@@ -1,0 +1,17 @@
+# 创建时间: 2026-03-12 16:21:20
+# 更新时间: 2026-03-12 16:21:20
+name: paiji-complete-v6
+channels:
+  - conda-forge
+  - defaults
+dependencies:
+  - python=3.11
+  - httpx
+  - numpy
+  - pandas
+  - pyyaml
+  - scikit-learn
+  - pip
+  - pip:
+      - loguru
+      - xgboost
