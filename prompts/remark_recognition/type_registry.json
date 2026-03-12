@@ -1,0 +1,366 @@
+{
+  "created_at": "2026-01-15 17:02:23",
+  "updated_at": "2026-01-15 18:06:50",
+  "version": "v11",
+  "types": [
+    {
+      "type_id": "T02_10X_10PLUS24",
+      "name": "10X Multiome/单细胞ATAC 10+24 固定RunCycle",
+      "description": "固定策略151+10+24+151（为覆盖i5 index）；通常要求同run/整RUN调整参数，可能带PhiX比例、包lane、平衡文库、保留BCL、10x cellranger-atac拆分方式等。",
+      "prompt_doc_path": "prompts/remark_recognition/types/T02_10x_10plus24.md",
+      "priority": 10,
+      "rule_route": {
+        "regex_patterns": [
+          "151\\s*\\+\\s*10\\s*\\+\\s*24\\s*\\+\\s*151",
+          "\\b10\\s*\\+\\s*24\\b",
+          "multiome\\s*atac",
+          "i5\\s*index",
+          "whole\\s+i5\\s+index",
+          "cellranger[-_ ]?atac"
+        ],
+        "keywords": [
+          "单细胞atac",
+          "10x multiome",
+          "10x atac 10+24",
+          "cover the whole i5 index"
+        ]
+      },
+      "route_hints": [
+        "10+24",
+        "151+10+24+151",
+        "Multiome ATAC",
+        "cover the whole i5 index",
+        "i5 index",
+        "10x cellranger-atac"
+      ]
+    },
+    {
+      "type_id": "T07_EXCLUDE_1_0_MODE",
+      "name": "非1.0：不参与新模式排机/不按新模式排机",
+      "description": "备注表达不参与新模式排机（排除1.0_mode）。可伴随同天完成/不要分两天/同批上机等要求。",
+      "prompt_doc_path": "prompts/remark_recognition/types/T07_exclude_1_0_mode.md",
+      "priority": 15,
+      "rule_route": {
+        "regex_patterns": [
+          "不参与\\s*新模式\\s*排机",
+          "不按\\s*新模式\\s*排机",
+          "不按\\s*新模式"
+        ],
+        "keywords": [
+          "不参与新模式排机",
+          "不按新模式排机",
+          "不按新模式排机"
+        ]
+      },
+      "route_hints": [
+        "不参与新模式排机",
+        "不按新模式排机",
+        "非1.0"
+      ]
+    },
+    {
+      "type_id": "T03_FC_PACKAGE",
+      "name": "包FC/同FC/定lane顺序/分FC上机",
+      "description": "Flowcell(FC)层面的排机约束：包FC、同FC、定lane顺序(lane->批次映射)、单样本拆分到多个FC上机、10B FC/Nova 6000 FC等。",
+      "prompt_doc_path": "prompts/remark_recognition/types/T03_fc_package.md",
+      "priority": 20,
+      "rule_route": {
+        "regex_patterns": [
+          "包\\s*fc",
+          "包\\s*芯片",
+          "flow\\s*cell",
+          "\\b10\\s*b\\s*fc\\b",
+          "nova\\s*6000\\s*fc",
+          "lane\\s*\\d+\\s*[：:]",
+          "分\\s*\\d+\\s*(个|张)\\s*fc",
+          "上\\s*(?:一|1)\\s*个\\s*fc",
+          "一个\\s*fc\\s*的\\s*(?:两|\\d+)\\s*条\\s*lane",
+          "^(?!.*不要).*?(?<!或者)(?<!尽量)(?<!没法)同\\s*fc\\s*(?:上机|测序)"
+        ],
+        "keywords": [
+          "包FC",
+          "包芯片",
+          "定lane",
+          "lane 1：",
+          "lane 1:",
+          "分4个FC",
+          "分5个FC",
+          "分6张FC"
+        ]
+      },
+      "route_hints": [
+        "包FC/同FC/包芯片",
+        "lane 1:xxxxxx 定lane顺序",
+        "10B FC / Nova 6000 FC",
+        "每个样本分X张FC上机"
+      ]
+    },
+    {
+      "type_id": "T08_PACKAGE_LANE",
+      "name": "包Lane/专用Lane/包X条lane/1000G包lane（含phinx）",
+      "description": "包Lane语义：包lane/包一条/包2条/包T7一条/1000G包lane等；支持PhiX拼写错误phinx X%并抽取为SET_PHIX。",
+      "prompt_doc_path": "prompts/remark_recognition/types/T08_package_lane.md",
+      "priority": 25,
+      "rule_route": {
+        "regex_patterns": [
+          "包\\s*lane",
+          "包\\s*(一|两|\\d+)\\s*条",
+          "包\\s*t7",
+          "1000\\s*g\\s*包\\s*lane",
+          "包\\s*lane\\s*1000\\s*g",
+          "phinx\\s*\\d+(?:\\.\\d+)?\\s*%"
+        ],
+        "keywords": [
+          "包lane",
+          "包 Lane",
+          "包L",
+          "包一条",
+          "包1条",
+          "包2条",
+          "包两条",
+          "包T7",
+          "包lane测序",
+          "包lane上机",
+          "包lane4条",
+          "phinx"
+        ]
+      },
+      "route_hints": [
+        "包lane/包一条/包2条/包T7一条",
+        "1000G包lane/包lane1000g/800G安排1 lane",
+        "phinx 5%（PhiX拼写错误）"
+      ]
+    },
+    {
+      "type_id": "T09_LANE_GROUPING",
+      "name": "Lane分组约束：同lane/不同lane/样本数校验",
+      "description": "Lane层面的分组/隔离约束：同lane上机、不同lane上机、批次间/样本类型维度lane约束，可能包含明确样本/文库数量与可接受的同run两条lane降级策略。",
+      "prompt_doc_path": "prompts/remark_recognition/types/T09_lane_grouping.md",
+      "priority": 42,
+      "rule_route": {
+        "regex_patterns": [
+          "同\\s*lane",
+          "必须\\s*同\\s*lane",
+          "不同\\s*lane",
+          "放在\\s*不同\\s*lane",
+          "不可\\s*在\\s*同.*lane",
+          "可以接受.*两条\\s*lane"
+        ],
+        "keywords": [
+          "同lane",
+          "同Lane",
+          "必须同lane",
+          "不同lane",
+          "不同Lane",
+          "同lane上机",
+          "不同lane上机"
+        ]
+      },
+      "route_hints": [
+        "同lane上机/必须同lane",
+        "不同lane上机/放在不同lane",
+        "X个/例样本同lane（需校验数量）",
+        "可接受同run两条lane的降级策略"
+      ]
+    },
+    {
+      "type_id": "T10_SAME_RUN_GROUPING",
+      "name": "同run/同一天同一台仪器/一起上机（避免批次效应）",
+      "description": "Run层面的分组约束：同RUN上机、一起建库一起上机、同时上机避免批次效应、同一天同一个机器/同一台仪器、与指定批次同RUN等；可伴随尽量同lane/至少同FC等偏好。",
+      "prompt_doc_path": "prompts/remark_recognition/types/T10_same_run_grouping.md",
+      "priority": 35,
+      "rule_route": {
+        "regex_patterns": [
+          "同\\s*run",
+          "同\\s*一天",
+          "同\\s*一\\s*台\\s*仪器",
+          "同\\s*一个\\s*仪器",
+          "同\\s*一个\\s*机器",
+          "一起\\s*上机",
+          "同时\\s*上机",
+          "一起\\s*建库",
+          "避免.*批次.*效应",
+          "请勿\\s*上机",
+          "退\\s*单",
+          "暂\\s*不\\s*上机"
+        ],
+        "keywords": [
+          "同run",
+          "同RUN",
+          "同Run",
+          "同一天",
+          "同一个机器",
+          "同一台仪器",
+          "同一个仪器",
+          "一起上机",
+          "同时上机",
+          "一起建库",
+          "避免批次效应",
+          "请勿上机",
+          "退单",
+          "暂不上机"
+        ]
+      },
+      "route_hints": [
+        "同run/同RUN上机",
+        "一起建库一起上机/同时上机/避免批次效应",
+        "同一天同一台仪器/同一个机器",
+        "与批次XXXX同RUN上机"
+      ]
+    },
+    {
+      "type_id": "T04_T7_SPECIAL_ADAPTER",
+      "name": "MGI/Illumina接头未环化/需环化等工艺提醒（不需要AI识别）",
+      "description": "建库接头/环化状态等实验工艺提醒：MGI/Illumina接头、线性文库、未环化/需环化、PCR-free文库、MGI双index 10+10等。该类通常不进入AI排机指令生成，输出应为人工识别或忽略。",
+      "prompt_doc_path": "prompts/remark_recognition/types/T04_t7_special_adapter.md",
+      "priority": 30,
+      "rule_route": {
+        "regex_patterns": [
+          "未\\s*环化",
+          "需\\s*环化",
+          "环化",
+          "\\bmgi\\b",
+          "\\billumina\\b",
+          "接头",
+          "线性\\s*文库",
+          "pcr\\s*-?\\s*free",
+          "mgi\\s*双\\s*index",
+          "\\b10\\s*\\+\\s*10\\b"
+        ],
+        "keywords": [
+          "未环化",
+          "需环化",
+          "MGI接头",
+          "Illumina接头",
+          "PCRFREE",
+          "PCR-free",
+          "线性文库",
+          "MGI双index 10+10"
+        ]
+      },
+      "route_hints": [
+        "未环化/需环化",
+        "MGI/Illumina接头",
+        "线性文库",
+        "PCR-free",
+        "MGI双index 10+10"
+      ]
+    },
+    {
+      "type_id": "T05_PHIX_RATIO",
+      "name": "PhiX比例/添加规则与校验",
+      "description": "从备注中抽取PhiX添加比例（phix/PhiX，10%/5%/7.4%等，支持“10% phix”“phix10%”“加40%phix”），并强制提示按机型/规则校验，不符合则退回人工识别。",
+      "prompt_doc_path": "prompts/remark_recognition/types/T05_phix_ratio.md",
+      "priority": 40,
+      "rule_route": {
+        "regex_patterns": [
+          "\\bphix\\b",
+          "\\bphix\\s*\\d+(?:\\.\\d+)?\\s*%",
+          "\\d+(?:\\.\\d+)?\\s*%\\s*phix",
+          "添加\\s*phix",
+          "不加\\s*phix",
+          "不添加\\s*phix"
+        ],
+        "keywords": [
+          "phix",
+          "PhiX",
+          "添加phix",
+          "不加phix",
+          "不添加phix",
+          "每条lane添加"
+        ]
+      },
+      "route_hints": [
+        "phix/PhiX",
+        "10% phix / phix10% / 添加phix7.4%",
+        "需校验phix比例，不符合退回人工"
+      ]
+    },
+    {
+      "type_id": "T06_LANE_RUN_SPLIT",
+      "name": "拆分排机：分lane/同lane/分run/不同天上机/不混测",
+      "description": "把样本/批次拆到不同lane或不同run（或要求绑定同lane），包括分lane上机、同lane不拆分、分run/不同天上机、不与某类文库混测等。",
+      "prompt_doc_path": "prompts/remark_recognition/types/T06_lane_run_split.md",
+      "priority": 45,
+      "rule_route": {
+        "regex_patterns": [
+          "分\\s*lane",
+          "分\\s*(两|\\d+)\\s*条\\s*lane",
+          "分开\\s*上机",
+          "分开\\s*上",
+          "分别\\s*上",
+          "同\\s*lane",
+          "不能\\s*分\\s*lane",
+          "不\\s*拆分",
+          "分\\s*run",
+          "不同\\s*天\\s*上机",
+          "不要\\s*全\\s*放\\s*在\\s*一起",
+          "不要.*同\\s*fc\\s*上机"
+        ],
+        "keywords": [
+          "分lane",
+          "分两条lane",
+          "分2条lane",
+          "分开上机",
+          "不同天上机",
+          "分run",
+          "同lane",
+          "不能分lane",
+          "不拆分",
+          "不要全放在一起",
+          "不要和"
+        ]
+      },
+      "route_hints": [
+        "分lane/分两条lane/单独一条lane",
+        "同lane/不能分lane/不拆分",
+        "分run/不同天上机/不混测需要分开"
+      ]
+    },
+    {
+      "type_id": "T01_RUNCYCLE_CUSTOM",
+      "name": "通用RunCycle/暗反应/插件/浓度PhiX等定制上机",
+      "description": "需要包run出单告知的参数调整与特殊上机要求：R1/R2/Index/暗反应/读长/循环数、PhiX、上机浓度、指定仪器/插件、BCL/fastq/raw data、不拆分、pooling/分lane等。",
+      "prompt_doc_path": "prompts/remark_recognition/types/T01_runcycle_custom.md",
+      "priority": 50,
+      "rule_route": {
+        "regex_patterns": [
+          "\\bR1\\b",
+          "\\bR2\\b",
+          "\\bI7\\b",
+          "\\bI5\\b",
+          "\\bread\\s*1\\b",
+          "\\bread\\s*2\\b",
+          "\\bcycle\\b",
+          "暗反应",
+          "读长",
+          "测序策略",
+          "phix",
+          "上机浓度",
+          "\\d{1,3}\\s*\\+\\s*\\d{1,3}\\s*\\+\\s*\\d{1,3}\\s*\\+\\s*\\d{1,3}",
+          "\\d{1,3}\\s*-\\s*\\d{1,3}\\s*-\\s*\\d{1,3}\\s*-\\s*\\d{1,3}"
+        ],
+        "keywords": [
+          "插件",
+          "custom recipe",
+          "不拆分",
+          "raw data",
+          "bcl",
+          "fastq",
+          "只pooling不上机"
+        ]
+      },
+      "route_hints": [
+        "暗反应",
+        "R1/R2/I7/I5/read1/read2",
+        "cycle/测序策略/读长",
+        "PhiX/phix，上机浓度",
+        "指定仪器/插件（A01426等）",
+        "BCL/fastq/raw data/不拆分",
+        "pooling/分lane计划"
+      ]
+    }
+  ]
+}
+
+

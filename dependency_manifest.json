@@ -1,0 +1,59 @@
+{
+  "created_at": "2026-03-12 16:21:20",
+  "entry": "test_full_pipeline_with_model3 copy_v6.py",
+  "copied_python_files_count": 26,
+  "copied_python_files": [
+    "core/ai/azure_openai_client.py",
+    "core/ai/loutput_predictor_wrapper.py",
+    "core/ai/pooling_coefficient_optimizer.py",
+    "core/ai/pooling_predictor.py",
+    "core/ai/remark_recognizer.py",
+    "core/config/scheduling_config.py",
+    "core/constraints/index_validator_verified.py",
+    "core/constraints/lane_validator.py",
+    "core/data/__init__.py",
+    "core/data/library_loader.py",
+    "core/data/remark_processor.py",
+    "core/preprocessing/base_imbalance_handler.py",
+    "core/preprocessing/batch_rule_analyzer.py",
+    "core/preprocessing/library_splitter.py",
+    "core/preprocessing/remark_intent_applier.py",
+    "core/preprocessing/rule_constrained_strategy_planner.py",
+    "core/scheduling/greedy_lane_scheduler.py",
+    "core/scheduling/package_lane_scheduler.py",
+    "core/scheduling/scheduling_types.py",
+    "core/validation/rule_checker.py",
+    "liblane_paths.py",
+    "models/library_info.py",
+    "models/remark_recognition_v2.py",
+    "scripts/predict_order_quantity_v6.py",
+    "scripts/train_output_rate_v6.py",
+    "test_full_pipeline_with_model3 copy_v6.py"
+  ],
+  "copied_model_dirs": [
+    "models/segmented_v6_prod_r5",
+    "models/output_dual_v6"
+  ],
+  "third_party_modules_detected": [
+    "httpx",
+    "loguru",
+    "numpy",
+    "pandas",
+    "sklearn",
+    "xgboost",
+    "yaml"
+  ],
+  "third_party_modules_unmapped": [],
+  "updated_at": "2026-03-12 16:39:09",
+  "copied_config_files": [
+    "config/business_rules.yaml",
+    "config/contract_volume_rules.yaml",
+    "config/machine_configs.yaml",
+    "config/pooling_optimizer_config.yaml",
+    "config/scheduling_rule_matrix.json",
+    "config/unified_rule_parameters.yaml"
+  ],
+  "copied_other_assets": [
+    "prompts/remark_recognition/type_registry.json"
+  ]
+}
