@@ -1,0 +1,14 @@
+test/pooling/paiji_complete/output_detail_*/**
+test/pooling/paiji_complete/__pycache__/**
+test/pooling/paiji_complete/*.log
+
+# Python 编译产物
+**/__pycache__/**
+*.pyc
+*.pyo
+
+# 编辑器/IDE
+.vscode/
+.idea/
+*.swp
+*.csv

@@ -27,10 +27,18 @@ from copy import deepcopy
 from datetime import datetime
 from enum import Enum
 from pathlib import Path
-from typing import Any, Dict, List, Optional, Set, Tuple
+from typing import Any, Dict, List, Optional, Set, Tuple, Union
 
 import numpy as np
 import pandas as pd
+import warnings
+
+# 全局关闭 pandas 的 DataFrame 高度碎片化性能告警（来自 prediction_delivery 内部）
+warnings.filterwarnings(
+    "ignore",
+    category=pd.errors.PerformanceWarning,
+    message="DataFrame is highly fragmented.  This is usually the result of calling `frame.insert` many times, which has poor performance.",
+)
 
 # 添加项目路径
 sys.path.insert(0, str(Path(__file__).parent))
@@ -50,8 +58,7 @@ from core.scheduling.greedy_lane_scheduler import GreedyLaneScheduler, GreedyLan
 from core.scheduling.package_lane_scheduler import PackageLaneScheduler
 from core.scheduling.scheduling_types import LaneAssignment
 
-# prediction_delivery 包导入
-sys.path.insert(0, str(Path(__file__).parent / "prediction_delivery"))
+# prediction_delivery 作为独立包依赖，由 pip 安装后直接导入
 from prediction_delivery import MODELS_DIR, predict_pooling
 
 # ==================== Lane上机浓度规则 ====================
@@ -2312,7 +2319,7 @@ def _build_output_path(data_path: Path, output_dir: Path, mode: str) -> Path:
     return output_dir / f"{data_path.stem}{suffix}"
 
 
-def _run_prediction_delivery(input_data: Path | pd.DataFrame, output_path: Path) -> pd.DataFrame:
+def _run_prediction_delivery(input_data: Union[Path, pd.DataFrame], output_path: Path) -> pd.DataFrame:
     """统一调用 prediction_delivery 执行 Pooling 预测。"""
     if output_path.exists():
         logger.info(f"预测输出文件已存在，将覆盖: {output_path}")
@@ -2320,7 +2327,194 @@ def _run_prediction_delivery(input_data: Path | pd.DataFrame, output_path: Path)
     return predict_pooling(input_data=input_data, output_file=output_path)
 
 
-# ==================== 入口函数 ====================
+def arrange_library(
+    data_file: Union[str, Path],
+    mode: str = "arrange",
+    output_detail_dir: Union[str, Path, None] = None,
+    output_file: Union[str, Path, None] = None,
+) -> Path:
+    """
+    封装的排机主函数：支持排机（arrange）与仅执行 Pooling 预测（pooling）。
+
+    Args:
+        data_file: 输入数据文件路径（CSV）。
+        mode: 运行模式：
+            - "arrange"：加载数据、排机、预测，全流程执行
+            - "pooling"：仅对已排机结果执行预测
+        output_detail_dir: 明细输出目录。当未显式提供 output_file 时，用于自动拼接输出文件名。
+        output_file: 明细输出文件完整路径（包含文件名）。如果提供，则优先生效，忽略 output_detail_dir 的自动命名规则。
+
+    Returns:
+        实际写出的明细/预测结果文件路径。
+    """
+    random.seed(42)
+    logger.info("=" * 80)
+    logger.info("arrange_library: 端到端排机流程 - 排机与 Pooling 预测")
+    logger.info("=" * 80)
+    logger.info(f"调用时间: {datetime.now().strftime('%Y-%m-%d %H:%M:%S')}")
+    logger.info(f"随机种子: 42 (固定，确保可复现)")
+    logger.info(f"运行模式: {mode}")
+
+    data_path = Path(data_file)
+    if not data_path.exists():
+        raise FileNotFoundError(f"数据文件不存在: {data_path}")
+    logger.info(f"\n使用数据文件: {data_path}")
+
+    # 优先使用 output_file；未指定时退回到目录+自动命名逻辑
+    if output_file is not None:
+        output_path = Path(output_file)
+        output_dir = output_path.parent
+    else:
+        if output_detail_dir is None:
+            # 回退到原脚本中的默认目录
+            output_dir = Path("/data/work/yuyongpeng/liblane_v2_deepseek/data/merge_data")
+        else:
+            output_dir = Path(output_detail_dir)
+        output_path = _build_output_path(data_path, output_dir, mode)
+
+    # 仅执行 Pooling 预测
+    if mode == "pooling":
+        logger.info("\n" + "=" * 80)
+        logger.info("arrange_library: 仅执行 Pooling 预测")
+        logger.info("=" * 80)
+        _run_prediction_delivery(input_data=data_path, output_path=output_path)
+        logger.info(f"Pooling 预测完成，输出文件: {output_path}")
+        return output_path
+
+    # ===== 全流程排机模式 =====
+    df_raw = pd.read_csv(data_path)
+    df_raw["origrec_key"] = _build_origrec_key(df_raw)
+    if "loutput" in df_raw.columns:
+        loutput_series = pd.to_numeric(df_raw["loutput"], errors="coerce")
+    else:
+        loutput_series = pd.Series([pd.NA] * len(df_raw))
+    loutput_by_origrec = dict(zip(df_raw["origrec_key"], loutput_series))
+
+    libraries = load_test_libraries(str(data_path))
+    logger.info(f"成功转换 {len(libraries)} 个测试文库")
+    if not libraries:
+        logger.error("未加载到任何文库数据")
+        return
+
+    ai_schedulable_libraries: List[EnhancedLibraryInfo] = []
+    non_ai_libraries: List[EnhancedLibraryInfo] = []
+    ai_schedulable_keys: Set[str] = set()
+    for lib in libraries:
+        if _is_yes_value(getattr(lib, "_aiavailable_raw", "")):
+            ai_schedulable_libraries.append(lib)
+            ai_schedulable_keys.add(_safe_str(getattr(lib, "_origrec_key", getattr(lib, "origrec", ""))))
+        else:
+            non_ai_libraries.append(lib)
+    logger.info(
+        "AI可排文库筛选完成: 可排={}，不可排={}".format(
+            len(ai_schedulable_libraries), len(non_ai_libraries)
+        )
+    )
+    if not ai_schedulable_libraries:
+        logger.warning("无AI可排文库（aiavailable!=yes），本次不执行排机，仅输出明细规则结果")
+
+    # ===== 步骤1: 处理包Lane文库 =====
+    logger.info("\n" + "=" * 80)
+    logger.info("步骤1: 处理包Lane文库（wkbaleno字段有值的文库）")
+    logger.info("=" * 80)
+    
+    package_lanes = []
+    package_libs = []
+    normal_libs = []
+    
+    for lib in ai_schedulable_libraries:
+        baleno = getattr(lib, 'package_lane_number', None) or getattr(lib, 'baleno', None)
+        if baleno and str(baleno).strip():
+            lib.package_lane_number = str(baleno).strip()
+            lib.is_package_lane = '是'
+            package_libs.append(lib)
+        else:
+            normal_libs.append(lib)
+    
+    logger.info(f"包Lane文库数: {len(package_libs)}")
+    logger.info(f"普通文库数: {len(normal_libs)}")
+    
+    if package_libs:
+        logger.info("\n使用PackageLaneScheduler处理包Lane文库...")
+        package_scheduler = PackageLaneScheduler()
+        package_result = package_scheduler.schedule(package_libs)
+        
+        logger.info(f"包Lane处理结果:")
+        logger.info(f"  - 成功生成Run数: {package_result.total_runs}")
+        logger.info(f"  - 成功生成Lane数: {package_result.total_lanes}")
+        logger.info(f"  - 已分配文库数: {package_result.total_libraries}")
+        logger.info(f"  - 失败包数: {len(package_result.failed_packages)}")
+        logger.info(f"  - 剩余未分配: {len(package_result.remaining_libraries)}")
+        
+        for run in package_result.runs:
+            for lane_result in run.lanes:
+                lane_assignment = LaneAssignment(
+                    lane_id=lane_result.lane_id,
+                    machine_id=f"M_{lane_result.lane_id}",
+                    machine_type=_resolve_machine_type_enum_simple(run.machine_type),
+                    libraries=lane_result.libraries,
+                    total_data_gb=lane_result.total_data_gb,
+                    pooling_coefficients=lane_result.pooling_coefficients,
+                    metadata={'is_package_lane': True, 'package_id': lane_result.package_id}
+                )
+                package_lanes.append(lane_assignment)
+        
+        normal_libs.extend(package_result.remaining_libraries)
+        
+        logger.info(f"\n包Lane处理完成，形成{len(package_lanes)}条包Lane")
+        logger.info(f"剩余{len(normal_libs)}个文库进入普通排机流程")
+    
+    # ===== 步骤2: 处理普通文库（包括包Lane处理失败的文库） =====
+    logger.info("\n" + "=" * 80)
+    logger.info("步骤2: 处理普通文库（使用GreedyLaneScheduler）")
+    logger.info("=" * 80)
+
+    if ai_schedulable_libraries:
+        random.seed(42)
+        stats, solution = test_with_model(
+            deepcopy(normal_libs), existing_lanes=package_lanes
+        )
+    else:
+        from types import SimpleNamespace
+        stats = {}
+        solution = SimpleNamespace(lane_assignments=[], unassigned_libraries=[])
+
+    # 收集预测结果
+    pred_df = _collect_prediction_rows(
+        solution.lane_assignments, loutput_by_origrec, "arrange"
+    )
+
+    lanes_with_split = _collect_lanes_with_split(solution.lane_assignments)
+
+    # 输出明细
+    _build_detail_output(
+        df_raw=df_raw,
+        pred_df=pred_df,
+        output_path=output_path,
+        ai_schedulable_keys=ai_schedulable_keys,
+        lanes_with_split=lanes_with_split,
+    )
+
+    logger.info("\n" + "=" * 80)
+    logger.info("步骤3: 调用 prediction_delivery 执行 Pooling 预测")
+    logger.info("=" * 80)
+    prediction_df = _run_prediction_delivery(input_data=output_path, output_path=output_path)
+    logger.info(
+        "prediction_delivery 预测完成: 记录数={}, 平均下单量={:.3f}G, 平均产出量={:.3f}G".format(
+            len(prediction_df),
+            float(pd.to_numeric(prediction_df["lorderdata"], errors="coerce").mean(skipna=True)),
+            float(pd.to_numeric(prediction_df["lai_output"], errors="coerce").mean(skipna=True)),
+        )
+    )
+
+    logger.info("\n端到端排机完成！")
+    logger.info(f"最终输出文件: {output_path}")
+    logger.info("=" * 80)
+
+    return output_path
+
+
+# ==================== 入口函数（CLI 封装） ====================
 
 
 def parse_args() -> argparse.Namespace:
@@ -2353,168 +2547,15 @@ def parse_args() -> argparse.Namespace:
 
 
 def main() -> None:
-    """主入口"""
+    """主入口：命令行包装 arrange_library 函数"""
     args = parse_args()
-    random.seed(42)
-    logger.info("=" * 80)
-    logger.info("端到端排机流程测试 - 排机与 Pooling 预测")
-    logger.info("=" * 80)
-    logger.info(f"测试时间: {datetime.now().strftime('%Y-%m-%d %H:%M:%S')}")
-    logger.info(f"随机种子: 42 (固定，确保可复现)")
-    logger.info(f"运行模式: {args.mode}")
-
-    data_file = args.data_file
-    data_path = Path(data_file)
-    if not data_path.exists():
-        logger.error(f"数据文件不存在: {data_path}")
-        return
-    logger.info(f"\n使用数据文件: {data_path}")
-
     try:
-        # 优先使用 --output-file 指定的完整路径；未指定时退回到原来的目录+自动命名逻辑
-        if args.output_file:
-            output_path = Path(args.output_file)
-            output_dir = output_path.parent
-        else:
-            output_dir = Path(args.output_detail_dir)
-            output_path = _build_output_path(data_path, output_dir, args.mode)
-
-        if args.mode == "pooling":
-            logger.info("\n" + "=" * 80)
-            logger.info("仅执行 Pooling 预测")
-            logger.info("=" * 80)
-            _run_prediction_delivery(input_data=data_path, output_path=output_path)
-            logger.info(f"Pooling 预测完成，输出文件: {output_path}")
-            return
-
-        df_raw = pd.read_csv(data_path)
-        df_raw["origrec_key"] = _build_origrec_key(df_raw)
-        if "loutput" in df_raw.columns:
-            loutput_series = pd.to_numeric(df_raw["loutput"], errors="coerce")
-        else:
-            loutput_series = pd.Series([pd.NA] * len(df_raw))
-        loutput_by_origrec = dict(zip(df_raw["origrec_key"], loutput_series))
-
-        libraries = load_test_libraries(str(data_path))
-        logger.info(f"成功转换 {len(libraries)} 个测试文库")
-        if not libraries:
-            logger.error("未加载到任何文库数据")
-            return
-
-        ai_schedulable_libraries: List[EnhancedLibraryInfo] = []
-        non_ai_libraries: List[EnhancedLibraryInfo] = []
-        ai_schedulable_keys: Set[str] = set()
-        for lib in libraries:
-            if _is_yes_value(getattr(lib, "_aiavailable_raw", "")):
-                ai_schedulable_libraries.append(lib)
-                ai_schedulable_keys.add(_safe_str(getattr(lib, "_origrec_key", getattr(lib, "origrec", ""))))
-            else:
-                non_ai_libraries.append(lib)
-        logger.info(
-            "AI可排文库筛选完成: 可排={}，不可排={}".format(
-                len(ai_schedulable_libraries), len(non_ai_libraries)
-            )
+        arrange_library(
+            data_file=args.data_file,
+            mode=args.mode,
+            output_detail_dir=args.output_detail_dir,
+            output_file=args.output_file,
         )
-        if not ai_schedulable_libraries:
-            logger.warning("无AI可排文库（aiavailable!=yes），本次不执行排机，仅输出明细规则结果")
-
-        # ===== 步骤1: 处理包Lane文库 =====
-        logger.info("\n" + "=" * 80)
-        logger.info("步骤1: 处理包Lane文库（wkbaleno字段有值的文库）")
-        logger.info("=" * 80)
-        
-        package_lanes = []
-        package_libs = []
-        normal_libs = []
-        
-        for lib in ai_schedulable_libraries:
-            baleno = getattr(lib, 'package_lane_number', None) or getattr(lib, 'baleno', None)
-            if baleno and str(baleno).strip():
-                lib.package_lane_number = str(baleno).strip()
-                lib.is_package_lane = '是'
-                package_libs.append(lib)
-            else:
-                normal_libs.append(lib)
-        
-        logger.info(f"包Lane文库数: {len(package_libs)}")
-        logger.info(f"普通文库数: {len(normal_libs)}")
-        
-        if package_libs:
-            logger.info("\n使用PackageLaneScheduler处理包Lane文库...")
-            package_scheduler = PackageLaneScheduler()
-            package_result = package_scheduler.schedule(package_libs)
-            
-            logger.info(f"包Lane处理结果:")
-            logger.info(f"  - 成功生成Run数: {package_result.total_runs}")
-            logger.info(f"  - 成功生成Lane数: {package_result.total_lanes}")
-            logger.info(f"  - 已分配文库数: {package_result.total_libraries}")
-            logger.info(f"  - 失败包数: {len(package_result.failed_packages)}")
-            logger.info(f"  - 剩余未分配: {len(package_result.remaining_libraries)}")
-            
-            for run in package_result.runs:
-                for lane_result in run.lanes:
-                    lane_assignment = LaneAssignment(
-                        lane_id=lane_result.lane_id,
-                        machine_id=f"M_{lane_result.lane_id}",
-                        machine_type=_resolve_machine_type_enum_simple(run.machine_type),
-                        libraries=lane_result.libraries,
-                        total_data_gb=lane_result.total_data_gb,
-                        pooling_coefficients=lane_result.pooling_coefficients,
-                        metadata={'is_package_lane': True, 'package_id': lane_result.package_id}
-                    )
-                    package_lanes.append(lane_assignment)
-            
-            normal_libs.extend(package_result.remaining_libraries)
-            
-            logger.info(f"\n包Lane处理完成，形成{len(package_lanes)}条包Lane")
-            logger.info(f"剩余{len(normal_libs)}个文库进入普通排机流程")
-        
-        # ===== 步骤2: 处理普通文库（包括包Lane处理失败的文库） =====
-        logger.info("\n" + "=" * 80)
-        logger.info("步骤2: 处理普通文库（使用GreedyLaneScheduler）")
-        logger.info("=" * 80)
-        
-        if ai_schedulable_libraries:
-            random.seed(42)
-            stats, solution = test_with_model(
-                deepcopy(normal_libs), existing_lanes=package_lanes
-            )
-        else:
-            from types import SimpleNamespace
-            stats = {}
-            solution = SimpleNamespace(lane_assignments=[], unassigned_libraries=[])
-
-        # 收集预测结果
-        pred_df = _collect_prediction_rows(
-            solution.lane_assignments, loutput_by_origrec, "arrange"
-        )
-
-        lanes_with_split = _collect_lanes_with_split(solution.lane_assignments)
-
-        # 输出明细
-        _build_detail_output(
-            df_raw=df_raw,
-            pred_df=pred_df,
-            output_path=output_path,
-            ai_schedulable_keys=ai_schedulable_keys,
-            lanes_with_split=lanes_with_split,
-        )
-
-        logger.info("\n" + "=" * 80)
-        logger.info("步骤3: 调用 prediction_delivery 执行 Pooling 预测")
-        logger.info("=" * 80)
-        prediction_df = _run_prediction_delivery(input_data=output_path, output_path=output_path)
-        logger.info(
-            "prediction_delivery 预测完成: 记录数={}, 平均下单量={:.3f}G, 平均产出量={:.3f}G".format(
-                len(prediction_df),
-                float(pd.to_numeric(prediction_df["lorderdata"], errors="coerce").mean(skipna=True)),
-                float(pd.to_numeric(prediction_df["lai_output"], errors="coerce").mean(skipna=True)),
-            )
-        )
-
-        logger.info("\n端到端测试完成！")
-        logger.info(f"最终输出文件: {output_path}")
-        logger.info("=" * 80)
     except Exception as exc:
         logger.error(f"测试过程发生错误: {exc}")
         import traceback
