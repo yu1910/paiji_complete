@@ -1,7 +1,7 @@
 """
 排机系统统一配置管理模块
 创建时间：2025-12-03 14:00:00
-更新时间：2026-03-11 17:27:30
+更新时间：2026-03-13 11:52:16
 
 集中管理所有排机相关的配置常量，避免硬编码分散在各个模块中。
 配置来源：docs/排机规则文档.md、config/business_rules.yaml
@@ -655,16 +655,14 @@ class SchedulingConfigManager:
         }
 
     def _classify_lane_project_type(self, libraries: List[Any]) -> str:
-        """按优先级口径识别Lane项目类型。"""
+        """按wkdatatype(data_type)识别Lane项目类型，不再按样本编号推断。"""
         has_clinical = False
         has_yc = False
         for lib in libraries:
-            sample_id = str(getattr(lib, 'sample_id', '') or '')
-            sub_project_name = str(getattr(lib, 'sub_project_name', '') or '')
             data_type = self._normalize_text(getattr(lib, 'data_type', '') or '')
-            if data_type == '临检' or self.is_clinical_library(sample_id):
+            if data_type == '临检':
                 has_clinical = True
-            if data_type == 'YC' or self.is_yc_library(sample_id, sub_project_name):
+            if data_type == 'YC':
                 has_yc = True
         if has_clinical:
             return self._normalize_text('临检')

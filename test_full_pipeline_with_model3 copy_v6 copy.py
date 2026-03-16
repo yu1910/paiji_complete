@@ -1,30 +1,25 @@
 """
-端到端排机流程测试 - V6模型预测下单量与产出量
+端到端排机流程测试 - 排机与 Pooling 预测
 创建时间：2026-01-12 11:23:30
-更新时间：2026-03-12 12:15:00
+更新时间：2026-03-16 17:26:55
 
 功能：
-- 测试完整排机流程（GreedyLaneScheduler）
-- 排机阶段不使用模型，纯规则排机
-- 排机完成后使用V6分段模型预测每个文库的下单量（lorderdata）
-- 基于预测下单量进一步预测每个文库的产出量（lai_output）
-- V6模型复用 predict_order_quantity_v6.py / train_output_rate_v6.py 的特征工程函数
+- 支持完整排机流程（GreedyLaneScheduler）
+- 支持仅执行 Pooling 预测，不再重复排机
+- 排机模式下先完成排机，再调用 prediction_delivery 输出下单量与产出量
+- 预测模式下直接对已排机文件调用 prediction_delivery
 
 变更记录：
-- 2026-02-10: 接入V6双模型（下单+产出）预测
--             - 排机后同时输出 lorderdata / lai_output
-- 2026-02-10: 从V5模型改为V6模型
-             - 去掉Pooling优化器参与排机决策
-             - 去掉自适应优化（高风险Lane交换/重排/全局搜索）
-             - 新增V6OrderOutputPredictor，排机后预测下单量与产出量
-             - 复用predict_order_quantity_v6.py的辅助函数
+- 2026-03-16: 移除脚本内置 Pooling 预测实现，统一改为调用 prediction_delivery
+- 2026-03-16: 新增 mode 参数
+             - arrange：加载数据、排机、预测，全流程执行
+             - pooling：仅对已排机结果执行预测
 - 2026-01-30: 字段映射精简，以表中实际字段名为准（wk前缀）
 """
 
 import argparse
 import json
 import math
-import pickle
 import random
 import sys
 from dataclasses import dataclass
@@ -55,26 +50,9 @@ from core.scheduling.greedy_lane_scheduler import GreedyLaneScheduler, GreedyLan
 from core.scheduling.package_lane_scheduler import PackageLaneScheduler
 from core.scheduling.scheduling_types import LaneAssignment
 
-# V6预测相关导入
-sys.path.insert(0, str(Path(__file__).parent / "scripts"))
-from predict_order_quantity_v6 import (
-    _apply_order_guard,
-    _build_group_keys_for_df,
-    _load_order_guard_config,
-    compute_lane_stats,
-    clean_data,
-    add_sampletype_output_group,
-    align_features,
-    remove_leakage_features,
-)
-from train_output_rate_v6 import (
-    create_interaction_features,
-    encode_categorical,
-)
-
-# ==================== V6模型路径 ====================
-V6_ORDER_MODEL_DIR = Path("models/segmented_v6_prod_r5")
-V6_OUTPUT_MODEL_DIR = Path("models/output_dual_v6")
+# prediction_delivery 包导入
+sys.path.insert(0, str(Path(__file__).parent / "prediction_delivery"))
+from prediction_delivery import MODELS_DIR, predict_pooling
 
 # ==================== Lane上机浓度规则 ====================
 LANE_ORDERDATA_FLOOR = 1.0
@@ -885,563 +863,6 @@ def try_multi_lib_swap_rebalance(
                 new_lanes_count += 1
 
     return {"new_lanes": new_lanes_count, "remaining_unassigned": len(unassigned)}
-
-
-# ==================== V6 模型预测器 ====================
-
-
-def _libraries_to_v6_dataframe(
-    libraries: List[EnhancedLibraryInfo],
-    lane_id: str,
-) -> pd.DataFrame:
-    """将EnhancedLibraryInfo列表转换为V6模型需要的DataFrame
-
-    Args:
-        libraries: 文库对象列表
-        lane_id: Lane标识
-
-    Returns:
-        包含V6所需字段的DataFrame
-    """
-    data: List[Dict[str, Any]] = []
-    for lib in libraries:
-        row: Dict[str, Any] = {
-            "lane_unique_id": lane_id,
-            "wkorigrec": getattr(lib, "origrec", "") or "",
-        }
-
-        # 数值特征
-        row["wkqpcr"] = float(
-            getattr(lib, "qpcr_molar", None)
-            or getattr(lib, "qpcr_concentration", 0.0)
-            or 0.0
-        )
-        row["wkcontractdata"] = float(getattr(lib, "contract_data_raw", 0.0) or 0.0)
-        row["wkpeaksize"] = float(getattr(lib, "peak_size", 350) or 350)
-        row["wkxpd"] = float(getattr(lib, "xpd", 0.0) or 0.0)
-        row["wkadaptorrate"] = float(getattr(lib, "adaptor_rate", 0.0) or 0.0)
-
-        # 分类特征
-        row["wksampletype"] = str(getattr(lib, "sample_type_code", "Unknown") or "Unknown")
-        # jkhj 不是 EnhancedLibraryInfo 的标准字段，使用 _extra_fields 或默认值
-        raw_jkhj = getattr(lib, "_jkhj_raw", None)
-        row["wkjkhj"] = str(raw_jkhj) if raw_jkhj else "诺禾自动"
-        row["wkcomplexresult"] = str(getattr(lib, "complex_result", "合格") or "合格")
-        row["wkpeakmap"] = str(getattr(lib, "peak_map", "良好") or "良好")
-        row["wk_jjbj"] = str(getattr(lib, "jjbj", "否") or "否")
-
-        # Lane特征计算所需的辅助字段
-        row["wkindexseq"] = str(getattr(lib, "index_seq", "") or "")
-        row["wk_10bp_data"] = float(
-            getattr(lib, "_10bp_data", 0.0)
-            or getattr(lib, "ten_bp_data", 0.0)
-            or 0.0
-        )
-        row["wkaddtestsremark"] = str(
-            getattr(lib, "add_tests_remark", "非加测") or "非加测"
-        )
-
-        data.append(row)
-    return pd.DataFrame(data)
-
-
-class V6OrderOutputPredictor:
-    """
-    V6双模型预测器：先预测下单量，再预测产出量和达标概率。
-
-    - 下单模型目录: models/segmented_v6
-    - 产出模型目录: models/output_dual_v6
-    """
-
-    THRESHOLD = 7.0
-    ORDER_RATIO_CAP_BY_SAMPLETYPE: Dict[str, float] = {
-        "VIP-真核普通转录组文库": 1.95,
-        "客户-真核普通转录组文库": 1.85,
-        "DNA小片段文库": 1.85,
-    }
-    OUTPUT_RATIO_CAP_BY_SAMPLETYPE: Dict[str, float] = {
-        "small RNA文库": 2.30,
-        "原核链特异性转录组文库": 2.50,
-        "客户-PCR产物": 2.30,
-        "客户-PCR产物/CRISPR": 2.30,
-    }
-
-    def __init__(
-        self,
-        order_model_dir: str | Path = V6_ORDER_MODEL_DIR,
-        output_model_dir: str | Path = V6_OUTPUT_MODEL_DIR,
-    ):
-        self.order_model_dir = Path(order_model_dir)
-        self.output_model_dir = Path(output_model_dir)
-
-        # 下单模型
-        self.order_small_model = None
-        self.order_large_model = None
-        self.order_small_shortage_clf = None
-        self.order_large_shortage_clf = None
-        self.order_small_encoders = None
-        self.order_large_encoders = None
-        self.order_small_thresholds = None
-        self.order_large_thresholds = None
-        self.order_risk_cfg: Dict[str, float] = {
-            "target_shortage_prob": 0.26,
-            "risk_base_scale": 0.45,
-            "risk_extra_scale": 1.20,
-            "max_uplift": 1.80,
-            "min_order_ratio": 0.95,
-            "max_order_ratio": 2.20,
-            "target_enough_prob": 0.78,
-            "group_cols": ["wksampletype", "wkjkhj", "wkproductline"],
-            "group_target_enough_prob": {"small": {}, "large": {}},
-            "group_hard_min_ratio": {"small": {}, "large": {}},
-            "runtime_order_multiplier_by_sampletype": {},
-            "runtime_order_multiplier_rules": [],
-            "lane_realloc": {"enabled": True},
-            "risk_uplift_bonus_by_sampletype": {},
-        }
-
-        # 产出模型（回归 + 分类）
-        self.output_small_reg = None
-        self.output_large_reg = None
-        self.output_small_clf = None
-        self.output_large_clf = None
-        self.output_small_encoders = None
-        self.output_large_encoders = None
-        self.output_small_thresholds = None
-        self.output_large_thresholds = None
-
-        self._is_loaded = False
-        self._load()
-
-    @staticmethod
-    def _load_thresholds(path: Path) -> Optional[Dict[str, float]]:
-        """加载分位数阈值文件。"""
-        if path.exists():
-            with open(path, "r", encoding="utf-8") as f:
-                thresholds = json.load(f)
-            logger.info(f"  已加载分位数阈值: {path.name} ({len(thresholds)}个)")
-            return thresholds
-        logger.warning(f"  分位数阈值文件不存在: {path}，将从当前数据计算")
-        return None
-
-    def _load(self) -> None:
-        """加载下单模型和产出模型。"""
-        order_files = [
-            "small_library_model.pkl",
-            "large_library_model.pkl",
-            "small_encoders.pkl",
-            "large_encoders.pkl",
-            "small_quantile_thresholds.json",
-            "large_quantile_thresholds.json",
-        ]
-        output_files = [
-            "small_output_regressor.pkl",
-            "large_output_regressor.pkl",
-            "small_enough_classifier.pkl",
-            "large_enough_classifier.pkl",
-            "small_encoders.pkl",
-            "large_encoders.pkl",
-            "small_quantile_thresholds.json",
-            "large_quantile_thresholds.json",
-        ]
-        for fname in order_files:
-            if not (self.order_model_dir / fname).exists():
-                logger.warning(f"下单模型文件缺失: {self.order_model_dir / fname}")
-                return
-        for fname in output_files:
-            if not (self.output_model_dir / fname).exists():
-                logger.warning(f"产出模型文件缺失: {self.output_model_dir / fname}")
-                return
-
-        try:
-            # 下单模型
-            with open(self.order_model_dir / "small_library_model.pkl", "rb") as f:
-                self.order_small_model = pickle.load(f)
-            with open(self.order_model_dir / "large_library_model.pkl", "rb") as f:
-                self.order_large_model = pickle.load(f)
-            with open(self.order_model_dir / "small_encoders.pkl", "rb") as f:
-                self.order_small_encoders = pickle.load(f)
-            with open(self.order_model_dir / "large_encoders.pkl", "rb") as f:
-                self.order_large_encoders = pickle.load(f)
-            self.order_small_thresholds = self._load_thresholds(
-                self.order_model_dir / "small_quantile_thresholds.json"
-            )
-            self.order_large_thresholds = self._load_thresholds(
-                self.order_model_dir / "large_quantile_thresholds.json"
-            )
-            small_shortage_path = self.order_model_dir / "small_shortage_classifier.pkl"
-            large_shortage_path = self.order_model_dir / "large_shortage_classifier.pkl"
-            if small_shortage_path.exists() and large_shortage_path.exists():
-                with open(small_shortage_path, "rb") as f:
-                    self.order_small_shortage_clf = pickle.load(f)
-                with open(large_shortage_path, "rb") as f:
-                    self.order_large_shortage_clf = pickle.load(f)
-                logger.info("  已加载下单欠产分类器")
-            else:
-                logger.warning("  未发现下单欠产分类器，使用纯回归下单")
-            self.order_risk_cfg = _load_order_guard_config(self.order_model_dir)
-            self.order_risk_cfg["target_enough_prob"] = float(
-                self.order_risk_cfg.get("target_enough_prob", 0.78)
-            )
-
-            # 产出模型
-            with open(self.output_model_dir / "small_output_regressor.pkl", "rb") as f:
-                self.output_small_reg = pickle.load(f)
-            with open(self.output_model_dir / "large_output_regressor.pkl", "rb") as f:
-                self.output_large_reg = pickle.load(f)
-            with open(self.output_model_dir / "small_enough_classifier.pkl", "rb") as f:
-                self.output_small_clf = pickle.load(f)
-            with open(self.output_model_dir / "large_enough_classifier.pkl", "rb") as f:
-                self.output_large_clf = pickle.load(f)
-            with open(self.output_model_dir / "small_encoders.pkl", "rb") as f:
-                self.output_small_encoders = pickle.load(f)
-            with open(self.output_model_dir / "large_encoders.pkl", "rb") as f:
-                self.output_large_encoders = pickle.load(f)
-            self.output_small_thresholds = self._load_thresholds(
-                self.output_model_dir / "small_quantile_thresholds.json"
-            )
-            self.output_large_thresholds = self._load_thresholds(
-                self.output_model_dir / "large_quantile_thresholds.json"
-            )
-
-            self._is_loaded = True
-            logger.info(
-                f"V6双模型加载完成: 下单={self.order_model_dir}, 产出={self.output_model_dir}"
-            )
-        except Exception as exc:
-            logger.exception(f"V6双模型加载失败: {exc}")
-
-    @property
-    def is_available(self) -> bool:
-        """模型是否可用。"""
-        return self._is_loaded
-
-    def _predict_order(self, df: pd.DataFrame) -> np.ndarray:
-        """按合同量分段预测下单量，并结合风险模型做安全上调。"""
-        preds_base = np.zeros(len(df))
-        shortage_probs = np.zeros(len(df))
-        small_mask = df["wkcontractdata"] < self.THRESHOLD
-        large_mask = ~small_mask
-
-        if small_mask.sum() > 0:
-            df_small = df[small_mask].copy()
-            df_small, _ = create_interaction_features(
-                df_small, quantile_thresholds=self.order_small_thresholds
-            )
-            df_small = encode_categorical(df_small, self.order_small_encoders, fit=False)
-            model_features = self.order_small_model.get_booster().feature_names
-            X_small = align_features(df_small, model_features)
-            preds_base[small_mask.values] = self.order_small_model.predict(X_small)
-            if self.order_small_shortage_clf is not None and hasattr(
-                self.order_small_shortage_clf, "predict_proba"
-            ):
-                if hasattr(self.order_small_shortage_clf, "get_booster"):
-                    clf_features = self.order_small_shortage_clf.get_booster().feature_names
-                    X_small_clf = align_features(df_small, clf_features)
-                else:
-                    X_small_clf = X_small
-                shortage_probs[small_mask.values] = np.asarray(
-                    self.order_small_shortage_clf.predict_proba(X_small_clf)[:, 1],
-                    dtype=float,
-                )
-
-        if large_mask.sum() > 0:
-            df_large = df[large_mask].copy()
-            df_large, _ = create_interaction_features(
-                df_large, quantile_thresholds=self.order_large_thresholds
-            )
-            df_large = encode_categorical(df_large, self.order_large_encoders, fit=False)
-            model_features = self.order_large_model.get_booster().feature_names
-            X_large = align_features(df_large, model_features)
-            preds_base[large_mask.values] = self.order_large_model.predict(X_large)
-            if self.order_large_shortage_clf is not None and hasattr(
-                self.order_large_shortage_clf, "predict_proba"
-            ):
-                if hasattr(self.order_large_shortage_clf, "get_booster"):
-                    clf_features = self.order_large_shortage_clf.get_booster().feature_names
-                    X_large_clf = align_features(df_large, clf_features)
-                else:
-                    X_large_clf = X_large
-                shortage_probs[large_mask.values] = np.asarray(
-                    self.order_large_shortage_clf.predict_proba(X_large_clf)[:, 1],
-                    dtype=float,
-                )
-
-        contracts = pd.to_numeric(df["wkcontractdata"], errors="coerce").fillna(0.0).values
-        sampletypes = df["wksampletype"].astype(str).values if "wksampletype" in df.columns else None
-        lane_ids = df["lane_unique_id"].astype(str).values if "lane_unique_id" in df.columns else None
-        group_cols = self.order_risk_cfg.get("group_cols", ["wksampletype", "wkjkhj", "wkproductline"])
-        group_keys = _build_group_keys_for_df(df, group_cols)
-
-        guarded_orders = preds_base.copy()
-        if small_mask.sum() > 0:
-            idx = np.where(small_mask.values)[0]
-            guarded_small, _ = _apply_order_guard(
-                preds_base[idx],
-                contracts[idx],
-                shortage_probs[idx],
-                self.order_risk_cfg,
-                sampletypes=sampletypes[idx] if sampletypes is not None else None,
-                group_keys=group_keys[idx],
-                lane_ids=lane_ids[idx] if lane_ids is not None else None,
-                segment_name="small",
-            )
-            guarded_orders[idx] = guarded_small
-        if large_mask.sum() > 0:
-            idx = np.where(large_mask.values)[0]
-            guarded_large, _ = _apply_order_guard(
-                preds_base[idx],
-                contracts[idx],
-                shortage_probs[idx],
-                self.order_risk_cfg,
-                sampletypes=sampletypes[idx] if sampletypes is not None else None,
-                group_keys=group_keys[idx],
-                lane_ids=lane_ids[idx] if lane_ids is not None else None,
-                segment_name="large",
-            )
-            guarded_orders[idx] = guarded_large
-
-        # 二次兜底：使用产出达标分类器按目标达标概率迭代上调下单量
-        target_enough_prob = float(self.order_risk_cfg.get("target_enough_prob", 0.78))
-        max_ratio = float(self.order_risk_cfg.get("max_order_ratio", 2.20))
-        if (
-            self.output_small_clf is not None
-            and self.output_large_clf is not None
-            and len(df) > 0
-        ):
-            for _ in range(2):
-                enough_probs = self._predict_enough_probability(df, guarded_orders)
-                low_mask = enough_probs < target_enough_prob
-                if not np.any(low_mask):
-                    break
-                gap = np.clip(target_enough_prob - enough_probs[low_mask], 0.0, 1.0)
-                step = 1.0 + np.minimum(0.35, 0.60 * gap)
-                guarded_orders[low_mask] = np.minimum(
-                    guarded_orders[low_mask] * step,
-                    contracts[low_mask] * max_ratio,
-                )
-
-        return np.maximum(guarded_orders, 0.0)
-
-    def _predict_enough_probability(
-        self, df: pd.DataFrame, predicted_orders: np.ndarray
-    ) -> np.ndarray:
-        """基于候选下单量估计达标概率。"""
-        enough_prob = np.full(len(df), 0.5, dtype=float)
-        if len(df) == 0:
-            return enough_prob
-
-        order_small_mask = predicted_orders < self.THRESHOLD
-        order_large_mask = ~order_small_mask
-
-        if order_small_mask.sum() > 0 and self.output_small_clf is not None:
-            df_small = df[order_small_mask].copy()
-            df_small["lorderdata"] = predicted_orders[order_small_mask]
-            df_small, _ = create_interaction_features(
-                df_small, quantile_thresholds=self.output_small_thresholds
-            )
-            df_small = encode_categorical(df_small, self.output_small_encoders, fit=False)
-            if hasattr(self.output_small_clf, "get_booster"):
-                clf_features = self.output_small_clf.get_booster().feature_names
-                X_small = align_features(df_small, clf_features)
-            else:
-                X_small = df_small
-            enough_prob[order_small_mask] = np.asarray(
-                self.output_small_clf.predict_proba(X_small)[:, 1], dtype=float
-            )
-
-        if order_large_mask.sum() > 0 and self.output_large_clf is not None:
-            df_large = df[order_large_mask].copy()
-            df_large["lorderdata"] = predicted_orders[order_large_mask]
-            df_large, _ = create_interaction_features(
-                df_large, quantile_thresholds=self.output_large_thresholds
-            )
-            df_large = encode_categorical(df_large, self.output_large_encoders, fit=False)
-            if hasattr(self.output_large_clf, "get_booster"):
-                clf_features = self.output_large_clf.get_booster().feature_names
-                X_large = align_features(df_large, clf_features)
-            else:
-                X_large = df_large
-            enough_prob[order_large_mask] = np.asarray(
-                self.output_large_clf.predict_proba(X_large)[:, 1], dtype=float
-            )
-
-        return np.clip(enough_prob, 0.0, 1.0)
-
-    def _predict_output(
-        self, df: pd.DataFrame, predicted_orders: np.ndarray
-    ) -> np.ndarray:
-        """基于预测下单量，预测产出量。"""
-        pred_output = np.zeros(len(df))
-
-        order_small_mask = predicted_orders < self.THRESHOLD
-        order_large_mask = ~order_small_mask
-
-        if order_small_mask.sum() > 0:
-            df_small = df[order_small_mask].copy()
-            df_small["lorderdata"] = predicted_orders[order_small_mask]
-            df_small, _ = create_interaction_features(
-                df_small, quantile_thresholds=self.output_small_thresholds
-            )
-            df_small = encode_categorical(df_small, self.output_small_encoders, fit=False)
-
-            reg_features = self.output_small_reg.get_booster().feature_names
-            X_reg = align_features(df_small, reg_features)
-
-            pred_output[order_small_mask] = self.output_small_reg.predict(X_reg)
-
-        if order_large_mask.sum() > 0:
-            df_large = df[order_large_mask].copy()
-            df_large["lorderdata"] = predicted_orders[order_large_mask]
-            df_large, _ = create_interaction_features(
-                df_large, quantile_thresholds=self.output_large_thresholds
-            )
-            df_large = encode_categorical(df_large, self.output_large_encoders, fit=False)
-
-            reg_features = self.output_large_reg.get_booster().feature_names
-            X_reg = align_features(df_large, reg_features)
-
-            pred_output[order_large_mask] = self.output_large_reg.predict(X_reg)
-
-        pred_output = np.maximum(pred_output, 0.0)
-        return pred_output
-
-    @staticmethod
-    def _resolve_contract_ratio_caps(contract_data: float) -> Tuple[float, float]:
-        """按合同量分段定义下单/产出倍率上限。"""
-        if contract_data < 2.0:
-            return 1.85, 2.35
-        if contract_data < 4.0:
-            return 1.75, 2.05
-        if contract_data < 6.0:
-            return 1.70, 1.95
-        if contract_data < 8.0:
-            return 1.65, 1.75
-        if contract_data < 10.0:
-            return 1.60, 1.65
-        if contract_data < 20.0:
-            return 1.55, 1.60
-        return 1.50, 1.45
-
-    def _apply_business_prediction_caps(
-        self,
-        df: pd.DataFrame,
-        predicted_orders: np.ndarray,
-        predicted_outputs: np.ndarray,
-    ) -> Tuple[np.ndarray, np.ndarray]:
-        """对模型预测结果施加业务上限，降低小合同与特定类型过度放大风险。"""
-        if len(df) == 0:
-            return predicted_orders, predicted_outputs
-
-        contracts = pd.to_numeric(df["wkcontractdata"], errors="coerce").fillna(0.0).values
-        if "wksampletype" in df.columns:
-            sampletypes = df["wksampletype"].astype(str).fillna("").values
-        else:
-            sampletypes = np.array([""] * len(df))
-
-        adjusted_orders = np.maximum(predicted_orders.copy(), 0.0)
-        adjusted_outputs = np.maximum(predicted_outputs.copy(), 0.0)
-
-        clipped_order_count = 0
-        clipped_output_count = 0
-
-        for idx, contract_data in enumerate(contracts):
-            if contract_data <= 0:
-                continue
-
-            order_cap_ratio, output_cap_ratio = self._resolve_contract_ratio_caps(float(contract_data))
-            sampletype = sampletypes[idx]
-            if sampletype in self.ORDER_RATIO_CAP_BY_SAMPLETYPE:
-                order_cap_ratio = min(order_cap_ratio, self.ORDER_RATIO_CAP_BY_SAMPLETYPE[sampletype])
-            if sampletype in self.OUTPUT_RATIO_CAP_BY_SAMPLETYPE:
-                output_cap_ratio = min(output_cap_ratio, self.OUTPUT_RATIO_CAP_BY_SAMPLETYPE[sampletype])
-
-            order_cap = contract_data * order_cap_ratio
-            output_contract_cap = contract_data * output_cap_ratio
-            output_order_cap_ratio = 1.25 if contract_data < 2.0 else 1.15
-            output_order_cap = adjusted_orders[idx] * output_order_cap_ratio
-            output_cap = min(output_contract_cap, output_order_cap)
-
-            if adjusted_orders[idx] > order_cap:
-                adjusted_orders[idx] = order_cap
-                clipped_order_count += 1
-
-            # 下单量裁剪后重新计算产出量与下单量的联动上限
-            output_order_cap = adjusted_orders[idx] * output_order_cap_ratio
-            output_cap = min(output_contract_cap, output_order_cap)
-            if adjusted_outputs[idx] > output_cap:
-                adjusted_outputs[idx] = output_cap
-                clipped_output_count += 1
-
-        if clipped_order_count > 0 or clipped_output_count > 0:
-            logger.info(
-                "业务上限约束生效: 下单裁剪{}条, 产出裁剪{}条".format(
-                    clipped_order_count, clipped_output_count
-                )
-            )
-        return adjusted_orders, adjusted_outputs
-
-    def predict_lane_order_and_output(
-        self,
-        libraries: List[EnhancedLibraryInfo],
-        lane_id: str = "temp_lane",
-    ) -> Dict[str, Any]:
-        """
-        预测Lane中每个文库的下单量和产出量。
-
-        Returns:
-            {
-              predicted_orders, predicted_outputs,
-              total_predicted_order, total_predicted_output,
-              avg_predicted_order, avg_predicted_output,
-              prediction_success, error_message
-            }
-        """
-        default_result = {
-            "predicted_orders": [],
-            "predicted_outputs": [],
-            "total_predicted_order": 0.0,
-            "total_predicted_output": 0.0,
-            "avg_predicted_order": 0.0,
-            "avg_predicted_output": 0.0,
-            "prediction_success": False,
-            "error_message": None,
-        }
-        if not self.is_available:
-            default_result["error_message"] = "V6双模型未加载"
-            return default_result
-        if not libraries:
-            default_result["error_message"] = "无文库数据"
-            return default_result
-
-        try:
-            df = _libraries_to_v6_dataframe(libraries, lane_id)
-            df = clean_data(df)
-            df = add_sampletype_output_group(df)
-            df = compute_lane_stats(df)
-
-            predicted_orders = self._predict_order(df)
-            predicted_outputs = self._predict_output(df, predicted_orders)
-            predicted_orders, predicted_outputs = self._apply_business_prediction_caps(
-                df=df,
-                predicted_orders=predicted_orders,
-                predicted_outputs=predicted_outputs,
-            )
-
-            return {
-                "predicted_orders": predicted_orders.tolist(),
-                "predicted_outputs": predicted_outputs.tolist(),
-                "total_predicted_order": float(predicted_orders.sum()),
-                "total_predicted_output": float(predicted_outputs.sum()),
-                "avg_predicted_order": float(predicted_orders.mean()),
-                "avg_predicted_output": float(predicted_outputs.mean()),
-                "prediction_success": True,
-                "error_message": None,
-            }
-        except Exception as exc:
-            logger.exception(f"V6双模型预测失败: {exc}")
-            default_result["error_message"] = str(exc)
-            return default_result
 
 
 # ==================== 辅助工具函数 ====================
@@ -2302,30 +1723,26 @@ def _auto_fix_lane_for_customer_and_10bp(
     return lane, removed_libs
 
 
-# ==================== V6预测结果收集与输出 ====================
+# ==================== 排机结果收集与输出 ====================
 
 
 def _collect_prediction_rows(
     lanes: List[LaneAssignment],
-    predictor: V6OrderOutputPredictor,
     loutput_by_origrec: Dict[str, float],
     tag: str,
 ) -> pd.DataFrame:
-    """收集V6预测结果到DataFrame
+    """收集排机结果到DataFrame
 
     Args:
         lanes: Lane列表
-        predictor: V6预测器
         loutput_by_origrec: origrec到实际产出的映射（用于计算误差）
         tag: 标签（用于日志）
 
     Returns:
-        预测结果DataFrame
+        排机结果DataFrame
     """
     rows: List[Dict[str, Any]] = []
-    if predictor is None or not predictor.is_available:
-        logger.warning(f"{tag} V6预测器不可用，跳过输出")
-        return pd.DataFrame(rows)
+    logger.info(f"{tag} 收集排机结果，用于后续 prediction_delivery 预测")
 
     runid_by_lane = _build_runid_by_lane(lanes)
     for lane in lanes:
@@ -2349,20 +1766,9 @@ def _collect_prediction_rows(
         if lane_balance_data is not None:
             lane_balance_data_value = round(float(lane_balance_data), 3)
 
-        # V6双模型预测
-        prediction = predictor.predict_lane_order_and_output(libs, lane.lane_id)
-        predicted_orders = prediction.get("predicted_orders", [])
-        predicted_outputs = prediction.get("predicted_outputs", [])
-
-        if len(predicted_orders) != len(libs):
-            logger.warning(
-                f"{tag} Lane {lane.lane_id} 预测长度不匹配: {len(predicted_orders)} vs {len(libs)}"
-            )
-            # 补齐长度
-            while len(predicted_orders) < len(libs):
-                predicted_orders.append(None)
-        while len(predicted_outputs) < len(libs):
-            predicted_outputs.append(None)
+        # 排机脚本只负责产出成Lane结果，预测统一交给 prediction_delivery 处理。
+        predicted_orders: List[Optional[float]] = [None] * len(libs)
+        predicted_outputs: List[Optional[float]] = [None] * len(libs)
 
         for idx, lib in enumerate(libs):
             pred_order = predicted_orders[idx]
@@ -2419,36 +1825,6 @@ def _collect_prediction_rows(
         df["predicted_lorderdata"] = pd.to_numeric(df["predicted_lorderdata"], errors="coerce").round(3)
         df["lai_output"] = pd.to_numeric(df["lai_output"], errors="coerce").round(3)
     return df
-
-
-def _summarize_prediction(df: pd.DataFrame, tag: str) -> Dict[str, float]:
-    """汇总V6预测结果"""
-    if df.empty:
-        logger.warning(f"{tag} 预测结果为空")
-        return {
-            "predicted_lorderdata_mean": float("nan"),
-            "lai_output_mean": float("nan"),
-            "wkcontractdata_mean": float("nan"),
-        }
-    predicted_lorderdata_mean = float(pd.to_numeric(df["predicted_lorderdata"], errors="coerce").mean(skipna=True))
-    lai_output_mean = float(pd.to_numeric(df["lai_output"], errors="coerce").mean(skipna=True))
-    wkcontractdata_mean = float(pd.to_numeric(df["wkcontractdata"], errors="coerce").mean(skipna=True))
-    order_ratio = predicted_lorderdata_mean / wkcontractdata_mean if wkcontractdata_mean > 0 else 0.0
-    output_ratio = lai_output_mean / wkcontractdata_mean if wkcontractdata_mean > 0 else 0.0
-    logger.info(
-        f"{tag} 平均合同量: {wkcontractdata_mean:.3f}G，"
-        f"平均预测下单量: {predicted_lorderdata_mean:.3f}G（下单/合同比={order_ratio:.3f}），"
-        f"平均预测产出量: {lai_output_mean:.3f}G（产出/合同比={output_ratio:.3f}）"
-    )
-    return {
-        "predicted_lorderdata_mean": predicted_lorderdata_mean,
-        "lai_output_mean": lai_output_mean,
-        "wkcontractdata_mean": wkcontractdata_mean,
-        "order_ratio": order_ratio,
-        "output_ratio": output_ratio,
-    }
-
-
 def _build_detail_output(
     df_raw: pd.DataFrame,
     pred_df: pd.DataFrame,
@@ -2665,12 +2041,11 @@ def load_test_libraries(data_file: str, limit: int | None = None) -> List[Enhanc
 # ==================== 排机方案分析 ====================
 
 
-def analyze_solution(solution: Any, v6_predictor: Optional[V6OrderOutputPredictor] = None) -> Dict[str, Any]:
+def analyze_solution(solution: Any) -> Dict[str, Any]:
     """分析排机方案的质量指标
     
     Args:
         solution: 排机解决方案
-        v6_predictor: V6预测器（可选，用于统计预测信息）
     """
     lanes: List[LaneAssignment] = solution.lane_assignments
     
@@ -2714,33 +2089,6 @@ def analyze_solution(solution: Any, v6_predictor: Optional[V6OrderOutputPredicto
         stats["min_utilization"] = min(lane_utilizations)
         stats["max_utilization"] = max(lane_utilizations)
         
-    # V6预测统计（下单+产出）
-    if v6_predictor and v6_predictor.is_available:
-        predicted_orders_all: List[float] = []
-        predicted_outputs_all: List[float] = []
-        contract_data_all: List[float] = []
-        for lane in lanes:
-            prediction = v6_predictor.predict_lane_order_and_output(lane.libraries, lane.lane_id)
-            if prediction["prediction_success"]:
-                predicted_orders_all.extend(prediction["predicted_orders"])
-                predicted_outputs_all.extend(prediction["predicted_outputs"])
-                for lib in lane.libraries:
-                    contract_data_all.append(float(lib.contract_data_raw or 0.0))
-
-        if predicted_orders_all:
-            total_predicted = sum(predicted_orders_all)
-            total_contract = sum(contract_data_all)
-            stats["v6_total_predicted_order"] = total_predicted
-            stats["v6_avg_predicted_order"] = total_predicted / len(predicted_orders_all)
-            stats["v6_order_ratio"] = total_predicted / total_contract if total_contract > 0 else 0.0
-            stats["v6_prediction_count"] = len(predicted_orders_all)
-        if predicted_outputs_all:
-            total_pred_output = sum(predicted_outputs_all)
-            total_contract = sum(contract_data_all)
-            stats["v6_total_predicted_output"] = total_pred_output
-            stats["v6_avg_predicted_output"] = total_pred_output / len(predicted_outputs_all)
-            stats["v6_output_ratio"] = total_pred_output / total_contract if total_contract > 0 else 0.0
-    
     return stats
 
 
@@ -2750,25 +2098,23 @@ def analyze_solution(solution: Any, v6_predictor: Optional[V6OrderOutputPredicto
 def test_with_model(
     libraries: List[EnhancedLibraryInfo],
     existing_lanes: Optional[List[LaneAssignment]] = None,
-) -> Tuple[Dict[str, Any], Any, V6OrderOutputPredictor]:
-    """排机流程 + V6模型预测下单量和产出量
+) -> Tuple[Dict[str, Any], Any]:
+    """排机流程
 
     流程：
     1. 优先尝试抽取纯10bp专Lane
     2. GreedyLaneScheduler 纯规则排机（不使用模型）
     3. 验证Lane合规性，矫正客户/10bp违规
     4. 尝试增加Lane数量、跨Lane交换再平衡
-    5. V6模型预测每个文库的下单量与产出量
-    
     Args:
         libraries: 待排机文库列表
         existing_lanes: 已存在的Lane（如包Lane），将被合并到最终结果中
 
     Returns:
-        (排机统计, 排机方案, V6预测器)
+        (排机统计, 排机方案)
     """
     logger.info("\n" + "=" * 80)
-    logger.info("排机流程：纯规则排机 + V6模型预测下单量与产出量")
+    logger.info("排机流程：纯规则排机")
     logger.info("=" * 80)
     
     # Lane容量配置（调度阶段）
@@ -2955,61 +2301,23 @@ def test_with_model(
             f"普通Lane: {len(solution.lane_assignments) - len(preset_lanes)})"
         )
 
-    # ===== V6模型预测下单量与产出量 =====
-    logger.info("\n" + "=" * 80)
-    logger.info("V6模型预测下单量与产出量")
-    logger.info("=" * 80)
-    v6_predictor = V6OrderOutputPredictor()
-    if v6_predictor.is_available:
-        logger.info(f"对 {len(solution.lane_assignments)} 条Lane进行V6下单量与产出量预测")
-        success_count = 0
-        fail_count = 0
-        for lane in solution.lane_assignments:
-            prediction = v6_predictor.predict_lane_order_and_output(lane.libraries, lane.lane_id)
-            if prediction["prediction_success"]:
-                predicted_orders_raw = list(prediction["predicted_orders"] or [])
-                predicted_orders = [
-                    _apply_lane_orderdata_floor(order_val) for order_val in predicted_orders_raw
-                ]
-                predicted_orders_numeric = [
-                    float(order_val) for order_val in predicted_orders if order_val is not None
-                ]
-                adjusted_total_predicted_order = float(sum(predicted_orders_numeric))
-                adjusted_avg_predicted_order = (
-                    adjusted_total_predicted_order / len(predicted_orders_numeric)
-                    if predicted_orders_numeric
-                    else 0.0
-                )
-                # 将预测结果写入Lane的metadata
-                lane.metadata["v6_prediction_applied"] = True
-                lane.metadata["v6_total_predicted_order"] = adjusted_total_predicted_order
-                lane.metadata["v6_avg_predicted_order"] = adjusted_avg_predicted_order
-                lane.metadata["v6_total_predicted_output"] = prediction["total_predicted_output"]
-                lane.metadata["v6_avg_predicted_output"] = prediction["avg_predicted_output"]
+    logger.info("脚本内置 Pooling 预测已停用，后续统一调用 prediction_delivery")
+    stats = analyze_solution(solution)
+    return stats, solution
 
-                # 保存每个文库预测结果
-                predicted_outputs = prediction["predicted_outputs"]
-                libs = list(lane.libraries)
-                order_dict = {}
-                output_dict = {}
-                for idx, lib in enumerate(libs):
-                    pred_order = predicted_orders[idx] if idx < len(predicted_orders) else None
-                    pred_output = predicted_outputs[idx] if idx < len(predicted_outputs) else None
-                    order_dict[lib.origrec] = pred_order
-                    output_dict[lib.origrec] = pred_output
-                lane.metadata["v6_predicted_orders"] = order_dict
-                lane.metadata["v6_predicted_outputs"] = output_dict
-                success_count += 1
-            else:
-                lane.metadata["v6_prediction_applied"] = False
-                lane.metadata["v6_error"] = prediction["error_message"]
-                fail_count += 1
-        logger.info(f"V6预测完成: 成功={success_count}, 失败={fail_count}")
-    else:
-        logger.warning("V6模型不可用，跳过下单量与产出量预测")
 
-    stats = analyze_solution(solution, v6_predictor)
-    return stats, solution, v6_predictor
+def _build_output_path(data_path: Path, output_dir: Path, mode: str) -> Path:
+    """根据运行模式生成输出文件路径。"""
+    suffix = "_lane_output_v6.csv" if mode == "arrange" else "_pooling_output_v6.csv"
+    return output_dir / f"{data_path.stem}{suffix}"
+
+
+def _run_prediction_delivery(input_data: Path | pd.DataFrame, output_path: Path) -> pd.DataFrame:
+    """统一调用 prediction_delivery 执行 Pooling 预测。"""
+    if output_path.exists():
+        logger.info(f"预测输出文件已存在，将覆盖: {output_path}")
+    logger.info(f"调用 prediction_delivery，模型目录: {MODELS_DIR}")
+    return predict_pooling(input_data=input_data, output_file=output_path)
 
 
 # ==================== 入口函数 ====================
@@ -3018,7 +2326,13 @@ def test_with_model(
 def parse_args() -> argparse.Namespace:
     """解析命令行参数"""
     parser = argparse.ArgumentParser(
-        description="端到端排机流程测试 - 使用V6模型预测下单量与产出量"
+        description="端到端排机流程测试 - 支持排机或仅执行 Pooling 预测"
+    )
+    parser.add_argument(
+        "--mode",
+        choices=["arrange", "pooling"],
+        default="arrange",
+        help="运行模式：arrange=加载数据、排机、预测；pooling=仅预测",
     )
     parser.add_argument(
         "--data-file",
@@ -3038,11 +2352,12 @@ def main() -> None:
     args = parse_args()
     random.seed(42)
     logger.info("=" * 80)
-    logger.info("端到端排机流程测试 - V6模型预测下单量与产出量")
+    logger.info("端到端排机流程测试 - 排机与 Pooling 预测")
     logger.info("=" * 80)
     logger.info(f"测试时间: {datetime.now().strftime('%Y-%m-%d %H:%M:%S')}")
     logger.info(f"随机种子: 42 (固定，确保可复现)")
-    
+    logger.info(f"运行模式: {args.mode}")
+
     data_file = args.data_file
     data_path = Path(data_file)
     if not data_path.exists():
@@ -3051,6 +2366,17 @@ def main() -> None:
     logger.info(f"\n使用数据文件: {data_path}")
 
     try:
+        output_dir = Path(args.output_detail_dir)
+        output_path = _build_output_path(data_path, output_dir, args.mode)
+
+        if args.mode == "pooling":
+            logger.info("\n" + "=" * 80)
+            logger.info("仅执行 Pooling 预测")
+            logger.info("=" * 80)
+            _run_prediction_delivery(input_data=data_path, output_path=output_path)
+            logger.info(f"Pooling 预测完成，输出文件: {output_path}")
+            return
+
         df_raw = pd.read_csv(data_path)
         df_raw["origrec_key"] = _build_origrec_key(df_raw)
         if "loutput" in df_raw.columns:
@@ -3135,41 +2461,49 @@ def main() -> None:
         
         # ===== 步骤2: 处理普通文库（包括包Lane处理失败的文库） =====
         logger.info("\n" + "=" * 80)
-        logger.info("步骤2: 处理普通文库（使用GreedyLaneScheduler + V6预测）")
+        logger.info("步骤2: 处理普通文库（使用GreedyLaneScheduler）")
         logger.info("=" * 80)
         
         if ai_schedulable_libraries:
             random.seed(42)
-            stats, solution, v6_predictor = test_with_model(
+            stats, solution = test_with_model(
                 deepcopy(normal_libs), existing_lanes=package_lanes
             )
         else:
             from types import SimpleNamespace
             stats = {}
             solution = SimpleNamespace(lane_assignments=[], unassigned_libraries=[])
-            v6_predictor = V6OrderOutputPredictor()
 
         # 收集预测结果
         pred_df = _collect_prediction_rows(
-            solution.lane_assignments, v6_predictor, loutput_by_origrec, "v6"
+            solution.lane_assignments, loutput_by_origrec, "arrange"
         )
-        _summarize_prediction(pred_df, "v6")
 
         lanes_with_split = _collect_lanes_with_split(solution.lane_assignments)
 
         # 输出明细
-        detail_dir = Path(args.output_detail_dir)
-        detail_name = f"{data_path.stem}_lane_output_v6.csv"
-        detail_path = detail_dir / detail_name
         _build_detail_output(
             df_raw=df_raw,
             pred_df=pred_df,
-            output_path=detail_path,
+            output_path=output_path,
             ai_schedulable_keys=ai_schedulable_keys,
             lanes_with_split=lanes_with_split,
         )
-        
+
+        logger.info("\n" + "=" * 80)
+        logger.info("步骤3: 调用 prediction_delivery 执行 Pooling 预测")
+        logger.info("=" * 80)
+        prediction_df = _run_prediction_delivery(input_data=output_path, output_path=output_path)
+        logger.info(
+            "prediction_delivery 预测完成: 记录数={}, 平均下单量={:.3f}G, 平均产出量={:.3f}G".format(
+                len(prediction_df),
+                float(pd.to_numeric(prediction_df["lorderdata"], errors="coerce").mean(skipna=True)),
+                float(pd.to_numeric(prediction_df["lai_output"], errors="coerce").mean(skipna=True)),
+            )
+        )
+
         logger.info("\n端到端测试完成！")
+        logger.info(f"最终输出文件: {output_path}")
         logger.info("=" * 80)
     except Exception as exc:
         logger.error(f"测试过程发生错误: {exc}")

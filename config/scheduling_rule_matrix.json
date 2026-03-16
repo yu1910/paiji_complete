@@ -1,7 +1,7 @@
 {
   "description": "统一排机规则总配置表",
   "created_at": "2026-03-06 13:55:15",
-  "updated_at": "2026-03-06 13:55:15",
+  "updated_at": "2026-03-13 11:05:45",
   "sample_type_groups": {
     "special_combo_group_a": {
       "description": "10X 5端和VDJ组合",
@@ -111,9 +111,28 @@
       "seq_strategy_keywords_any": ["PE150"],
       "seq_strategy_keywords_exclude": ["10+24"],
       "seq_modes": ["3.6T-NEW"],
-      "project_types": ["临检", "YC", "其他"],
+      "project_types": ["临检", "YC"],
       "soft_target_gb": 975.0,
       "min_target_gb": 975.0,
+      "max_target_gb": 1200.0,
+      "tolerance_gb": 5.0,
+      "lane_count": 8,
+      "loading_method": "25B",
+      "sequencing_mode": "3.6T-NEW",
+      "fc_min_data_gb": 1150.0
+    },
+    {
+      "rule_code": "tj_1595_standard_pe150_25b_other",
+      "priority": 110,
+      "process_codes": [1595],
+      "test_nos": ["Novaseq X Plus-PE150"],
+      "machine_types": ["Nova X-25B", "NovaSeq X Plus"],
+      "seq_strategy_keywords_any": ["PE150"],
+      "seq_strategy_keywords_exclude": ["10+24"],
+      "seq_modes": ["3.6T-NEW"],
+      "project_types": ["其他"],
+      "soft_target_gb": 975.0,
+      "min_target_gb": 1025.0,
       "max_target_gb": 1200.0,
       "tolerance_gb": 5.0,
       "lane_count": 8,
