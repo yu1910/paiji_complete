@@ -2344,6 +2344,11 @@ def parse_args() -> argparse.Namespace:
         default="/data/work/yuyongpeng/liblane_v2_deepseek/data/merge_data",
         help="明细输出目录",
     )
+    parser.add_argument(
+        "--output-file",
+        default=None,
+        help="明细输出文件完整路径（包含文件名）。如果提供，则优先生效，忽略 --output-detail-dir 的文件名拼接规则",
+    )
     return parser.parse_args()
 
 
@@ -2366,8 +2371,13 @@ def main() -> None:
     logger.info(f"\n使用数据文件: {data_path}")
 
     try:
-        output_dir = Path(args.output_detail_dir)
-        output_path = _build_output_path(data_path, output_dir, args.mode)
+        # 优先使用 --output-file 指定的完整路径；未指定时退回到原来的目录+自动命名逻辑
+        if args.output_file:
+            output_path = Path(args.output_file)
+            output_dir = output_path.parent
+        else:
+            output_dir = Path(args.output_detail_dir)
+            output_path = _build_output_path(data_path, output_dir, args.mode)
 
         if args.mode == "pooling":
             logger.info("\n" + "=" * 80)
