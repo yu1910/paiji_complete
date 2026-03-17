@@ -20,14 +20,12 @@ setup(
     long_description=long_description,
     long_description_content_type="text/markdown",
     url="https://example.com/arrange_library",
-    # 打包当前目录下的 Python 包（core、models 等）
-    packages=find_packages(exclude=["tests", "*.tests", "*.tests.*", "tests.*"]),
-    # 单文件模块：封装主逻辑的脚本
-    py_modules=["arrange_library_model6", "liblane_paths"],
+    # 只打包 arrange_library 这一棵包
+    packages=find_packages(include=["arrange_library", "arrange_library.*"]),
     include_package_data=True,
     package_data={
         # 打包配置和模型文件（排机用）
-        "": [
+        "arrange_library": [
             "config/*.yaml",
             "config/*.yml",
             "config/*.json",
