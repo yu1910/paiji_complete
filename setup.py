@@ -24,13 +24,12 @@ setup(
     packages=find_packages(include=["arrange_library", "arrange_library.*"]),
     include_package_data=True,
     package_data={
-        # 打包配置和模型文件（排机用）
+        # 把 arrange_library 目录里的配置和模型等文件都打包进去
         "arrange_library": [
-            "config/*.yaml",
-            "config/*.yml",
-            "config/*.json",
-            "models/**/*.pkl",
-            "models/**/*.json",
+            "*",
+            "core/*", "core/**/*",
+            "models/*", "models/**/*",
+            "config/*", "config/**/*",
         ],
     },
     python_requires=">=3.8",
