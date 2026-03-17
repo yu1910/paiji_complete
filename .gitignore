@@ -12,3 +12,4 @@ test/pooling/paiji_complete/*.log
 .idea/
 *.swp
 *.csv
+test/
