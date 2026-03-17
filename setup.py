@@ -23,7 +23,7 @@ setup(
     # 打包当前目录下的 Python 包（core、models 等）
     packages=find_packages(exclude=["tests", "*.tests", "*.tests.*", "tests.*"]),
     # 单文件模块：封装主逻辑的脚本
-    py_modules=["test_full_pipeline_with_model3_copy_v6_copy"],
+    py_modules=["arrange_library_model6"],
     include_package_data=True,
     package_data={
         # 打包配置和模型文件（排机用）
