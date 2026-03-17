@@ -40,10 +40,10 @@ warnings.filterwarnings(
     message="DataFrame is highly fragmented.  This is usually the result of calling `frame.insert` many times, which has poor performance.",
 )
 
-# 添加项目路径
+# 添加项目路径（包内：当前文件所在目录即 arrange_library 根）
 sys.path.insert(0, str(Path(__file__).parent))
 
-from liblane_paths import setup_liblane_paths
+from .liblane_paths import setup_liblane_paths
 
 setup_liblane_paths()
 
