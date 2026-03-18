@@ -38,23 +38,23 @@ from loguru import logger
 from liblane_paths import setup_liblane_paths
 setup_liblane_paths()
 
-from core.ai.pooling_coefficient_optimizer import (
+from arrange_library.core.ai.pooling_coefficient_optimizer import (
     PoolingCoefficientOptimizer,
     PoolingOptimizationResult,
 )
-from core.config.scheduling_config import get_scheduling_config, SchedulingMode
+from arrange_library.core.config.scheduling_config import get_scheduling_config, SchedulingMode
 from models.library_info import EnhancedLibraryInfo, MachineType
-from core.constraints.index_validator_verified import IndexConflictValidator
-from core.constraints.lane_validator import LaneValidator
-from core.scheduling.scheduling_types import LaneAssignment, SchedulingSolution
-from core.preprocessing.base_imbalance_handler import BaseImbalanceHandler
-from core.preprocessing.batch_rule_analyzer import BatchRuleAnalyzer, BatchAnalysisReport
-from core.preprocessing.library_splitter import LibrarySplitter
-from core.preprocessing.rule_constrained_strategy_planner import (
+from arrange_library.core.constraints.index_validator_verified import IndexConflictValidator
+from arrange_library.core.constraints.lane_validator import LaneValidator
+from arrange_library.core.scheduling.scheduling_types import LaneAssignment, SchedulingSolution
+from arrange_library.core.preprocessing.base_imbalance_handler import BaseImbalanceHandler
+from arrange_library.core.preprocessing.batch_rule_analyzer import BatchRuleAnalyzer, BatchAnalysisReport
+from arrange_library.core.preprocessing.library_splitter import LibrarySplitter
+from arrange_library.core.preprocessing.rule_constrained_strategy_planner import (
     RuleConstrainedStrategyPlanner,
     StrategyExecutionPlan,
 )
-from core.validation.rule_checker import RuleChecker
+from arrange_library.core.validation.rule_checker import RuleChecker
 
 
 @dataclass
@@ -1052,7 +1052,7 @@ class GreedyLaneScheduler:
             solution: 排机结果
             keep_failed_lanes: 是否保留验证失败的Lane（不拆解），供外层处理
         """
-        from core.constraints.lane_validator import LaneValidator
+        from arrange_library.core.constraints.lane_validator import LaneValidator
         
         validator = LaneValidator(strict_mode=False)
         
@@ -1355,7 +1355,7 @@ class GreedyLaneScheduler:
         machine_type_str = lane.machine_type.value if lane.machine_type else "Nova X-25B"
         
         # 创建一个非严格模式的验证器，专用Lane只检查错误不检查警告
-        from core.constraints.lane_validator import LaneValidator
+        from arrange_library.core.constraints.lane_validator import LaneValidator
         lenient_validator = LaneValidator(strict_mode=False)
         
         # [2025-12-26 修复] 传入metadata指示这是碱基不均衡专用Lane，跳过碱基不均衡占比检查
@@ -4148,7 +4148,7 @@ class GreedyLaneScheduler:
         Returns:
             (仍未分配的文库列表, 新创建的Lane列表)
         """
-        from core.constraints.lane_validator import LaneValidator
+        from arrange_library.core.constraints.lane_validator import LaneValidator
         
         min_lane_data, max_lane_data = self._resolve_lane_capacity_limits(unassigned, machine_type)
         

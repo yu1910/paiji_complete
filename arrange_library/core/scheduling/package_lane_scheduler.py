@@ -22,13 +22,13 @@ from loguru import logger
 from liblane_paths import setup_liblane_paths
 setup_liblane_paths()
 
-from core.ai.pooling_coefficient_optimizer import (
+from arrange_library.core.ai.pooling_coefficient_optimizer import (
     PoolingCoefficientOptimizer,
     PoolingOptimizationResult,
 )
-from core.config.scheduling_config import get_scheduling_config
-from models.library_info import EnhancedLibraryInfo
-from core.preprocessing.base_imbalance_handler import BaseImbalanceHandler
+from arrange_library.core.config.scheduling_config import get_scheduling_config
+from arrange_library.models.library_info import EnhancedLibraryInfo
+from arrange_library.core.preprocessing.base_imbalance_handler import BaseImbalanceHandler
 
 
 class PackageType(Enum):
@@ -573,7 +573,7 @@ class PackageLaneScheduler:
     def _validate_index_conflicts(self, libraries: List[EnhancedLibraryInfo]) -> Tuple[bool, List[str]]:
         """验证Index冲突"""
         try:
-            from core.constraints.index_validator_verified import IndexConflictValidator
+            from arrange_library.core.constraints.index_validator_verified import IndexConflictValidator
             
             validator = IndexConflictValidator()
             result = validator.validate_lane(libraries)

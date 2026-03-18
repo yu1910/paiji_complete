@@ -11,8 +11,8 @@ from liblane_paths import setup_liblane_paths
 
 setup_liblane_paths()
 
-from models.library_info import EnhancedLibraryInfo
-from models.remark_recognition_v2 import CommandItem, RemarkRecognitionResultV2
+from arrange_library.models.library_info import EnhancedLibraryInfo
+from arrange_library.models.remark_recognition_v2 import CommandItem, RemarkRecognitionResultV2
 
 
 class RemarkIntentApplier:

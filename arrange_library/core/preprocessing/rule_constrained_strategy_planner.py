@@ -12,7 +12,7 @@ from typing import Dict, List, Optional
 
 from loguru import logger
 
-from core.preprocessing.batch_rule_analyzer import (
+from arrange_library.core.preprocessing.batch_rule_analyzer import (
     BatchAnalysisReport,
     DedicatedLaneRecommendation,
 )

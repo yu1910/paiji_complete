@@ -14,7 +14,7 @@ from enum import Enum
 from liblane_paths import setup_liblane_paths
 setup_liblane_paths()
 
-from models.library_info import EnhancedLibraryInfo, MachineType
+from arrange_library.models.library_info import EnhancedLibraryInfo, MachineType
 
 class OptimizationObjective(Enum):
     """优化目标枚举"""
