@@ -1978,6 +1978,25 @@ def _build_detail_output(
 # ==================== 数据加载 ====================
 
 
+def _read_csv_with_encoding_fallback(csv_path: Union[str, Path], **kwargs: Any) -> pd.DataFrame:
+    """读取CSV并对常见中文编码做兜底。"""
+    if "encoding" in kwargs and kwargs["encoding"]:
+        return pd.read_csv(csv_path, **kwargs)
+
+    fallback_encodings = ("utf-8", "utf-8-sig", "gb18030", "gbk")
+    last_error: Optional[UnicodeDecodeError] = None
+    for encoding in fallback_encodings:
+        try:
+            df = pd.read_csv(csv_path, encoding=encoding, **kwargs)
+            if encoding != "utf-8":
+                logger.warning(f"CSV编码非utf-8，已使用 {encoding} 读取文件: {csv_path}")
+            return df
+        except UnicodeDecodeError as exc:
+            last_error = exc
+
+    raise ValueError(f"CSV读取失败，无法识别文件编码: {csv_path}，最后错误: {last_error}")
+
+
 def load_standardized_csv(data_file: str, limit: int | None = None) -> List[EnhancedLibraryInfo]:
     """从标准化CSV文件加载文库数据（训练数据格式）
     
@@ -1989,7 +2008,7 @@ def load_standardized_csv(data_file: str, limit: int | None = None) -> List[Enha
         raise FileNotFoundError(f"数据文件不存在: {data_path}")
     
     logger.info(f"从标准化CSV文件加载数据: {data_path}")
-    df = pd.read_csv(data_path, nrows=limit)
+    df = _read_csv_with_encoding_fallback(data_path, nrows=limit)
     logger.info(f"读取 {len(df)} 行数据")
     
     libraries: List[EnhancedLibraryInfo] = []
@@ -2382,7 +2401,7 @@ def arrange_library(
         return output_path
 
     # ===== 全流程排机模式 =====
-    df_raw = pd.read_csv(data_path)
+    df_raw = _read_csv_with_encoding_fallback(data_path)
     df_raw["origrec_key"] = _build_origrec_key(df_raw)
     if "loutput" in df_raw.columns:
         loutput_series = pd.to_numeric(df_raw["loutput"], errors="coerce")
