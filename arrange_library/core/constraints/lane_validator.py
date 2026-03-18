@@ -37,12 +37,12 @@ from collections import defaultdict
 from loguru import logger
 
 # 使用包内相对导入，避免依赖 sys.path，在 Docker 等环境更稳定
-from ...liblane_paths import setup_liblane_paths
+from arrange_library.liblane_paths import setup_liblane_paths
 
 setup_liblane_paths()
 
-from ..config.scheduling_config import get_scheduling_config
-from ...models.library_info import EnhancedLibraryInfo
+from arrange_library.core.config.scheduling_config import get_scheduling_config
+from arrange_library.models.library_info import EnhancedLibraryInfo
 
 
 class ValidationRuleType(Enum):
