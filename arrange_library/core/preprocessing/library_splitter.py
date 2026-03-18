@@ -12,8 +12,8 @@ from typing import Any, Dict, List, Tuple
 
 from loguru import logger
 
-from models.library_info import EnhancedLibraryInfo
-from core.config.scheduling_config import get_library_split_config
+from arrange_library.models.library_info import EnhancedLibraryInfo
+from arrange_library.core.config.scheduling_config import get_library_split_config
 
 
 class LibrarySplitter:

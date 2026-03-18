@@ -18,7 +18,7 @@ from dataclasses import dataclass
 from loguru import logger
 from collections import defaultdict
 
-from models.library_info import EnhancedLibraryInfo
+from arrange_library.models.library_info import EnhancedLibraryInfo
 
 # 配置常量
 DEFAULT_MAX_DATA_GB: float = 240.0  # 默认最大数据量(GB) 2024.11.21更新

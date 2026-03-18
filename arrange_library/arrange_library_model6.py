@@ -43,7 +43,7 @@ warnings.filterwarnings(
 # 添加项目路径（包内：当前文件所在目录即 arrange_library 根）
 sys.path.insert(0, str(Path(__file__).parent))
 
-from .liblane_paths import setup_liblane_paths
+from arrange_library.liblane_paths import setup_liblane_paths
 
 setup_liblane_paths()
 
@@ -410,7 +410,7 @@ def _attempt_build_lane_from_pool(
     if index_conflict_attempts <= 0 or other_failure_attempts <= 0:
         return None, []
 
-    from core.constraints.index_validator_verified import IndexConflictValidator
+    from arrange_library.core.constraints.index_validator_verified import IndexConflictValidator
     _idx_validator = IndexConflictValidator()
 
     index_conflict_retry_count = 0
@@ -2150,7 +2150,7 @@ def test_with_model(
         scheduler.pooling_optimizer.enabled = False
         logger.info("排机阶段：Pooling优化器已禁用（V6流程不需要）")
     
-    from core.constraints.lane_validator import LaneValidator
+    from arrange_library.core.constraints.lane_validator import LaneValidator
     strict_validator = LaneValidator(strict_mode=True)
     logger.info("严格校验容量区间改为按统一配置表动态解析")
 
