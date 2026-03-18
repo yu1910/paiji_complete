@@ -18,8 +18,8 @@ from pathlib import Path
 import yaml
 from loguru import logger
 
-from liblane_paths import setup_liblane_paths
-setup_liblane_paths()
+# from liblane_paths import setup_liblane_paths
+# setup_liblane_paths()
 
 
 class SchedulingMode(Enum):

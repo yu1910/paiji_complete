@@ -13,9 +13,9 @@ import pandas as pd
 import yaml
 from loguru import logger
 
-from liblane_paths import setup_liblane_paths
+# from liblane_paths import setup_liblane_paths
 
-setup_liblane_paths()
+# setup_liblane_paths()
 
 from arrange_library.core.ai.loutput_predictor_wrapper import LOutputPredictorWrapper, create_loutput_predictor
 from arrange_library.core.config.scheduling_config import get_pooling_config

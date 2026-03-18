@@ -37,9 +37,9 @@ from collections import defaultdict
 from loguru import logger
 
 # 使用包内相对导入，避免依赖 sys.path，在 Docker 等环境更稳定
-from arrange_library.liblane_paths import setup_liblane_paths
+# from arrange_library.liblane_paths import setup_liblane_paths
 
-setup_liblane_paths()
+# setup_liblane_paths()
 
 from arrange_library.core.config.scheduling_config import get_scheduling_config
 from arrange_library.models.library_info import EnhancedLibraryInfo
@@ -302,7 +302,7 @@ class LaneValidator:
     def _validate_index_conflicts(self, libraries: List[EnhancedLibraryInfo]) -> List[ValidationError]:
         """校验Index冲突"""
         try:
-            from core.constraints.index_validator_verified import IndexConflictValidator
+            from arrange_library.core.constraints.index_validator_verified import IndexConflictValidator
             
             validator = IndexConflictValidator()
             result = validator.validate_lane(libraries)

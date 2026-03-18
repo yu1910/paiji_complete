@@ -7,9 +7,9 @@ from typing import Dict, List, Optional, Tuple
 
 from loguru import logger
 
-from liblane_paths import setup_liblane_paths
+# from liblane_paths import setup_liblane_paths
 
-setup_liblane_paths()
+# setup_liblane_paths()
 
 from arrange_library.models.library_info import EnhancedLibraryInfo
 from arrange_library.models.remark_recognition_v2 import CommandItem, RemarkRecognitionResultV2

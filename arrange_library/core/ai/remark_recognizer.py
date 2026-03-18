@@ -16,9 +16,9 @@ from typing import Any, Dict, List, Optional, Tuple
 
 from loguru import logger
 
-from liblane_paths import setup_liblane_paths
+# from liblane_paths import setup_liblane_paths
 
-setup_liblane_paths()
+# setup_liblane_paths()
 
 from core.ai.azure_openai_client import AzureOpenAIClient
 from models.library_info import EnhancedLibraryInfo

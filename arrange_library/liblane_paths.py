@@ -71,7 +71,7 @@ class LibLanePathManager:
 _path_manager = LibLanePathManager()
 
 
-def setup_liblane_paths():
+def # setup_liblane_paths():
     """设置LibLane项目路径（供其他模块调用）"""
     global _path_manager
     return _path_manager
@@ -103,7 +103,7 @@ def get_tests_path() -> Path:
 
 
 # 自动初始化路径设置
-setup_liblane_paths()
+# setup_liblane_paths()
 
 
 # 便捷的导入别名，供其他模块使用

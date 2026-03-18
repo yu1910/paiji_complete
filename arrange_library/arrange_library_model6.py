@@ -43,9 +43,9 @@ warnings.filterwarnings(
 # 添加项目路径（包内：当前文件所在目录即 arrange_library 根）
 sys.path.insert(0, str(Path(__file__).parent))
 
-from arrange_library.liblane_paths import setup_liblane_paths
+# from arrange_library.liblane_paths import setup_liblane_paths
 
-setup_liblane_paths()
+# setup_liblane_paths()
 
 from loguru import logger
 

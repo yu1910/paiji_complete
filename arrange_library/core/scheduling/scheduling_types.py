@@ -11,8 +11,8 @@ from dataclasses import dataclass, field
 from enum import Enum
 
 # 导入基础模型
-from liblane_paths import setup_liblane_paths
-setup_liblane_paths()
+# from liblane_paths import setup_liblane_paths
+# setup_liblane_paths()
 
 from arrange_library.models.library_info import EnhancedLibraryInfo, MachineType
 
