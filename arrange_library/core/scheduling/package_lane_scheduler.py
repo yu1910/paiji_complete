@@ -19,8 +19,8 @@ from collections import defaultdict
 
 from loguru import logger
 
-from liblane_paths import setup_liblane_paths
-setup_liblane_paths()
+# from arrange_library.liblane_paths import setup_liblane_paths
+# setup_liblane_paths()
 
 from arrange_library.core.ai.pooling_coefficient_optimizer import (
     PoolingCoefficientOptimizer,

@@ -11,8 +11,8 @@ from typing import Dict, Optional, Any, List
 from loguru import logger
 import os
 
-from liblane_paths import setup_liblane_paths
-setup_liblane_paths()
+# from liblane_paths import setup_liblane_paths
+# setup_liblane_paths()
 
 
 class AzureOpenAIClient:
