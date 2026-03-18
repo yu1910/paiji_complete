@@ -17,10 +17,10 @@ from liblane_paths import setup_liblane_paths
 
 setup_liblane_paths()
 
-from core.ai.loutput_predictor_wrapper import LOutputPredictorWrapper, create_loutput_predictor
-from core.config.scheduling_config import get_pooling_config
-from core.scheduling.scheduling_types import LaneAssignment
-from models.library_info import EnhancedLibraryInfo
+from arrange_library.core.ai.loutput_predictor_wrapper import LOutputPredictorWrapper, create_loutput_predictor
+from arrange_library.core.config.scheduling_config import get_pooling_config
+from arrange_library.core.scheduling.scheduling_types import LaneAssignment
+from arrange_library.models.library_info import EnhancedLibraryInfo
 
 
 class PoolingConfigManager:
@@ -120,7 +120,7 @@ class PoolingCoefficientOptimizer:
 
     def __init__(
         self,
-        config_path: str = "config/pooling_optimizer_config.yaml",
+        config_path: str = "arrange_library/config/pooling_optimizer_config.yaml",
         predictor: Optional[LOutputPredictorWrapper] = None,
         pooling_config_path: str = "/data/work/yuyongpeng/liblane_v2_deepseek/data/wktype_pooling_config.xlsx",
         efficiency_correction_path: str = "/data/work/yuyongpeng/liblane_v2_deepseek/data/production_efficiency_correction.csv",
@@ -389,7 +389,7 @@ class PoolingCoefficientOptimizer:
            小文库额外补偿
         6. 转换为系数返回（系数 = 下单量 / 合同量）
         """
-        from core.ai.pooling_predictor import PoolingPredictor
+        from arrange_library.core.ai.pooling_predictor import PoolingPredictor
         pooling_predictor = PoolingPredictor()
 
         # 大文库调整系数梯度抑制配置
@@ -523,7 +523,7 @@ class PoolingCoefficientOptimizer:
                     final_order_amount = base_order_amount * adjustment_factor
 
                     # 从LIBRARY_TYPE_CONFIG获取类型效率系数来决定补偿力度
-                    from core.ai.pooling_predictor import LIBRARY_TYPE_CONFIG
+                    from arrange_library.core.ai.pooling_predictor import LIBRARY_TYPE_CONFIG
                     type_eff = LIBRARY_TYPE_CONFIG.get(sample_type, {}).get(
                         'efficiency_factor', 1.0
                     )

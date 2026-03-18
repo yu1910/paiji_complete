@@ -49,14 +49,14 @@ setup_liblane_paths()
 
 from loguru import logger
 
-from .models.library_info import EnhancedLibraryInfo, MachineType
-from .core.config.scheduling_config import get_scheduling_config
-from .core.constraints.lane_validator import ValidationRuleType, ValidationError, ValidationSeverity
-from .core.data import load_libraries_from_csv
-from .core.preprocessing.rule_constrained_strategy_planner import StrategyExecutionPlan
-from .core.scheduling.greedy_lane_scheduler import GreedyLaneScheduler, GreedyLaneConfig
-from .core.scheduling.package_lane_scheduler import PackageLaneScheduler
-from .core.scheduling.scheduling_types import LaneAssignment
+from arrange_library.models.library_info import EnhancedLibraryInfo, MachineType
+from arrange_library.core.config.scheduling_config import get_scheduling_config
+from arrange_library.core.constraints.lane_validator import ValidationRuleType, ValidationError, ValidationSeverity
+from arrange_library.core.data import load_libraries_from_csv
+from arrange_library.core.preprocessing.rule_constrained_strategy_planner import StrategyExecutionPlan
+from arrange_library.core.scheduling.greedy_lane_scheduler import GreedyLaneScheduler, GreedyLaneConfig
+from arrange_library.core.scheduling.package_lane_scheduler import PackageLaneScheduler
+from arrange_library.core.scheduling.scheduling_types import LaneAssignment
 
 # prediction_delivery 作为独立包依赖，由 pip 安装后直接导入
 from prediction_delivery import MODELS_DIR, predict_pooling
