@@ -1903,6 +1903,12 @@ def _build_detail_output(
     )
     merged.loc[lane_assigned_mask & missing_lcxms_mask, "lcxms"] = "3.6T-NEW"
 
+    # 成Lane(有laneid)的文库，标记lanecreatetype为AI
+    if "lanecreatetype" not in merged.columns:
+        merged["lanecreatetype"] = pd.NA
+    _ensure_object_column(merged, "lanecreatetype")
+    merged.loc[lane_assigned_mask, "lanecreatetype"] = "AI"
+
     # AI排机次数：默认0，AI可排文库统一+1（无论是否成lane）
     if "aiarrangenumber" not in merged.columns:
         merged["aiarrangenumber"] = 0
