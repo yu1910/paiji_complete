@@ -255,14 +255,14 @@ class GeneticAlgorithmConfig:
 @dataclass
 class LibrarySplitConfig:
     """文库拆分配置"""
-    # 自动拆分阈值（单个index对）- 3.6T-NEW模式
-    auto_split_threshold_gb: float = 80.0
-    # 手工拆分阈值 - 1.0模式
-    manual_split_threshold_gb: float = 100.0
+    # 非1.0模式 + 单index：单文库合同量 >100G 触发拆分
+    single_index_non_1_0_threshold_gb: float = 100.0
+    # 1.0模式 + 单index：单文库合同量 >200G 触发拆分
+    single_index_mode_1_0_threshold_gb: float = 200.0
+    # 多index：单文库合同量 >300G 触发拆分
+    multi_index_threshold_gb: float = 300.0
     # 拆分后最小数据量
     min_split_size_gb: float = 2.0
-    # 拆分后单个文库最大建议数据量
-    max_single_split_size_gb: float = 80.0
     # 大数据量文库阈值
     large_data_threshold_gb: float = 70.0
 

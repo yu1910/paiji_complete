@@ -1172,7 +1172,7 @@ rules:
 
   - rule_id: "R16"
     rule_name: "文库拆分规则"
-    description: "1.0模式（手工/常规产线S）：默认不拆分，单条文库最大上限200G；3.6T-NEW模式（自动产线Z/ZS）：拆分阈值=Index对数×80G，需拆分时优先对半拆分"
+    description: "非1.0模式单index超过100G拆分；1.0模式单index超过200G拆分；多index超过300G拆分；触发后优先按对半方式持续拆分，直到片段不超过阈值"
     priority: "high"
     compliance_target: 0.95
     doc_section: "文库标签分类规则"
@@ -1183,30 +1183,32 @@ rules:
         mode_1_0:
           description: "1.0模式（手工/常规产线 S）"
           rules:
-            - "默认不拆分"
-            - "单条文库最大上限 200G"
-            - "即便超过 80G 也不触发拆分逻辑"
-        mode_3_6t_new:
-          description: "3.6T-NEW 模式（自动产线 Z/ZS）"
+            - "单index 文库合同量 >200G 时触发拆分"
+        non_1_0_single_index:
+          description: "非1.0模式 + 单index"
           rules:
-            - "仅在该模式下执行自动拆分"
-            - "遵循 Index 对数×80G 的动态阈值"
-      splitting_conditions_3_6t_new:
+            - "合同量 >100G 时触发拆分"
+        multi_index:
+          description: "多index 文库"
+          rules:
+            - "合同量 >300G 时触发拆分"
+      splitting_conditions:
         - condition: "包Lane / 包FC / 指定 Lane 文库"
           action: "保持原有指定，不拆分"
         - condition: "阈值计算"
-          formula: "拆分阈值 = Index 对数 × 80G"
+          formula: "非1.0单index=100G；1.0单index=200G；多index=300G"
           examples:
-            - "1 对 Index → 80G"
-            - "2 对 Index → 160G"
-            - "n 对 Index → n×80G"
+            - "非1.0单index：100G以内不拆，超过100G拆分"
+            - "1.0单index：200G以内不拆，超过200G拆分"
+            - "多index：300G以内不拆，超过300G拆分"
         - condition: "触发拆分"
-          description: "当合同数据量 ≥ 阈值且满足自动产线条件时，判定为「需拆分」"
+          description: "当合同数据量严格大于对应阈值时，判定为「需拆分」"
         - condition: "拆分方式"
-          description: "优先对半拆分（1→2），拆分后的每条子文库需要 >2G，除数据量外其他字段保持一致"
+          description: "优先对半拆分（1→2→4→8），直到每个子片段不超过对应阈值；拆分后的每条子文库需要 >2G，除数据量外其他字段保持一致"
       splitting_impact:
-        - "手工文库（1.0模式）拆分阈值：❌（不拆分）"
-        - "自动文库（3.6T-NEW模式）拆分阈值：Index 对数 × 80G"
+        - "非1.0模式单index拆分阈值：100G"
+        - "1.0模式单index拆分阈值：200G"
+        - "多index拆分阈值：300G"
         - "受样本取样体积影响时，可在保持「优先对半」原则下进行人工复核"
 
   - rule_id: "R21"
@@ -1419,9 +1421,8 @@ documentation:
   last_sync_date: "2025-11-26"
   sync_notes: |
     配置从文档同步，确保一致性。主要更新内容（2025-11-26）：
-    1. 更新R16（文库拆分规则）：区分1.0模式（手工S，默认不拆分，上限200G）和3.6T-NEW模式（自动Z/ZS，阈值=Index对数×80G）
+    1. 更新R16（文库拆分规则）：统一为非1.0单index阈值100G、1.0单index阈值200G、多index阈值300G，并保持对半拆分
     2. 更新R17（特殊处理标签规则）：添加包Lane前置校验（数据量≥1000G且Index对数≥5）
     3. 更新R7（碱基不均衡）：区分常规场景（<40%）和3.6T-NEW模式（≤30%），确认分组29规则（分组27占比≤20%）
     4. 添加R5A（加测文库比例限制）：同一条Lane中，加测文库合同数据量占比≤25%且允许额外10G缓冲
     5. 更新浓度规则和Pooling调整规则
-
