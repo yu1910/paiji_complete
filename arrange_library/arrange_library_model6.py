@@ -1505,6 +1505,8 @@ def _auto_fix_lane_for_customer_and_10bp(
     added_libs: List[EnhancedLibraryInfo] = []
     metadata_after = dict(metadata)
     machine_type = lane.machine_type.value if lane.machine_type else "Nova X-25B"
+    customer_ratio_limit = 0.50
+    index_10bp_ratio_min = 0.40
     min_allowed, max_allowed = _resolve_lane_capacity_limits(
         libraries=working_libs,
         machine_type=machine_type,
@@ -1546,7 +1548,7 @@ def _auto_fix_lane_for_customer_and_10bp(
         data_total = _total_data(working_libs)
         need_non_cust = 0.0
         if data_customers > 0 or data_non_customers > 0:
-            target_non_cust = max(data_non_customers, data_customers / strict_validator.CUSTOMER_RATIO_LIMIT - data_customers)
+            target_non_cust = max(data_non_customers, data_customers / customer_ratio_limit - data_customers)
             need_non_cust = max(0.0, target_non_cust - data_non_customers)
         pool_non_cust_count = sum(1 for lib in unassigned_pool if not _is_customer_like_validator(lib))
         pool_non_cust_data = sum(float(getattr(lib, "contract_data_raw", 0) or 0) for lib in unassigned_pool if not _is_customer_like_validator(lib))
@@ -1580,7 +1582,7 @@ def _auto_fix_lane_for_customer_and_10bp(
                     data_total -= freed
                     room += freed
                     data_non_customers = _total_data(non_customers)
-                    target_non_cust = max(data_non_customers, data_customers / strict_validator.CUSTOMER_RATIO_LIMIT - data_customers)
+                    target_non_cust = max(data_non_customers, data_customers / customer_ratio_limit - data_customers)
                     need_non_cust = max(0.0, target_non_cust - data_non_customers)
             picked = _pick_from_pool(unassigned_pool, lambda x: not _is_customer_like_validator(x), need_non_cust, data_total)
         logger.info(f"Lane {lane.lane_id} 实际挑选非客户文库: {len(picked)}个")
@@ -1687,8 +1689,8 @@ def _auto_fix_lane_for_customer_and_10bp(
                 return working_libs, removed_libs
         if data_10bp > 0 and data_non_10bp > 0:
             ratio = data_10bp / (data_10bp + data_non_10bp)
-            if ratio < strict_validator.INDEX_10BP_RATIO_MIN:
-                need_extra_10bp = max(0.0, strict_validator.INDEX_10BP_RATIO_MIN * data_non_10bp / (1 - strict_validator.INDEX_10BP_RATIO_MIN) - data_10bp)
+            if ratio < index_10bp_ratio_min:
+                need_extra_10bp = max(0.0, index_10bp_ratio_min * data_non_10bp / (1 - index_10bp_ratio_min) - data_10bp)
                 picked = _pick_from_pool(unassigned_pool, lambda x: strict_validator._is_10bp_index(getattr(x, "index_seq", "") or "") or (getattr(x, "ten_bp_data", None) or 0) > 0, need_extra_10bp, total_data)
                 if picked:
                     cand_libs = working_libs + picked
@@ -2025,6 +2027,14 @@ def load_standardized_csv(data_file: str, limit: int | None = None) -> List[Enha
             lib = EnhancedLibraryInfo.from_csv_row(row_dict)
             # 设置机型
             lib.machine_type = _resolve_machine_type_enum_simple(lib.eq_type)
+            # 保留拆分相关原始字段，供lane_show与拆分Lane识别使用
+            raw_wkissplit = _safe_str(row_dict.get("wkissplit"), default="")
+            lib.wkissplit = raw_wkissplit
+            if getattr(lib, "is_split", None) is None and _is_yes_value(raw_wkissplit):
+                lib.is_split = True
+            raw_split_status = _safe_str(row_dict.get("split_status"), default="")
+            if raw_split_status:
+                lib.split_status = raw_split_status
             # 保存origrec_key与AI可排标识，供主流程与明细规则使用
             lib._origrec_key = _safe_str(
                 row_dict.get("wkorigrec")

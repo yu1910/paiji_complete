@@ -23,12 +23,11 @@ class LibrarySplitter:
     MODE_OTHER = "other"
 
     def __init__(self):
-        # 从配置加载拆分参数，支持动态调整
         split_config = get_library_split_config()
-        self.auto_split_threshold = split_config.auto_split_threshold_gb
-        self.manual_split_threshold = split_config.manual_split_threshold_gb
+        self.single_index_non_1_0_threshold = split_config.single_index_non_1_0_threshold_gb
+        self.single_index_mode_1_0_threshold = split_config.single_index_mode_1_0_threshold_gb
+        self.multi_index_threshold = split_config.multi_index_threshold_gb
         self.min_split_size = split_config.min_split_size_gb
-        self.max_single_split_size = split_config.max_single_split_size_gb
         
     def split_libraries(self, libraries: List[EnhancedLibraryInfo]) -> Tuple[List[EnhancedLibraryInfo], List[dict]]:
         """
@@ -42,7 +41,13 @@ class LibrarySplitter:
         """
         logger.info("=" * 60)
         logger.info("[拆分] 开始文库拆分预处理")
-        logger.info(f"  自动拆分阈值: >{self.auto_split_threshold}G")
+        logger.info(
+            "  拆分规则: 非1.0单index >{}G；1.0单index >{}G；多index >{}G".format(
+                self.single_index_non_1_0_threshold,
+                self.single_index_mode_1_0_threshold,
+                self.multi_index_threshold,
+            )
+        )
         logger.info(f"  最小保留数据量: >{self.min_split_size}G")
         
         processed_libraries = []
@@ -88,11 +93,9 @@ class LibrarySplitter:
         """判断是否需要拆分
 
         新规则：
-        1. 新index数目 = min(实际index数目, 3)
-        2. 单index合同量 = 原始合同数据量 / 新index数目
-        3. 模式阈值：
-           - 1.0模式：单index合同量 > 200 才拆分
-           - 非1.0模式：单index合同量 > 100 才拆分
+        1. 非1.0模式单index合同数据量 > 100G 时拆分
+        2. 1.0模式单index合同数据量 > 200G 时拆分
+        3. 多index合同数据量 > 300G 时拆分
         """
         # 1. 包Lane/包FC/指定Lane不拆分
         if self._has_fixed_lane_binding(lib):
@@ -107,27 +110,30 @@ class LibrarySplitter:
         if data_amount <= 0:
             return False
 
-        # 3. 按新规则计算拆分阈值
-        actual_index_count = self._count_index_pairs(lib)
-        effective_index_count = min(actual_index_count, 3)
-        mode = self._detect_sequence_mode(lib)
-        single_index_threshold = 200.0 if mode == self.MODE_ONE_POINT_ZERO else 100.0
-        single_index_data = data_amount / effective_index_count
+        rule_label, max_data_per_fragment = self._resolve_split_rule(lib)
 
-        should_split = single_index_data > single_index_threshold
+        should_split = data_amount > max_data_per_fragment
         if should_split:
             logger.debug(
-                "  文库 {} 触发拆分: 合同量={}G, 实际index={}, 新index={}, 单index={}G, 模式={}, 阈值={}G".format(
+                "  文库 {} 触发拆分: 合同量={}G, 规则={}, 阈值={}G".format(
                     lib.origrec,
                     round(data_amount, 3),
-                    actual_index_count,
-                    effective_index_count,
-                    round(single_index_data, 3),
-                    mode,
-                    single_index_threshold,
+                    rule_label,
+                    round(max_data_per_fragment, 3),
                 )
             )
         return should_split
+
+    def _resolve_split_rule(self, lib: EnhancedLibraryInfo) -> Tuple[str, float]:
+        """根据业务规则解析拆分阈值。"""
+        index_count = self._count_index_pairs(lib)
+        if index_count > 1:
+            return "multi_index", self.multi_index_threshold
+
+        mode = self._detect_sequence_mode(lib)
+        if mode == self.MODE_ONE_POINT_ZERO:
+            return "single_index_mode_1.0", self.single_index_mode_1_0_threshold
+        return "single_index_mode_other", self.single_index_non_1_0_threshold
 
     def _count_index_pairs(self, lib: EnhancedLibraryInfo) -> int:
         """计算index对数
@@ -190,23 +196,22 @@ class LibrarySplitter:
 
         规则：
         - 优先对半拆分（拆成2份）
-        - 拆分后每个子文库应尽量满足当前模式下单index合同量阈值
+        - 拆分后每个子文库应尽量满足当前拆分规则阈值
         - 确保每个子文库数据量在合理范围内
         """
         data_amount = float(lib.contract_data_raw)
 
-        mode = self._detect_sequence_mode(lib)
-        single_index_threshold = 200.0 if mode == self.MODE_ONE_POINT_ZERO else 100.0
-        effective_index_count = min(self._count_index_pairs(lib), 3)
+        rule_label, max_data_per_fragment = self._resolve_split_rule(lib)
 
         # 计算需要拆分成多少份（优先对半，份数为2的幂次）
         split_count = self._calculate_split_count(
             data_amount=data_amount,
-            effective_index_count=effective_index_count,
-            single_index_threshold=single_index_threshold,
+            max_data_per_fragment=max_data_per_fragment,
         )
 
-        logger.debug(f"  文库 {lib.origrec} ({data_amount}G) 需拆分为 {split_count} 份")
+        logger.debug(
+            f"  文库 {lib.origrec} ({data_amount}G) 按规则 {rule_label} 需拆分为 {split_count} 份"
+        )
 
         split_libs = []
         split_data_amount = data_amount / split_count
@@ -236,6 +241,7 @@ class LibrarySplitter:
                 new_aidbid = str(uuid.uuid4())
             new_lib.wkaidbid = new_aidbid
             new_lib.aidbid = new_aidbid
+            new_lib._split_source_library = lib
             split_libs.append(new_lib)
         
         return split_libs
@@ -243,20 +249,17 @@ class LibrarySplitter:
     def _calculate_split_count(
         self,
         data_amount: float,
-        effective_index_count: int,
-        single_index_threshold: float,
+        max_data_per_fragment: float,
     ) -> int:
         """计算拆分份数（优先对半拆分，份数为2的幂次）
 
         Args:
             data_amount: 原始数据量（G）
-            effective_index_count: 新index数目（封顶3）
-            single_index_threshold: 模式阈值（1.0=200，非1.0=100）
+            max_data_per_fragment: 单个拆分片段允许的最大合同数据量
 
         Returns:
             int: 拆分份数
         """
-        max_data_per_fragment = single_index_threshold * max(effective_index_count, 1)
         if data_amount <= max_data_per_fragment:
             return 1
 
@@ -273,4 +276,3 @@ class LibrarySplitter:
             split_count = split_count // 2
 
         return max(2, split_count)  # 至少拆成2份
-

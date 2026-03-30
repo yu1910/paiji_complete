@@ -397,20 +397,33 @@ class GreedyLaneScheduler:
             return SchedulingSolution(lane_assignments=[], unassigned_libraries=[])
         
         logger.info(f"开始逐Lane贪心排机 - 文库数: {len(libraries)}")
+
+        # 0. 先按业务规则执行文库拆分，再进入后续排机分析与调度
+        working_libraries, split_records = self.library_splitter.split_libraries(libraries)
+        presplit_family_context = self._build_presplit_family_context(working_libraries)
+        if split_records:
+            logger.info(
+                "预拆分完成: 原始文库{}个，触发拆分{}个，拆分后文库{}个",
+                len(libraries),
+                len(split_records),
+                len(working_libraries),
+            )
+        else:
+            logger.info("预拆分完成: 无需拆分")
         
-        # 0. 全局规则分析 - 在排机前对整批文库做全局特征分析
-        self._batch_analysis_report = self._run_batch_analysis(libraries)
+        # 1. 全局规则分析 - 在排机前对整批文库做全局特征分析
+        self._batch_analysis_report = self._run_batch_analysis(working_libraries)
         
-        # 1. 按优先级和数据量排序文库
-        sorted_libs = self._sort_libraries(libraries)
+        # 2. 按优先级和数据量排序文库
+        sorted_libs = self._sort_libraries(working_libraries)
         
-        # 2. 按机器类型分组
+        # 3. 按机器类型分组
         machine_groups = self._group_by_machine_type(sorted_libs)
         
         all_lanes: List[LaneAssignment] = []
         unassigned: List[EnhancedLibraryInfo] = []
         
-        # 3. 对每个机器类型组进行排机
+        # 4. 对每个机器类型组进行排机
         for machine_type, libs in machine_groups.items():
             machine_type_enum = self._resolve_machine_type_enum(machine_type, libs)
             machine_type_key = (
@@ -867,16 +880,17 @@ class GreedyLaneScheduler:
             )
             all_lanes.extend(new_lanes)
 
-        # ===== 统一拆分策略：按需事务化拆分（仅全部子文库可被Lane消耗时才提交） =====
-        if unassigned and all_lanes:
-            unassigned, committed_split_records = self._apply_deferred_atomic_split(
-                unassigned=unassigned,
+        # 统一回滚预拆分文库：任一拆分家族未全部成Lane，则整组回滚为原始文库
+        if presplit_family_context:
+            all_lanes, unassigned, rollback_records = self._rollback_incomplete_presplit_families(
                 lanes=all_lanes,
+                unassigned=unassigned,
+                family_context=presplit_family_context,
             )
-            if committed_split_records:
+            if rollback_records:
                 logger.info(
-                    "按需拆分提交完成: {}个原始文库被拆分并全部消耗",
-                    len(committed_split_records),
+                    "预拆分回滚完成: {}个原始文库因子片段未全部成Lane而回滚",
+                    len(rollback_records),
                 )
 
         # 3.5 Pooling优化（不改变Lane组成，仅调整系数）
@@ -911,6 +925,89 @@ class GreedyLaneScheduler:
         # 恢复基础配置，避免跨次排机污染
         self.config = self._base_config
         return solution
+
+    def _build_presplit_family_context(
+        self,
+        libraries: List[EnhancedLibraryInfo],
+    ) -> Dict[str, Dict[str, object]]:
+        """从预拆分后的文库列表中提取拆分家族上下文。"""
+        family_context: Dict[str, Dict[str, object]] = {}
+        for lib in libraries:
+            family_id = str(getattr(lib, "original_library_id", "") or "").strip()
+            if not family_id:
+                continue
+            total_fragments = int(getattr(lib, "total_fragments", 0) or 0)
+            if total_fragments <= 1:
+                continue
+            family_entry = family_context.setdefault(
+                family_id,
+                {
+                    "expected_fragments": total_fragments,
+                    "source_library": getattr(lib, "_split_source_library", None),
+                },
+            )
+            if family_entry.get("source_library") is None:
+                family_entry["source_library"] = getattr(lib, "_split_source_library", None)
+            family_entry["expected_fragments"] = max(
+                int(family_entry.get("expected_fragments", 0) or 0),
+                total_fragments,
+            )
+        return family_context
+
+    def _rollback_incomplete_presplit_families(
+        self,
+        lanes: List[LaneAssignment],
+        unassigned: List[EnhancedLibraryInfo],
+        family_context: Dict[str, Dict[str, object]],
+    ) -> Tuple[List[LaneAssignment], List[EnhancedLibraryInfo], List[Dict[str, object]]]:
+        """若预拆分家族未全部成Lane，则移除其片段并恢复原始文库。"""
+        if not family_context:
+            return lanes, unassigned, []
+
+        assigned_fragments: Dict[str, List[Tuple[LaneAssignment, EnhancedLibraryInfo]]] = {}
+        for lane in lanes:
+            for lib in list(lane.libraries):
+                family_id = str(getattr(lib, "original_library_id", "") or "").strip()
+                if family_id and family_id in family_context:
+                    assigned_fragments.setdefault(family_id, []).append((lane, lib))
+
+        unassigned_fragments: Dict[str, List[EnhancedLibraryInfo]] = {}
+        remaining_unassigned: List[EnhancedLibraryInfo] = []
+        for lib in unassigned:
+            family_id = str(getattr(lib, "original_library_id", "") or "").strip()
+            if family_id and family_id in family_context:
+                unassigned_fragments.setdefault(family_id, []).append(lib)
+                continue
+            remaining_unassigned.append(lib)
+
+        rollback_records: List[Dict[str, object]] = []
+        restored_originals: List[EnhancedLibraryInfo] = []
+        for family_id, context in family_context.items():
+            expected_fragments = int(context.get("expected_fragments", 0) or 0)
+            assigned_count = len(assigned_fragments.get(family_id, []))
+            pending_count = len(unassigned_fragments.get(family_id, []))
+            if expected_fragments <= 0 or (assigned_count == expected_fragments and pending_count == 0):
+                continue
+
+            for lane, lib in assigned_fragments.get(family_id, []):
+                lane.remove_library(lib)
+
+            source_library = context.get("source_library")
+            if source_library is not None:
+                restored_originals.append(source_library)
+
+            rollback_records.append(
+                {
+                    "family_id": family_id,
+                    "expected_fragments": expected_fragments,
+                    "assigned_fragments": assigned_count,
+                    "pending_fragments": pending_count,
+                }
+            )
+
+        filtered_lanes = [lane for lane in lanes if lane.libraries]
+        final_unassigned = remaining_unassigned + restored_originals
+        return filtered_lanes, final_unassigned, rollback_records
 
     def _try_assign_split_fragments_atomically(
         self,
@@ -1219,6 +1316,7 @@ class GreedyLaneScheduler:
         machine_type_enum = self._resolve_machine_type_enum(machine_type, imbalance_libs)
         if machine_type_enum == MachineType.UNKNOWN:
             machine_type_enum = MachineType.NOVA_X_25B
+        machine_type_str = machine_type_enum.value if isinstance(machine_type_enum, MachineType) else str(machine_type)
         
         customer_imbalance, internal_imbalance = self._split_imbalance_by_customer(imbalance_libs)
 

@@ -642,19 +642,42 @@ class RuleChecker:
     # ========== 规则19：文库拆分规则（预处理） ==========
     def check_need_split(self, lib: Dict) -> bool:
         """检查文库是否需要拆分
-        
-        自动线阈值：80G
-        手工线阈值：100G
+
+        规则：
+        - 非1.0模式单index >100G
+        - 1.0模式单index >200G
+        - 多index >300G
         """
         contract_vol = lib.get('合同数据量_文库', 0)
-        production_line = lib.get('产线标识', 'S')
         
         if not contract_vol or pd.isna(contract_vol):
             return False
         
         try:
             vol = float(contract_vol)
-            threshold = 80 if production_line == 'Z' else 100
+            index_seq = (
+                lib.get('index_seq')
+                or lib.get('Index序列')
+                or lib.get('index序列')
+                or ''
+            )
+            index_pairs = [seg.strip() for seg in str(index_seq).split(',') if seg.strip()]
+            index_count = max(len(index_pairs), 1)
+
+            if index_count > 1:
+                threshold = 300.0
+            else:
+                mode_candidates = [
+                    lib.get('lane_sj_mode'),
+                    lib.get('current_seq_mode'),
+                    lib.get('测序模式'),
+                    lib.get('测序策略'),
+                    lib.get('cxms'),
+                    lib.get('工序'),
+                    lib.get('test_no'),
+                ]
+                is_mode_1_0 = any('1.0' in str(value).strip().lower() for value in mode_candidates if value is not None)
+                threshold = 200.0 if is_mode_1_0 else 100.0
             return vol > threshold
         except (ValueError, TypeError):
             return False
@@ -1537,4 +1560,3 @@ if __name__ == '__main__':
     logger.info("综合Lane级别规则测试")
     logger.info("=" * 60)
     test_all_lane_rules()
-
