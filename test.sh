@@ -1,4 +1,4 @@
-python "test_full_pipeline_with_model3_copy_v6_copy.py" \
+python "/data/work/yuyongpeng/liblane_v2_deepseek/paiji_complete/arrange_library/arrange_library_model6.py" \
   --mode arrange \
-  --data-file "./2026-03-06_v1_dataDeal.csv" \
-  --output-file "./2026-03-06_v1_arrange-2.csv"
+  --data-file "./59_sta.csv" \
+  --output-file "./59_sta_arrange.csv"
