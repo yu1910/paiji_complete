@@ -41,8 +41,11 @@ warnings.filterwarnings(
     message="DataFrame is highly fragmented.  This is usually the result of calling `frame.insert` many times, which has poor performance.",
 )
 
-# 添加项目路径（包内：当前文件所在目录即 arrange_library 根）
-sys.path.insert(0, str(Path(__file__).parent))
+# 添加项目路径（包外：将 arrange_library 的上一级目录加入 sys.path）
+# 这样 `from arrange_library...` 的绝对导入在脚本直跑场景下也稳定可用。
+package_parent_dir = str(Path(__file__).resolve().parent.parent)
+if package_parent_dir not in sys.path:
+    sys.path.insert(0, package_parent_dir)
 
 # from arrange_library.liblane_paths import setup_liblane_paths
 
