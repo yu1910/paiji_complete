@@ -1510,9 +1510,12 @@ class GreedyLaneScheduler:
 
                     effective_total = lane.total_data_gb + balance_data
                     utilization = effective_total / self.config.lane_capacity_gb if self.config.lane_capacity_gb > 0 else 0.0
+                    lane_machine_type_str = (
+                        lane.machine_type.value if lane.machine_type else machine_type_str
+                    )
                     _, max_allowed = self._resolve_lane_capacity_limits(
                         lane.libraries,
-                        machine_type_str,
+                        lane_machine_type_str,
                         lane=lane,
                     )
                     if effective_total > max_allowed + 1e-6:

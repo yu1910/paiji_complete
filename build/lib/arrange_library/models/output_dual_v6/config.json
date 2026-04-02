@@ -1,0 +1,12 @@
+{
+  "model_type": "V6产出双阶段模型",
+  "stage1": "回归预测产出 loutput",
+  "stage2": "分类预测达标概率 P(loutput/wkcontractdata>=1)",
+  "segmentation": "按下单量阈值分段：7.0G",
+  "focus_sampletypes": [
+    "VIP-真核普通转录组文库",
+    "全基因组文库",
+    "宏转录组",
+    "客户-全基因组文库"
+  ]
+}
