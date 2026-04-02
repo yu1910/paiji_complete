@@ -108,7 +108,7 @@ class EnhancedLibraryInfo:
     # === 机器和数据量信息 ===
     eq_type: str                          # EQTYPE - 机器类型
     contract_data_raw: float              # CONTRACTDATA_RAW - 合同数据量
-    test_code: int                        # TESTCODE - 测序编码
+    test_code: Optional[int]              # TESTCODE - 测序编码
     test_no: str                          # TESTNO - 测序策略
     
     # === 项目和合同信息 ===
@@ -1638,7 +1638,7 @@ class EnhancedLibraryInfo:
             # 机器和数据量信息
             'eq_type': eq_type,
             'contract_data_raw': contract_data,
-            'test_code': pick_int(['TESTCODE', 'testcode'], 1001),
+            'test_code': pick_int(['TESTCODE', 'testcode'], None),
             'test_no': pick_str(['TESTNO', 'testno', 'wktestno'], 'PE150'),
             
             # 项目和合同信息

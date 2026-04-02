@@ -1,18 +1,20 @@
 """
 包Lane/FC排机程序
 创建时间：2025-12-02 17:40:00
-更新时间：2026-03-06 13:55:15
+更新时间：2026-04-02 00:00:00
 
 依据《排机流程规划》步骤二.1实现：
 - 根据包Lane编号/Lane ID/FC/RunCycle进行固定分组
-- 容量校验：包Lane数据量975G±10G（965G-985G）
+- 容量校验：包Lane数据量1000G±0.01G（999.99G-1000.01G）
 - Index校验：校验Lane内Index冲突
 - 成Lane：生成Lane分配结果
 - Pooling：计算Pooling系数
 - 计算：计算取样体积
 """
 
-from dataclasses import dataclass, field
+import copy
+import uuid
+from dataclasses import dataclass, field, replace
 from enum import Enum
 from typing import List, Dict, Optional, Tuple, Set
 from collections import defaultdict
@@ -26,7 +28,7 @@ from arrange_library.core.ai.pooling_coefficient_optimizer import (
     PoolingCoefficientOptimizer,
     PoolingOptimizationResult,
 )
-from arrange_library.core.config.scheduling_config import get_scheduling_config
+from arrange_library.core.config.scheduling_config import LaneRuleSelection, get_scheduling_config
 from arrange_library.models.library_info import EnhancedLibraryInfo
 from arrange_library.core.preprocessing.base_imbalance_handler import BaseImbalanceHandler
 
@@ -96,21 +98,34 @@ class PackageSchedulingResult:
         }
 
 
+@dataclass
+class MultiPackageLaneSplitFamily:
+    """单个文库多包Lane编号拆分后的家族信息。"""
+    family_id: str
+    source_library: EnhancedLibraryInfo
+    target_package_lane_numbers: List[str]
+    raw_package_lane_number: str
+
+    @property
+    def total_fragments(self) -> int:
+        return len(self.target_package_lane_numbers)
+
+
 class PackageLaneScheduler:
     """包Lane/FC排机程序
     
     依据《排机流程规划》实现包Lane、包FC的固定分组排机：
     1. 根据包Lane编号/Lane ID/FC/RunCycle进行固定分组
-    2. 容量校验：包Lane数据量975G±10G（965G-985G）
+    2. 容量校验：包Lane数据量1000G±5G（995G-1005G）
     3. Index校验：校验Lane内Index冲突
     4. 生成Lane分配结果
     """
     
-    # 包Lane容量配置（975G±10G）
-    PACKAGE_LANE_TARGET_GB = 975.0    # 包Lane目标数据量
-    PACKAGE_LANE_TOLERANCE_GB = 10.0  # 包Lane数据量浮动范围
-    PACKAGE_LANE_MIN_GB = 965.0       # 包Lane最小数据量（975-10）
-    PACKAGE_LANE_MAX_GB = 985.0       # 包Lane最大数据量（975+10）
+    # 包Lane容量配置（1000G±0.01G）
+    PACKAGE_LANE_TARGET_GB = 1000.0
+    PACKAGE_LANE_TOLERANCE_GB = 0.01
+    PACKAGE_LANE_MIN_GB = 999.99
+    PACKAGE_LANE_MAX_GB = 1000.01
     
     # 普通Lane最大数据量（GB）- 用于其他类型的Lane
     MAX_LANE_CAPACITY_GB = 1000.0
@@ -131,8 +146,59 @@ class PackageLaneScheduler:
         self._run_counter = 0
         self.pooling_optimizer = pooling_optimizer or PoolingCoefficientOptimizer()
         self.scheduling_config = get_scheduling_config()
+        # 包Lane规则由当前调度器强制收紧，避免受外部配置漂移影响。
+        self.scheduling_config.lane_capacity.package_lane_target = self.PACKAGE_LANE_TARGET_GB
+        self.scheduling_config.lane_capacity.package_lane_tolerance = self.PACKAGE_LANE_TOLERANCE_GB
+        self.scheduling_config.lane_capacity.package_lane_min = self.PACKAGE_LANE_MIN_GB
+        self.scheduling_config.lane_capacity.package_lane_max = self.PACKAGE_LANE_MAX_GB
         self.imbalance_handler = BaseImbalanceHandler()
         logger.info("包Lane/FC排机程序初始化完成")
+
+    def _get_package_lane_capacity_range(self, machine_type: str) -> LaneRuleSelection:
+        """包lane优先走专属容量规则，不复用普通混排容量矩阵。"""
+        normalized_machine_type = self.scheduling_config._normalize_text(machine_type)
+        loading_method = ''
+        if '25B' in normalized_machine_type or normalized_machine_type == self.scheduling_config._normalize_text('NovaSeq X Plus'):
+            loading_method = '25B'
+
+        return LaneRuleSelection(
+            rule_code="package_lane_capacity",
+            soft_target_gb=float(self.scheduling_config.lane_capacity.package_lane_target),
+            min_target_gb=float(self.scheduling_config.lane_capacity.package_lane_min),
+            max_target_gb=float(self.scheduling_config.lane_capacity.package_lane_max),
+            tolerance_gb=0.0,
+            effective_min_gb=float(self.scheduling_config.lane_capacity.package_lane_min),
+            effective_max_gb=float(self.scheduling_config.lane_capacity.package_lane_max),
+            lane_count=8,
+            loading_method=loading_method,
+            sequencing_mode='',
+            fc_min_data_gb=0.0,
+            profile={'source': 'lane_capacities.package_lane'},
+        )
+
+    @staticmethod
+    def _apply_scheduling_capacity_cap(selection):
+        """仅在排机阶段收紧标准25B规则上限，不影响LaneValidator。"""
+        rule_code = str(getattr(selection, 'rule_code', '') or '')
+        if rule_code in {'tj_1595_standard_pe150_25b', 'tj_1595_standard_pe150_25b_other'}:
+            selection = replace(
+                selection,
+                max_target_gb=min(float(selection.max_target_gb), 1100.0),
+                effective_max_gb=min(float(selection.effective_max_gb), 1105.0),
+            )
+        return selection
+
+    def _get_scheduling_lane_capacity_range(
+        self,
+        libraries: List[EnhancedLibraryInfo],
+        machine_type: str,
+    ):
+        """获取仅用于排机的容量规则，允许比校验规则更保守。"""
+        selection = self.scheduling_config.get_lane_capacity_range(
+            libraries=libraries,
+            machine_type=machine_type,
+        )
+        return self._apply_scheduling_capacity_cap(selection)
     
     def schedule(self, libraries: List[EnhancedLibraryInfo]) -> PackageSchedulingResult:
         """
@@ -148,15 +214,30 @@ class PackageLaneScheduler:
         logger.info(" 开始包Lane/FC排机")
         logger.info("=" * 60)
         logger.info(f"待排机文库总数: {len(libraries)}")
+
+        prepared_libraries, split_families, preprocessing_failed, preprocessing_unprocessed = (
+            self._expand_multi_package_lane_libraries(libraries)
+        )
         
         # 分离包文库和普通文库
-        package_lane_libs, lane_id_libs, fc_libs, run_cycle_libs, remaining_libs = self._separate_libraries(libraries)
+        package_lane_libs, lane_id_libs, fc_libs, run_cycle_libs, remaining_libs = (
+            self._separate_libraries(prepared_libraries)
+        )
+        remaining_libs.extend(preprocessing_unprocessed)
         
         runs = []
-        failed_packages = {}
+        failed_packages = dict(preprocessing_failed)
         
         # 1. 处理包Lane
         lane_results, failed_lane_packages, unprocessed_lane_libs = self._process_package_lanes(package_lane_libs)
+        lane_results, failed_lane_packages, unprocessed_lane_libs = (
+            self._rollback_incomplete_multi_package_lane_splits(
+                lane_results,
+                failed_lane_packages,
+                unprocessed_lane_libs,
+                split_families,
+            )
+        )
         remaining_libs.extend(unprocessed_lane_libs)
         failed_packages.update(failed_lane_packages)
         
@@ -199,6 +280,318 @@ class PackageLaneScheduler:
         self._print_scheduling_summary(result)
         
         return result
+
+    @staticmethod
+    def _parse_package_lane_numbers(raw_value: Optional[str]) -> List[str]:
+        """解析包Lane编号，支持英文逗号和中文逗号。"""
+        text = str(raw_value or '').strip()
+        if not text:
+            return []
+
+        normalized = text.replace('，', ',').replace('；', ',').replace(';', ',')
+        return [token.strip() for token in normalized.split(',') if token.strip()]
+
+    @staticmethod
+    def _split_contract_data_evenly(total_data: float, split_count: int) -> List[float]:
+        """按份数均分合同数据量，并让最后一份兜底总和误差。"""
+        if split_count <= 1:
+            return [float(total_data)]
+
+        average = float(total_data) / split_count
+        split_values = [average] * split_count
+        split_values[-1] = float(total_data) - average * (split_count - 1)
+        return split_values
+
+    def _build_multi_package_lane_family_id(
+        self,
+        lib: EnhancedLibraryInfo,
+        family_index: int,
+    ) -> str:
+        """构造多包Lane拆分家族唯一标识。"""
+        origrec = str(getattr(lib, 'origrec', '') or '').strip()
+        library_code = str(getattr(lib, 'library_code', '') or '').strip()
+        source_key = origrec or library_code or f"UNKNOWN_{family_index}"
+        return f"PKG_MULTI_{source_key}_{family_index:04d}"
+
+    def _expand_multi_package_lane_libraries(
+        self,
+        libraries: List[EnhancedLibraryInfo],
+    ) -> Tuple[
+        List[EnhancedLibraryInfo],
+        Dict[str, MultiPackageLaneSplitFamily],
+        Dict[str, str],
+        List[EnhancedLibraryInfo],
+    ]:
+        """对逗号分隔的多包Lane编号执行专用拆分。
+
+        仅此场景允许带包Lane编号文库拆分。若配置非法，则原文库保持未排机。
+        """
+        expanded_libraries: List[EnhancedLibraryInfo] = []
+        split_families: Dict[str, MultiPackageLaneSplitFamily] = {}
+        failed_packages: Dict[str, str] = {}
+        unprocessed_libraries: List[EnhancedLibraryInfo] = []
+        family_index = 0
+
+        for lib in libraries:
+            raw_package_lane = getattr(lib, 'package_lane_number', None) or getattr(lib, 'baleno', None)
+            package_lane_numbers = self._parse_package_lane_numbers(raw_package_lane)
+
+            if len(package_lane_numbers) <= 1:
+                if package_lane_numbers:
+                    normalized_pkg = package_lane_numbers[0]
+                    lib.package_lane_number = normalized_pkg
+                    lib.baleno = normalized_pkg
+                    lib.is_package_lane = '是'
+                expanded_libraries.append(lib)
+                continue
+
+            lib.package_lane_number = str(raw_package_lane).strip()
+            lib.baleno = lib.package_lane_number
+            lib.is_package_lane = '是'
+
+            source_label = (
+                str(getattr(lib, 'origrec', '') or '').strip()
+                or str(getattr(lib, 'library_code', '') or '').strip()
+                or f"UNKNOWN_{family_index + 1}"
+            )
+            if len(set(package_lane_numbers)) != len(package_lane_numbers):
+                failed_packages[f"package_lane_multi_{source_label}"] = (
+                    f"文库{source_label}配置了重复包Lane编号{package_lane_numbers}，"
+                    "无法拆分到不同Lane，按原文库不拆分且不排机处理"
+                )
+                unprocessed_libraries.append(lib)
+                logger.warning(
+                    "文库 {} 多包Lane编号存在重复，跳过包Lane拆分: {}",
+                    source_label,
+                    package_lane_numbers,
+                )
+                continue
+
+            family_index += 1
+            family_id = self._build_multi_package_lane_family_id(lib, family_index)
+            split_families[family_id] = MultiPackageLaneSplitFamily(
+                family_id=family_id,
+                source_library=lib,
+                target_package_lane_numbers=list(package_lane_numbers),
+                raw_package_lane_number=str(raw_package_lane).strip(),
+            )
+
+            total_contract_data = float(getattr(lib, 'contract_data_raw', 0.0) or 0.0)
+            split_values = self._split_contract_data_evenly(total_contract_data, len(package_lane_numbers))
+            original_library_id = (
+                str(getattr(lib, 'origrec', '') or '').strip()
+                or str(getattr(lib, 'library_code', '') or '').strip()
+                or family_id
+            )
+            original_aidbid = str(
+                getattr(lib, 'wkaidbid', None) or getattr(lib, 'aidbid', None) or ''
+            ).strip()
+
+            logger.info(
+                "文库 {} 检测到多个包Lane编号 {}，按{}份执行专用拆分",
+                source_label,
+                package_lane_numbers,
+                len(package_lane_numbers),
+            )
+
+            for idx, (package_lane_number, split_value) in enumerate(
+                zip(package_lane_numbers, split_values),
+                start=1,
+            ):
+                fragment = copy.deepcopy(lib)
+                fragment.contract_data_raw = split_value
+                fragment.package_lane_number = package_lane_number
+                fragment.baleno = package_lane_number
+                fragment.is_package_lane = '是'
+                fragment.is_split = True
+                fragment.wkissplit = 'yes'
+                fragment.split_status = 'completed'
+                fragment.wktotalcontractdata = total_contract_data
+                fragment.total_contract_data = total_contract_data
+                fragment.original_library_id = original_library_id
+                fragment.fragment_index = idx
+                fragment.total_fragments = len(package_lane_numbers)
+                fragment.fragment_id = f"{original_library_id}_PKG{idx:03d}"
+                fragment.split_reason = 'package_lane_multi_number'
+                fragment.split_strategy = 'package_lane_multi_number'
+                fragment._split_source_library = lib
+                fragment._package_lane_multi_split = True
+                fragment._package_lane_multi_split_family_id = family_id
+                fragment._package_lane_original_numbers = tuple(package_lane_numbers)
+                fragment._package_lane_original_value = str(raw_package_lane).strip()
+
+                if idx == 1 and original_aidbid:
+                    new_aidbid = original_aidbid
+                else:
+                    new_aidbid = str(uuid.uuid4())
+                fragment.wkaidbid = new_aidbid
+                fragment.aidbid = new_aidbid
+
+                expanded_libraries.append(fragment)
+
+        return expanded_libraries, split_families, failed_packages, unprocessed_libraries
+
+    def _rollback_incomplete_multi_package_lane_splits(
+        self,
+        lane_results: List[LaneResult],
+        failed_packages: Dict[str, str],
+        unprocessed: List[EnhancedLibraryInfo],
+        split_families: Dict[str, MultiPackageLaneSplitFamily],
+    ) -> Tuple[List[LaneResult], Dict[str, str], List[EnhancedLibraryInfo]]:
+        """若多包Lane拆分未全部成功，则整包回滚为原文库且不排机。"""
+        if not split_families:
+            return lane_results, failed_packages, unprocessed
+
+        lane_results_by_package_id = {
+            str(lane.package_id): lane
+            for lane in lane_results
+            if lane.package_type == PackageType.PACKAGE_LANE
+        }
+        rollback_families: Set[str] = set()
+
+        for family_id, family in split_families.items():
+            family_errors: List[str] = []
+            for target_package_id in family.target_package_lane_numbers:
+                lane = lane_results_by_package_id.get(target_package_id)
+                if lane is None:
+                    family_errors.append(f"目标包Lane {target_package_id} 未成功成Lane")
+                    continue
+
+                non_package_lane_libs = [
+                    lib
+                    for lib in lane.libraries
+                    if not str(
+                        getattr(lib, 'package_lane_number', None) or getattr(lib, 'baleno', None) or ''
+                    ).strip()
+                ]
+                if non_package_lane_libs:
+                    family_errors.append(
+                        f"目标包Lane {target_package_id} 混入了{len(non_package_lane_libs)}个非包Lane文库"
+                    )
+                    continue
+
+                matched_fragments = [
+                    lib
+                    for lib in lane.libraries
+                    if getattr(lib, '_package_lane_multi_split_family_id', None) == family_id
+                    and str(getattr(lib, 'package_lane_number', '') or '').strip() == target_package_id
+                ]
+                if len(matched_fragments) != 1:
+                    family_errors.append(
+                        f"目标包Lane {target_package_id} 中匹配片段数异常: {len(matched_fragments)}"
+                    )
+
+            if family_errors:
+                rollback_families.add(family_id)
+                source_label = (
+                    str(getattr(family.source_library, 'origrec', '') or '').strip()
+                    or str(getattr(family.source_library, 'library_code', '') or '').strip()
+                    or family.family_id
+                )
+                failed_packages[f"package_lane_multi_{source_label}"] = (
+                    f"文库{source_label}多包Lane拆分后未全部成功进入目标Lane，"
+                    f"原因: {'；'.join(family_errors)}；按原文库不拆分且不排机处理"
+                )
+
+        changed = True
+        while changed and rollback_families:
+            changed = False
+            rollback_package_ids = {
+                pkg_id
+                for family_id in rollback_families
+                for pkg_id in split_families[family_id].target_package_lane_numbers
+            }
+            for family_id, family in split_families.items():
+                if family_id in rollback_families:
+                    continue
+                if rollback_package_ids.intersection(family.target_package_lane_numbers):
+                    rollback_families.add(family_id)
+                    source_label = (
+                        str(getattr(family.source_library, 'origrec', '') or '').strip()
+                        or str(getattr(family.source_library, 'library_code', '') or '').strip()
+                        or family.family_id
+                    )
+                    failed_packages[f"package_lane_multi_{source_label}"] = (
+                        f"文库{source_label}关联的目标包Lane与回滚包重叠，"
+                        "按规则整家族回滚且不排机"
+                    )
+                    changed = True
+
+        if not rollback_families:
+            return lane_results, failed_packages, unprocessed
+
+        rollback_package_ids = {
+            pkg_id
+            for family_id in rollback_families
+            for pkg_id in split_families[family_id].target_package_lane_numbers
+        }
+
+        retained_lane_results: List[LaneResult] = []
+        rollback_lane_results: List[LaneResult] = []
+        for lane in lane_results:
+            if lane.package_type == PackageType.PACKAGE_LANE and str(lane.package_id) in rollback_package_ids:
+                rollback_lane_results.append(lane)
+            else:
+                retained_lane_results.append(lane)
+
+        final_unprocessed: List[EnhancedLibraryInfo] = []
+        seen_object_ids: Set[int] = set()
+        restored_family_ids: Set[str] = set()
+
+        def add_library(lib: EnhancedLibraryInfo) -> None:
+            object_id = id(lib)
+            if object_id in seen_object_ids:
+                return
+            seen_object_ids.add(object_id)
+            final_unprocessed.append(lib)
+
+        def restore_source_library(family_id: str) -> None:
+            if family_id in restored_family_ids:
+                return
+            restored_family_ids.add(family_id)
+            family = split_families[family_id]
+            source_library = family.source_library
+            source_library.package_lane_number = family.raw_package_lane_number
+            source_library.baleno = family.raw_package_lane_number
+            source_library.is_package_lane = '是'
+            source_library.is_split = False
+            source_library.wkissplit = ''
+            source_library.split_status = 'rolled_back'
+            source_library.fragment_index = None
+            source_library.total_fragments = None
+            source_library.fragment_id = None
+            source_library.split_reason = 'package_lane_multi_number_rollback'
+            source_library.split_strategy = None
+            add_library(source_library)
+
+        def collect_rollback_libraries(libs: List[EnhancedLibraryInfo]) -> None:
+            for lib in libs:
+                family_id = getattr(lib, '_package_lane_multi_split_family_id', None)
+                package_id = str(getattr(lib, 'package_lane_number', '') or '').strip()
+                if family_id in rollback_families:
+                    restore_source_library(family_id)
+                elif package_id in rollback_package_ids:
+                    add_library(lib)
+                else:
+                    add_library(lib)
+
+        collect_rollback_libraries(unprocessed)
+        for lane in rollback_lane_results:
+            collect_rollback_libraries(lane.libraries)
+
+        for package_id in rollback_package_ids:
+            failed_packages.setdefault(
+                f"package_lane_{package_id}",
+                "关联多包Lane编号文库拆分未全部成功，整包回滚且不排机",
+            )
+
+        logger.warning(
+            "多包Lane拆分触发回滚: 家族数={}，影响包Lane数={}",
+            len(rollback_families),
+            len(rollback_package_ids),
+        )
+
+        return retained_lane_results, failed_packages, final_unprocessed
     
     def _separate_libraries(self, libraries: List[EnhancedLibraryInfo]) -> Tuple:
         """分离不同类型的包文库"""
@@ -215,7 +608,8 @@ class PackageLaneScheduler:
             fc_number = getattr(lib, 'fc_number', None) or getattr(lib, 'flowcell_id', None)
             run_cycle = getattr(lib, 'run_cycle', None)
             
-            if is_package_lane and package_lane_number:
+            if package_lane_number:
+                lib.is_package_lane = '是'
                 package_lane_libs.append(lib)
             elif lane_id:
                 lane_id_libs.append(lib)
@@ -247,14 +641,11 @@ class PackageLaneScheduler:
             groups[pkg_number].append(lib)
         
         for pkg_id, libs in groups.items():
-            total_data = sum(float(lib.contract_data_raw or 0) for lib in libs)
+            total_data = self._calculate_total_contract_data(libs)
             machine_types = set(getattr(lib, 'eq_type', '') or '' for lib in libs)
             machine_types.discard('')
             machine_type = list(machine_types)[0] if machine_types else 'Nova X-25B'
-            lane_rule = self.scheduling_config.get_lane_capacity_range(
-                libraries=libs,
-                machine_type=machine_type,
-            )
+            lane_rule = self._get_package_lane_capacity_range(machine_type)
             
             # 包Lane容量校验：优先使用统一规则配置
             if total_data < lane_rule.effective_min_gb or total_data > lane_rule.effective_max_gb:
@@ -273,15 +664,15 @@ class PackageLaneScheduler:
                 failed_packages[f"package_lane_{pkg_id}"] = "；".join(constraint_messages)
                 unprocessed.extend(libs)
                 continue
-            
-            # Index对数校验：所有文库Index对数必须≥5（规则文档Line 80）
-            min_index_pairs = min(self._count_index_pairs(lib) for lib in libs)
-            if min_index_pairs < 5:
+
+            # 包Lane规则：按整条Lane统计Index对总数，需≥5。
+            total_index_pairs = self._count_lane_index_pairs(libs)
+            if total_index_pairs < 5:
                 failed_packages[f"package_lane_{pkg_id}"] = (
-                    f"Index对数不足：最小{min_index_pairs}对，要求≥5对"
+                    f"Index对数不足：当前共{total_index_pairs}对，要求整条包Lane≥5对"
                 )
                 unprocessed.extend(libs)
-                logger.warning(f"包Lane {pkg_id} Index对数不足：最小{min_index_pairs}对（要求≥5对）")
+                logger.warning(f"包Lane {pkg_id} Index对数不足：当前共{total_index_pairs}对（要求整条包Lane≥5对）")
                 continue
             
             # 碱基不均衡限制校验（规则文档Line 81-82）
@@ -336,10 +727,7 @@ class PackageLaneScheduler:
         for lane_id, libs in groups.items():
             total_data = sum(float(lib.contract_data_raw or 0) for lib in libs)
             machine_type = str(getattr(libs[0], 'eq_type', '') or 'Nova X-25B')
-            lane_rule = self.scheduling_config.get_lane_capacity_range(
-                libraries=libs,
-                machine_type=machine_type,
-            )
+            lane_rule = self._get_scheduling_lane_capacity_range(libraries=libs, machine_type=machine_type)
             
             # 容量校验
             if total_data > lane_rule.effective_max_gb:
@@ -395,10 +783,7 @@ class PackageLaneScheduler:
             machine_type = list(machine_types)[0] if machine_types else 'Novaseq'
             
             # 获取FC容量配置
-            lane_rule = self.scheduling_config.get_lane_capacity_range(
-                libraries=libs,
-                machine_type=machine_type,
-            )
+            lane_rule = self._get_scheduling_lane_capacity_range(libraries=libs, machine_type=machine_type)
             fc_config = {
                 'max_data_gb': lane_rule.effective_max_gb * max(lane_rule.lane_count, 1),
                 'lanes': max(lane_rule.lane_count, 1),
@@ -450,10 +835,7 @@ class PackageLaneScheduler:
         for run_cycle, libs in groups.items():
             total_data = sum(float(lib.contract_data_raw or 0) for lib in libs)
             machine_type = str(getattr(libs[0], 'eq_type', '') or 'Nova X-25B')
-            lane_rule = self.scheduling_config.get_lane_capacity_range(
-                libraries=libs,
-                machine_type=machine_type,
-            )
+            lane_rule = self._get_scheduling_lane_capacity_range(libraries=libs, machine_type=machine_type)
             
             # 如果数据量超过单Lane容量，需要分多Lane
             if total_data <= lane_rule.effective_max_gb:
@@ -547,7 +929,7 @@ class PackageLaneScheduler:
         
         for machine_type, machine_lanes in lanes_by_machine.items():
             first_lane_libs = machine_lanes[0].libraries if machine_lanes else []
-            lane_rule = self.scheduling_config.get_lane_capacity_range(
+            lane_rule = self._get_scheduling_lane_capacity_range(
                 libraries=first_lane_libs,
                 machine_type=machine_type,
             )
@@ -654,6 +1036,14 @@ class PackageLaneScheduler:
         
         # 按逗号分隔计算对数
         return lib.index_seq.count(',') + 1
+
+    def _count_lane_index_pairs(self, libraries: List[EnhancedLibraryInfo]) -> int:
+        """统计整条Lane的Index对总数。"""
+        return sum(self._count_index_pairs(lib) for lib in libraries)
+
+    def _calculate_total_contract_data(self, libraries: List[EnhancedLibraryInfo]) -> float:
+        """统计整条Lane合同数据量。"""
+        return sum(float(getattr(lib, 'contract_data_raw', 0.0) or 0.0) for lib in libraries)
     
     def _validate_package_lane_imbalance(
         self, 
@@ -716,4 +1106,3 @@ class PackageLaneScheduler:
             return False, ratio_reason
         
         return True, None
-

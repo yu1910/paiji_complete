@@ -97,11 +97,21 @@ class LibrarySplitter:
         2. 1.0模式单index合同数据量 > 200G 时拆分
         3. 多index合同数据量 > 300G 时拆分
         """
-        # 1. 包Lane/包FC/指定Lane不拆分
+        # 1. 包Lane编号文库绝对禁止拆分
+        if self._has_package_lane_binding(lib):
+            logger.debug(
+                "  文库 {} 存在包Lane编号 {}，禁止拆分".format(
+                    getattr(lib, "origrec", ""),
+                    str(getattr(lib, "package_lane_number", None) or getattr(lib, "baleno", None) or "").strip(),
+                )
+            )
+            return False
+
+        # 2. 包FC/指定Lane不拆分
         if self._has_fixed_lane_binding(lib):
             return False
 
-        # 2. 读取合同量
+        # 3. 读取合同量
         try:
             data_amount = float(lib.contract_data_raw or 0)
         except (ValueError, TypeError):
@@ -153,10 +163,22 @@ class LibrarySplitter:
         pairs = [seg.strip() for seg in index_seq.split(',') if seg.strip()]
         return max(len(pairs), 1)
 
-    def _has_fixed_lane_binding(self, lib: EnhancedLibraryInfo) -> bool:
-        """包Lane/包FC/指定Lane/指定FC文库不进行拆分。"""
+    def _has_package_lane_binding(self, lib: EnhancedLibraryInfo) -> bool:
+        """是否存在包Lane编号。"""
         fields = [
             getattr(lib, "package_lane_number", None),
+            getattr(lib, "baleno", None),
+        ]
+        for value in fields:
+            if value is None:
+                continue
+            if str(value).strip():
+                return True
+        return False
+
+    def _has_fixed_lane_binding(self, lib: EnhancedLibraryInfo) -> bool:
+        """包FC/指定Lane/指定FC文库不进行拆分。"""
+        fields = [
             getattr(lib, "package_fc_number", None),
             getattr(lib, "lane_id", None),
             getattr(lib, "fc_id", None),
