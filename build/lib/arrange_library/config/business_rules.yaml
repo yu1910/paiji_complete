@@ -1,0 +1,1428 @@
+# 业务规则配置文件
+# 创建时间：2025-10-09 10:00:00
+# 更新时间：2025-12-01 10:00:00
+# 对应文档: docs/排机规则文档.md
+# 
+# 规则管理原则:
+# 1. 文档是权威来源，配置从文档同步
+# 2. 代码从配置读取，避免硬编码
+# 3. 定期验证配置与文档一致性
+
+rules:
+  - rule_id: "R1"
+    rule_name: "合同数据量校验"
+    description: "所有工序的Lane数据量基准，根据机器类型、优先级档位和文库类型动态调整，约半月一次调整"
+    priority: "critical"
+    compliance_target: 1.0
+    doc_section: "数据量校验规则"
+    doc_reference: "docs/排机规则文档.md#合同数据量校验-规则1"
+    details:
+      rule_type: "可变规则，同算法"
+      scope: "所有工序"
+      data_source: "天津-规则表6：生产自主包Lane/散样排机的Lane数据量"
+      update_frequency: "约半月一次，每次增加10-15G"
+      calculation_basis: "总数据量按合同数据量进行计算"
+      rule_description:
+        - "所有工序都存在此规则"
+        - "需要补齐合同数据量规则"
+        - "总数据量按合同数据量进行计算"
+        - "Lane数据量会经常变化（看CV值和产出均一性），约半月一次，每次增加10-15G"
+        - "合同数据量对应选择文库池中'合同数据量'字段（前端下单需要测序的数据量）"
+        - "Lane数据量是根据不同工序和机器类型的lane产出情况来设定的"
+      key_machines:
+        - machine: "Nova X-10B"
+          capacity: 380.0
+          tolerance: 10.0
+          lanes: 8
+          process: "Novaseq X Plus-PE150"
+        - machine: "Nova X-25B"
+          capacity: 975.0
+          tolerance: 10.0
+          lanes: 8
+          process: "Novaseq X Plus-PE150"
+          min_data: 1150
+      priority_tier_adjustments:
+        - tier: "临检"
+          condition: "lane中临检文库>100G"
+          capacity: 780
+          condition2: "lane中临检文库<100G"
+          capacity2: 962.5
+        - tier: "YC"
+          condition: "lane中YC文库>100G"
+          capacity: 810
+          condition2: "lane中YC文库<100G"
+          capacity2: 962.5
+      special_library_configs:
+        - type: "10X文库"
+          capacity: 930
+          note: "自主包lane"
+        - type: "甲基化文库"
+          capacity: 960
+          note: "自主包lane，添加8.33%phix"
+      complete_process_tables:
+        - process: "Novaseq PE150"
+          process_code: 405
+          tables:
+            - lab: "天津"
+              tier: "临检"
+              library_type: "S"
+              seq_mode: "3.0T"
+              lane_capacity: 780
+              fc_capacity: 3120
+              tolerance: "±10G"
+              lanes: 4
+              method: "S4 XP"
+              min_data: ">100G"
+              condition: "lane中临检文库>100G时，合同数据量按780G/lane"
+            - lab: "天津"
+              tier: "临检"
+              library_type: "S"
+              seq_mode: "3.6T-New"
+              lane_capacity: 880
+              fc_capacity: 3520
+              tolerance: "±10G"
+              lanes: 4
+              method: "S4 XP"
+              min_data: "<100G"
+              condition: "lane中临检文库<100G时，合同数据量按962.5G/lane"
+            - lab: "天津"
+              tier: "YC"
+              library_type: "S"
+              seq_mode: "3.2T"
+              lane_capacity: 810
+              fc_capacity: 3240
+              tolerance: "±10G"
+              lanes: 4
+              method: "S4 XP"
+              min_data: ">100G"
+              condition: "lane中YC文库>100G时，合同数据量按810G/lane"
+            - lab: "天津"
+              tier: "YC"
+              library_type: "S"
+              seq_mode: "3.6T-New"
+              lane_capacity: 880
+              fc_capacity: 3520
+              tolerance: "±10G"
+              lanes: 4
+              method: "S4 XP"
+              min_data: "<100G"
+              condition: "lane中YC文库<100G时，合同数据量按962.5G/lane"
+            - lab: "天津"
+              tier: "其他"
+              library_type: "S"
+              seq_mode: "3.6T-New"
+              lane_capacity: 930
+              fc_capacity: 3720
+              tolerance: "±10G"
+              lanes: 4
+              method: "S4 XP"
+              condition: "10X文库自主包lane"
+            - lab: "天津"
+              tier: "其他"
+              library_type: "S"
+              seq_mode: "3.6T-New"
+              lane_capacity: 960
+              fc_capacity: 3840
+              tolerance: "±10G"
+              lanes: 4
+              method: "S4 XP"
+              condition: "甲基化文库自主包lane，添加8.33%phix"
+            - lab: "天津"
+              tier: "其他"
+              library_type: "S，Z，ZS"
+              seq_mode: "3.6T-New"
+              lane_capacity: 880
+              fc_capacity: 3520
+              tolerance: "±10G"
+              lanes: 4
+              method: "S4 XP"
+              condition: "标准散样排机"
+        - process: "Novaseq X Plus-PE150"
+          process_code: 1595
+          machines:
+            - name: "Nova X-10B"
+              configs:
+                - lab: "天津"
+                  tier: "临检"
+                  library_type: "S，Z，ZS"
+                  seq_mode: "3.6T-New"
+                  lane_capacity: 380
+                  fc_capacity: 3040
+                  tolerance: "±10G"
+                  lanes: 8
+                  method: "10B"
+                - lab: "天津"
+                  tier: "YC"
+                  library_type: "S，Z，ZS"
+                  seq_mode: "3.6T-New"
+                  lane_capacity: 380
+                  fc_capacity: 3040
+                  tolerance: "±10G"
+                  lanes: 8
+                  method: "10B"
+                - lab: "天津"
+                  tier: "其他"
+                  library_type: "S，Z，ZS"
+                  seq_mode: "3.6T-New"
+                  lane_capacity: 380
+                  fc_capacity: 3040
+                  tolerance: "±10G"
+                  lanes: 8
+                  method: "10B"
+            - name: "Nova X-25B"
+              configs:
+                - lab: "天津"
+                  tier: "其他"
+                  library_type: "S，Z，ZS"
+                  seq_mode: "3.6T-New"
+                  lane_capacity: 975
+                  fc_capacity: 7800
+                  tolerance: "±10G"
+                  lanes: 8
+                  method: "25B"
+                  min_data: 1150
+                - lab: "天津"
+                  tier: "临检"
+                  library_type: "S，Z，ZS"
+                  seq_mode: "3.6T-New"
+                  lane_capacity: 975
+                  fc_capacity: 7800
+                  tolerance: "±10G"
+                  lanes: 8
+                  method: "25B"
+                - lab: "天津"
+                  tier: "YC"
+                  library_type: "S，Z，ZS"
+                  seq_mode: "3.6T-New"
+                  lane_capacity: 975
+                  fc_capacity: 7800
+                  tolerance: "±10G"
+                  lanes: 8
+                  method: "25B"
+        - process: "Novaseq-T7"
+          process_code: 876
+          configs:
+            - lab: "天津"
+              machine: "T7"
+              library_type: "S，Z，ZS"
+              seq_mode: "3.6T-New"
+              lane_capacity: 1670
+              fc_capacity: 1670
+              tolerance: "±10G"
+              lanes: 1
+              method: "S4"
+            - lab: "天津"
+              machine: "T7"
+              library_type: "S，Z，ZS"
+              seq_mode: "3.6T-New"
+              lane_capacity: 1600
+              fc_capacity: 1600
+              tolerance: "±10G"
+              lanes: 1
+              method: "S4"
+              condition: "含甲基化文库且数据量占比≤160G（客户-Methylation文库、微量 (Methylation文库)）"
+            - lab: "天津"
+              machine: "T7、T7-Methylation"
+              library_type: "S，Z，ZS"
+              seq_mode: "3.6T-New"
+              lane_capacity: 1580
+              fc_capacity: 1580
+              tolerance: "±10G"
+              lanes: 1
+              method: "S4"
+              condition: "甲基化文库包lane"
+        - process: "T7-C4 PE100"
+          process_code: 1770
+          configs:
+            - lab: "天津"
+              machine: "T7-C4"
+              library_type: "S"
+              method: "S4"
+              lane_capacity: 4500
+              fc_capacity: 4500
+              tolerance: "±10G"
+              lanes: 1
+              seq_mode: "lane seq"
+              condition: "cDNA与oligo混排时其中oligo上限数据量<700G"
+            - lab: "天津"
+              machine: "T7-Stereo-FFPE"
+              library_type: "S"
+              method: "Stereo FFPE"
+              lane_capacity: 5000
+              fc_capacity: 5000
+              tolerance: "±10G"
+              lanes: 1
+              seq_mode: "lane seq"
+            - lab: "天津"
+              machine: "T7-Stereo"
+              library_type: "S"
+              method: "StereoV1_2；StereoV1_3"
+              lane_capacity: 4000
+              fc_capacity: 4000
+              tolerance: "±10G"
+              lanes: 1
+              seq_mode: "lane seq"
+        - process: "SURFSEQ-PE150"
+          process_code: 1832
+          configs:
+            - lab: "天津"
+              machine: "SURFSEQ-5000"
+              library_type: "S，Z，ZS"
+              seq_mode: "3.6T-New"
+              lane_capacity: 1200
+              fc_capacity: 1200
+              tolerance: "±10G"
+              lanes: 1
+              method: "C4"
+            - lab: "天津"
+              machine: "SURFSEQ-Q"
+              library_type: "S，Z，ZS"
+              seq_mode: "3.6T-New"
+              lane_capacity: 750
+              fc_capacity: 6000
+              tolerance: "±10G"
+              lanes: 8
+              method: "FH8"
+        - process: "Novaseq SE50"
+          process_code: 418
+          configs:
+            - lab: "天津"
+              machine: "Novaseq"
+              library_type: "S"
+              lane_capacity: 435
+              fc_capacity: 870
+              tolerance: "±10G"
+              lanes: 2
+              method: "S4 XP"
+        - process: "Novaseq PE250"
+          process_code: 419
+          configs:
+            - lab: "天津"
+              machine: "Novaseq"
+              library_type: "S"
+              lane_capacity: 400
+              fc_capacity: 800
+              tolerance: "±10G"
+              lanes: 2
+              method: "S4 XP"
+              condition: "错位barcode数据量比例≥85%，不添加phix"
+            - lab: "天津"
+              machine: "Novaseq"
+              library_type: "S"
+              lane_capacity: 410
+              fc_capacity: 820
+              tolerance: "±10G"
+              lanes: 2
+              method: "S4 XP"
+              condition: "85%＞错位barcode数据量比例≥70%，添加5%phix"
+            - lab: "天津"
+              machine: "Novaseq"
+              library_type: "S"
+              lane_capacity: 420
+              fc_capacity: 840
+              tolerance: "±10G"
+              lanes: 2
+              method: "S4 XP"
+              condition: "70%＞错位barcode数据量比例，添加33%phix"
+        - process: "Novaseq PE50"
+          process_code: 426
+          configs:
+            - lab: "天津"
+              machine: "Novaseq"
+              library_type: "S"
+              lane_capacity: 400
+              fc_capacity: 800
+              tolerance: "±10G"
+              lanes: 2
+              method: "S4 XP"
+      key_points:
+        - "Lane数据量根据机器类型和产出均一性定期调整（约半月一次）"
+        - "总数据量按合同数据量进行计算"
+        - "不同优先级档位（临检、YC、其他）有不同的数据量要求"
+        - "临检和YC文库根据lane中该类型文库数据量调整合同数据量标准"
+        - "特殊文库类型（10X、甲基化等）有专门的数据量配置"
+        - "产线文库类型：S（管式文库，手工诺禾池子）、Z（板式文库，自动线池子）、ZS（混合）"
+        - "所有工序均标记为'可混'，表示可以与其他文库混排"
+
+  - rule_id: "R2"
+    rule_name: "客户/诺禾混排占比"
+    description: "存在诺禾文库时，客户文库数据量≤50%，客户文库以FKDL开头"
+    priority: "critical"
+    compliance_target: 1.0
+    doc_section: "文库混排规则"
+    doc_reference: "docs/排机规则文档.md#客户诺禾混排占比校验-规则2"
+    details:
+      rule_type: "改为红线规则，不超过红线即可"
+      applicable_processes:
+        - "Novaseq T7"
+        - "Novaseq PE150"
+        - "Novaseq SE50"
+        - "Novaseq PE250"
+        - "SURFSEQ PE150"
+      customer_library_prefix: "FKDL"
+      max_ratio: 0.5
+      library_classification:
+        customer_library:
+          definition: "样本编号以FKDL开头的（按照'样本类型'区分）"
+          identification: "按排机-文库池手工客户进行区分"
+        novogene_library:
+          definition: "非FKDL的文库"
+          types:
+            - type: "Z型"
+              description: "板式文库，在自动线池子"
+            - type: "S型"
+              description: "管式文库，在手工诺禾池子"
+      rules:
+        - "整条Lane都是客户文库时，无需考虑客户文库占比"
+        - "若存在诺禾文库时，要保证客户文库数据量不超过Lane数据量的50%"
+        - "客户文库数据量不能超过Lane数据量的50%"
+
+  - rule_id: "R3"
+    rule_name: "Index重复校验"
+    description: "P7端：6bp→4重复，8bp→6重复，10bp+→7重复；P5端特殊处理"
+    priority: "critical"
+    compliance_target: 1.0
+    doc_section: "Index重复校验"
+    doc_reference: "docs/排机规则文档.md#index重复校验规则-规则3"
+    details:
+      rule_type: "固定规则，同算法"
+      purpose: "确保一条Lane中的Index序列不重复，保证后期数据拆分"
+      rule_description:
+        - "纯算法规则，要确保一条lane中的index序列不重复，不然后期无法拆分数据"
+        - "按静态数据区分Index重复校验规则（正向/反向）"
+        - "Index是建库过程引入的用来区分文库的标签"
+        - "通过为每个样本添加不同的Index，可在单次测序中同时处理多个样本"
+        - "测序完成后，通过识别Index序列将混合数据按样本拆分，生成独立的测序文件"
+        - "Index有双端index和单端index，按照碱基个数又分成6碱基、7碱基、8碱基以及10碱基"
+        - "为了能最保证拆分，排机时需要校验index序列是否重复，保证至少有两位碱基不同，即可拆分开来"
+        - "例如：6和8碱基最多可重复4位，8和8碱基最多可重复6个均可同lane上机"
+      p7p5_check_rules:
+        p7_check:
+          description: "当前文库Index与Lane中其他所有文库Index的P7端进行两两比对"
+          limits:
+            - length: 6
+              max_repeat: 4
+            - length: 7
+              max_repeat: 5
+              note: "2024年11月21日补充"
+            - length: 8
+              max_repeat: 6
+            - length: "大于8"
+              max_repeat: 7
+        pe_adapter_repeat:
+          description: "当前Index的P7端等于PE且比对的另一个Index的P7端也等于PE时，算PE转接头重复"
+        p5_check:
+          description: "P7超过固定重复位时需校验P5端"
+          conditions:
+            - "如果P5端等于通用接头，比对组合中P5端也等于通用接头的，算重复"
+            - "如果P5端等于随机INDEX/RANDOM PRIMERS，算重复"
+            - "P5端校验规则与P7端相同"
+      p7_only_check_rules:
+        description: "仅校验P7端"
+        limits:
+          - length: 6
+            max_repeat: 4
+          - length: 7
+            max_repeat: 5
+            note: "2024年11月21日补充"
+          - length: 8
+            max_repeat: 6
+          - length: "大于8"
+            max_repeat: 7
+
+  - rule_id: "R4"
+    rule_name: "RunCycle一致性"
+    description: "同Lane内文库RunCycle必须一致"
+    priority: "high"
+    compliance_target: 0.95
+    doc_section: "特殊处理标签"
+    doc_reference: "docs/排机规则文档.md#特殊处理标签"
+    details:
+      rule_type: "固定规则"
+      requirement: "同Lane内RunCycle必须一致"
+      definition: "RunCycle编号：测序参数备注，相同RunCycle排同一Lane"
+      flexibility: "可打破的固定规则"
+      related_labels:
+        - "包Lane与否：指定文库是否独立成Lane"
+        - "Lane ID：指定Lane编号，相同编号文库排同一Lane"
+        - "FC编号：Flow Cell编号，相同FC编号组成Run"
+        - "上机备注：特殊需求说明"
+      combination_rules:
+        - "相同编号的文库排在同一条Lane上"
+        - "相同编号成Lane"
+        - "相同FC成Run"
+
+  - rule_id: "R5"
+    rule_name: "Peak Size一致性"
+    description: "同Lane内Peak Size差异≤150bp或≥75%数据量相近"
+    priority: "medium"
+    compliance_target: 0.90
+    doc_section: "文库混排规则"
+    doc_reference: "docs/排机规则文档.md#peak-size数据量校验-规则6"
+    details:
+      rule_type: "红线规则"
+      definition: "Peak Size是文库上机前质检测定的峰图片段大小"
+      conditions:
+        - condition: "最大值 - 最小值 ≤ 150bp"
+        - condition: "数据量 ≥ 总数据量的75%"
+      note: "两个条件需要同时考虑，满足其一即可通过校验"
+  
+  - rule_id: "R5A"
+    rule_name: "加测文库比例限制"
+    description: "同一条Lane中，加测文库的合同数据量占比必须≤25%且允许额外10G缓冲"
+    priority: "medium"
+    compliance_target: 0.90
+    doc_section: "文库混排规则"
+    doc_reference: "docs/排机规则文档.md#加测文库比例限制"
+    details:
+      rule_type: "固定规则"
+      rule_content: "同一条 Lane 中，加测文库的合同数据量占比必须 ≤ 25% 且允许额外 10G 缓冲。当 Lane 中出现超额时需回退并重新组合"
+      max_ratio: 0.25
+      buffer: 10  # GB
+      validation: "当Lane中出现超额时需回退并重新组合"
+      definition: "加测文库指加测备注是「加测」这部分文库"
+
+  - rule_id: "R6"
+    rule_name: "单端Index数据占比"
+    description: "单端Index文库数据量占比<30%"
+    priority: "medium"
+    compliance_target: 0.85
+    doc_section: "Index重复校验"
+    doc_reference: "docs/排机规则文档.md#单端index文库数据量比例-规则5"
+    details:
+      rule_type: "固定规则，同算法"
+      data_source: "实验总结值"
+      definition: "Index序列只有P7端没有P5端称为单端Index（Index序列字段没有';'存在的）"
+      conditions:
+        - condition: "Lane中全部都是单端Index，不限制比例"
+        - condition: "Lane中同时排有单端Index的文库和双端Index的文库，限制单端Index文库的合同数据量占整条Lane文库合同数据量 < 30%"
+      max_ratio: 0.3
+
+  - rule_id: "R7"
+    rule_name: "碱基不均衡文库处理"
+    description: "天津实验室特殊文库类型分组规则和占比限制"
+    priority: "high"
+    compliance_target: 0.90
+    doc_section: "碱基不均衡文库处理"
+    doc_reference: "docs/排机规则文档.md#碱基不均衡文库处理"
+    details:
+      rule_type: "固定规则（碱基不均衡包lane规则同算法）；碱基不均衡混排优化为几种类型排机限制"
+      strategy:
+        - "优先：碱基不均衡文库包Lane排机"
+        - "其次：碱基不均衡+碱基均衡文库混排"
+      special_restrictions:
+        - "遗传实验室的碱基不均衡文库只能散样安排，不包Lane"
+        - "临检实验室不存在碱基不均衡文库"
+      max_ratio_when_mixed:
+        normal_scenario: 0.4
+        note_normal: "常规场景：碱基不均衡文库数据量占比 < 40%（可能年度调整）"
+        mode_3_6t_new: 0.3
+        note_3_6t_new: "3.6T-NEW 模式散样排机：碱基不均衡文库数据量不得超过 30%，并且仍需满足特殊文库总量限制"
+      total_library_types_limit: 3
+      update_records:
+        - date: "2024.11.21"
+          changes:
+            - "碱基不均衡文库最大数据量从190G更新为240G（Novaseq X Plus-PE150 25B）"
+            - "特殊文库总量从190更新为240（Novaseq X Plus-PE150 25B上机方式）"
+      grouping_principles:
+        - "同组内优先规则：同一组内，优先同文库类型包Lane；其次考虑混排包Lane"
+        - "同类型排整条Lane：大多数碱基不均衡文库不可与其他碱基不均衡文库同Lane"
+        - "特殊分组混排：仅分组27(3')、分组28(5')、分组29允许同组内混排"
+      tianjin_lab_nova_x_25b_groups:
+        - group: 1
+          library_type: "ATAC-seq文库"
+          data_ratio: 0.8
+          note: "不可与其他碱基不均衡文库同Lane"
+        - group: 2
+          library_type: "CUT Tag文库（动物组织）"
+          data_ratio: 0.8
+          note: "同类型排整条Lane"
+        - group: 3
+          library_type: "CUT Tag文库（细胞）"
+          data_ratio: 0.8
+          note: "同类型排整条Lane"
+        - group: 4
+          library_type: "EM-Seq文库"
+          data_ratio: 0.99
+          note: "同类型排整条Lane"
+        - group: 5
+          library_type: "Methylation文库"
+          data_ratio: 0.99
+          note: "同类型排整条Lane"
+        - group: 6
+          library_type: "small RNA文库"
+          data_ratio: 1.0
+          note: "同类型排整条Lane"
+        - group: 7
+          library_type: "单细胞文库"
+          data_ratio: 0.85
+          note: "同类型排整条Lane"
+        - group: 8
+          library_type: "动植物简化基因组文库(GBS亲代)"
+          data_ratio: 0.8
+          note: "同类型排整条Lane"
+        - group: 9
+          library_type: "动植物简化基因组文库(GBS子代)"
+          data_ratio: 0.8
+          note: "同类型排整条Lane"
+        - group: 10
+          library_type: "客户-ATAC-seq文库"
+          data_ratio: 0.8
+          note: "同类型排整条Lane"
+        - group: 11
+          library_type: "客户-CUT-Tag文库"
+          data_ratio: 0.8
+          note: "同类型排整条Lane"
+        - group: 12
+          library_type: "客户-Methylation文库"
+          data_ratio: 0.99
+          note: "同类型排整条Lane"
+        - group: 13
+          library_type: "客户-NanoString DSP文库"
+          data_ratio: 0.8
+          note: "同类型排整条Lane"
+        - group: 14
+          library_type: "客户-PCR产物"
+          data_ratio: 0.6
+          note: "同类型排整条Lane"
+        - group: 15
+          library_type: "客户-small RNA文库"
+          data_ratio: 1.0
+          note: "同类型排整条Lane"
+        - group: 16
+          library_type: "客户-单细胞文库"
+          data_ratio: 0.85
+          note: "同类型排整条Lane"
+        - group: 17
+          library_type: "客户-简化基因组"
+          data_ratio: 0.8
+          note: "同类型排整条Lane"
+        - group: 18
+          library_type: "客户-其他碱基不均衡文库"
+          data_ratio: 0.8
+          note: "同类型排整条Lane"
+        - group: 19
+          library_type: "微量 (Methylation文库)"
+          data_ratio: 0.99
+          note: "同类型排整条Lane"
+        - group: 20
+          library_type: "客户-扩增子文库"
+          data_ratio: 0.65
+          note: "同类型排整条Lane"
+        - group: "27(3')"
+          library_types:
+            - "墨卓转录组-3端文库"
+            - "10X转录组-3'文库"
+            - "10X Visium空间转录组文库"
+            - "10X转录组-3'膜蛋白文库"
+            - "客户-10X 3 单细胞转录组文库"
+            - "10X Visium FFPEV2空间转录组文库(V2)"
+            - "客户文库-10X Visium 文库"
+            - "客户-10X 3 Feature Barcode文库"
+            - "客户-10X Visium空间转录组文库"
+            - "BD单细胞WTA文库"
+          data_ratio: 1.0
+          note: "优先同类型包Lane，同组可混排，同Lane不超过3种"
+        - group: "28(5')"
+          library_types:
+            - "10X转录组-5'文库"
+            - "10X转录组V(D)J-BCR文库"
+            - "10X转录组V(D)J-TCR文库"
+            - "客户-10X VDJ文库"
+            - "客户-10X转录组V(D)J-BCR文库"
+            - "客户-10X转录组V(D)J-TCR文库"
+            - "客户-10X转录组文库"
+            - "10X转录组-5'膜蛋白文库"
+            - "客户-10X 5 单细胞转录组文库"
+          data_ratio: 1.0
+          note: "优先同类型包Lane，同组可混排，同Lane不超过3种"
+        - group: 29
+          description: "分组27+分组28混排"
+          data_ratio: 1.0
+          special_mixing_rules:
+            - "优先同类型包Lane"
+            - "其次同组包lane"
+            - "分组27和分组28可混排"
+            - "文库类型不超过3种"
+            - "分组27文库占比不超过20%"
+      complete_library_type_list:
+        total_types: 68
+        by_group:
+          group_1: ["ATAC-seq文库"]
+          group_2: ["CUT Tag文库（动物组织）"]
+          group_3: ["CUT Tag文库（细胞）"]
+          group_4: ["EM-Seq文库"]
+          group_5:
+            - "Methylation文库"
+            - "RRBS文库"
+            - "RNA甲基化文库"
+            - "RNA甲基化文库-Input"
+            - "RNA甲基化文库-IP"
+            - "羟甲基化文库"
+            - "Ribo-seq文库"
+          group_6:
+            - "small RNA文库"
+            - "UMI smallRNA文库"
+            - "外泌体small RNA"
+          group_7:
+            - "单细胞文库"
+            - "circRNA"
+          group_8: ["动植物简化基因组文库(GBS亲代)"]
+          group_9: ["动植物简化基因组文库(GBS子代)"]
+          group_10: ["客户-ATAC-seq文库"]
+          group_11: ["客户-CUT-Tag文库"]
+          group_12:
+            - "客户-Methylation文库"
+            - "客户-RRBS文库"
+          group_13:
+            - "客户-NanoString DSP文库"
+            - "DSP空间转录组文库"
+          group_14:
+            - "客户-PCR产物"
+            - "PCR-free (PCR产物单建)"
+          group_15: ["客户-small RNA文库"]
+          group_16:
+            - "客户-单细胞文库"
+            - "客户-BD单细胞WTA文库"
+            - "BD单细胞WTA文库"
+          group_17:
+            - "客户-简化基因组"
+            - "客户-GBS(康奈尔GBS文库)"
+            - "GBS(康奈尔GBS文库)"
+            - "客户-RAD文库 (单)"
+            - "客户-RAD文库 (混)"
+            - "RAD文库 (单)"
+            - "RAD文库 (混)"
+          group_18:
+            - "客户-其他碱基不均衡文库"
+            - "RAD-seq文库(单建)"
+            - "RAD-seq文库(混建)"
+          group_19:
+            - "微量 (Methylation文库)"
+            - "微量RNA甲基化文库"
+            - "微量甲基化"
+            - "低起始量RNA甲基化文库-Input(人)"
+            - "低起始量RNA甲基化文库-Input(鼠)"
+            - "低起始量RNA甲基化文库-IP(人)"
+            - "低起始量RNA甲基化文库-IP(鼠)"
+            - "外泌体lncRNA文库"
+          group_20: ["客户-扩增子文库"]
+          group_27:
+            - "墨卓转录组-3端文库"
+            - "10X转录组-3'文库"
+            - "10X Visium空间转录组文库"
+            - "10X转录组-3'膜蛋白文库"
+            - "客户-10X 3 单细胞转录组文库"
+            - "10X Visium FFPEV2空间转录组文库(V2)"
+            - "客户文库-10X Visium 文库"
+            - "客户-10X 3 Feature Barcode文库"
+            - "客户-10X Visium空间转录组文库"
+            - "客户-10X Visium FFPEV2空间转录组文库(V2)"
+            - "客户-10X Feature Barcode文库"
+          group_28:
+            - "10X转录组-5'文库"
+            - "10X转录组V(D)J-BCR文库"
+            - "10X转录组V(D)J-TCR文库"
+            - "客户-10X VDJ文库"
+            - "客户-10X转录组V(D)J-BCR文库"
+            - "客户-10X转录组V(D)J-TCR文库"
+            - "客户-10X转录组文库"
+            - "10X转录组-5'膜蛋白文库"
+            - "客户-10X 5 单细胞转录组文库"
+            - "客户-10X 5 Feature Barcode文库"
+            - "客户-10X Flex文库"
+      machine_specific_rules:
+        novaseq_x_plus:
+          description: "NovaSeq X Plus机器的分组规则与Nova X-25B基本一致，共23个分组，数据量占比相同"
+          groups: "分组1-20：与Nova X-25B相同的文库类型和占比；分组27(3')、分组28(5')、分组29：与Nova X-25B相同的混排规则"
+        novaseq:
+          description: "Novaseq机器也有23个分组，但部分文库类型的数据量占比略有不同"
+          differences:
+            - group: 1
+              library_type: "ATAC-seq文库"
+              ratio: 0.9
+              note: "Nova X-25B为0.8"
+            - group: 5
+              library_type: "Methylation文库"
+              ratio: 0.92
+              note: "Nova X-25B为0.99"
+            - group: 7
+              library_type: "单细胞文库"
+              ratio: 0.9
+              note: "Nova X-25B为0.85"
+            - group: 14
+              library_type: "客户-PCR产物"
+              ratio: 0.61
+              note: "Nova X-25B为0.6"
+      max_data_amount_2024_11_21_update:
+        tianjin_lab_nova_x_25b: 240
+        previous_limit: 190
+        affected_library_types: 28
+        affected_types_list:
+          - "客户-10X全基因组文库"
+          - "外泌体lncRNA文库"
+          - "10X转录组V(D)J-TCR文库"
+          - "单细胞文库"
+          - "客户-small RNA文库"
+          - "客户-单细胞文库"
+          - "Methylation文库"
+          - "10X转录组-5'文库"
+          - "RRBS文库"
+          - "客户-Methylation文库"
+          - "10X转录组-3'文库"
+          - "PCR-free (PCR产物单建)"
+          - "客户-PCR产物"
+          - "动植物简化基因组文库(GBS亲代)"
+          - "动植物简化基因组文库(GBS子代)"
+          - "客户-简化基因组"
+          - "客户-10X转录组文库"
+          - "客户-10X转录组文库（客户的5'）"
+          - "客户-10X VDJ文库"
+          - "BD单细胞WTA文库"
+          - "10X Visium FFPEV2空间转录组文库(V2)"
+          - "10X Visium空间转录组文库"
+        special_cases_unchanged:
+          - library: "RAD文库（单）"
+            limit: 90
+            note: ">70G，大数据量"
+          - library: "RAD文库（混）"
+            limit: 90
+            note: ">70G，大数据量"
+          - library: "GBS（康奈尔GBS文库）"
+            limit: 80
+          - library: "10X全基因组文库"
+            limit: 240
+            note: "<70G，小数据量"
+      special_library_total_limits:
+        - machine: "Novaseq X Plus-PE150 25B"
+          limit: 240
+          note: "2024-11-21更新: 190→240"
+        - machine: "Novaseq X Plus-PE150 10B"
+          limit: 150
+        - machine: "Novaseq-T7"
+          limit: 175
+
+  - rule_id: "R8"
+    rule_name: "10碱基Index占比"
+    description: "同Lane含10bp与非10bp混排时，10bp文库数据量需>40%且≤60%"
+    priority: "high"
+    compliance_target: 0.95
+    doc_section: "Index重复校验"
+    doc_reference: "docs/排机规则文档.md#10碱基index文库数据量比例-规则4"
+    details:
+      rule_type: "固定规则，同算法"
+      data_source: "实验经验总结"
+      definition:
+        - "10碱基是指index序列字段碱基数是10个的文库"
+        - "10碱基Index：包括单端和双端"
+        - "仅看Index P7端长度"
+        - "示例：10碱基index：AAAGGGCCTT; AAAGGG     6碱基index：AAAGGG; AAAGGGCCTT"
+        - "一个文库含多index的，包含10碱基index则该文库数据量都算作10碱基的数据量"
+        - "如：文库数据量为10G，该文库同时含有6、8、10碱基index，则算作10碱基index数据量为10G（仅看IndexP7端长度）"
+      conditions:
+        - condition: "Lane中只含10碱基文库时，不做限制"
+        - condition: "Lane中只含非10碱基文库时，也不做限制"
+        - condition: "Lane中含10碱基和非10碱基时，10碱基Index的文库数据量 > 40%（非10碱基文库数据量 < 60%）"
+      min_ratio: 0.4
+      max_ratio: 0.6
+
+  - rule_id: "R9"
+    rule_name: "特殊文库总量限制"
+    description: "Novaseq X Plus-PE150 25B特殊文库总量≤240G，混排文库类型≤3种"
+    priority: "high"
+    compliance_target: 0.95
+    doc_section: "碱基不均衡文库处理"
+    doc_reference: "docs/排机规则文档.md#特殊文库总量限制表"
+    details:
+      max_library_types: 3
+      important_rules:
+        - "文库类型限制：不超过三种文库类型"
+        - "数据量限制：总文库的最大数据量总和不超过特殊文库总量"
+        - "特殊文库种类：每个工序/上机方式最多3种特殊文库类型"
+      definition: "特殊文库总量是指碱基不均衡文库与碱基均衡文库混排时，碱基不均衡文库的最大允许总量"
+      example: "Novaseq X Plus-PE150 25B的特殊文库总量为240G，意味着在一个Lane中，碱基不均衡文库的总数据量不能超过240G，同时混排的碱基不均衡文库类型不能超过3种"
+      complete_limit_table:
+        - process: "Novaseq PE150"
+          method: "S2"
+          limit_gb: 500
+          library_types: 3
+        - process: "Novaseq PE150"
+          method: "S1"
+          limit_gb: 400
+          library_types: 3
+        - process: "Novaseq PE150"
+          method: "S4"
+          limit_gb: 400
+          library_types: 3
+        - process: "Novaseq PE150"
+          method: "S4 XP"
+          limit_gb: 400
+          library_types: 3
+        - process: "Novaseq X Plus-PE150"
+          method: "25B"
+          limit_gb: 240
+          library_types: 3
+          update_date: "2024-11-21"
+          previous_limit: 190
+          update_note: "190→240"
+        - process: "Novaseq X Plus-PE150"
+          method: "10B"
+          limit_gb: 150
+          library_types: 3
+        - process: "Novaseq-T7"
+          method: "S4"
+          limit_gb: 175
+          library_types: 3
+
+  - rule_id: "R10"
+    rule_name: "Pooling与下单比例控制"
+    description: "Lane下单量/合同量<115%，单文库下单量≥1G，单端Index占比<30%"
+    priority: "medium"
+    compliance_target: 0.90
+    doc_section: "Pooling系统规则"
+    doc_reference: "docs/排机规则文档.md#pooling系统规则"
+    details:
+      pooling_adjustment_rule:
+        rule_type: "可变规则"
+        update_frequency: "每月1次调整"
+        adjustment_reason:
+          - "合同数据量与真实产出存在差异"
+          - "需要对合同数据量进行人为系数调整"
+        adjustment_method:
+          - "人工调整，总结过去1个月某类文库产出与合同数据量的差异"
+          - "给相应文库及其合同区间给定系数"
+      pooling_calculation:
+        rule_type: "固定规则"
+        formula: "下单量 = 合同量 × Pooling系数"
+        single_sample_limits:
+          min_order_amount: 1.0  # GB
+          max_difference: 30.0  # GB，下单数据量 - 合同数据量 < 30G
+        lane_level_limits:
+          max_ratio: 0.15  # Lane总下单数据量 / Lane总合同数据量 < 115% 即增量 < 15%
+      volume_adjustment_rule:
+        rule_type: "固定规则"
+        calculation_parameters:
+          - "下单量：基于合同量和Pooling系数"
+          - "QPCR摩尔浓度：文库特征参数"
+          - "上机浓度：固定值"
+          - "体系总体积：有调整标准"
+        volume_rules:
+          - "样本体积必须遵守的规则（参考S/Z体积限制）"
+          - "形成加样的样本体积有必须遵守的规则"
+      order_data_ratio_limit:
+        rule_id: "规则10"
+        rule_type: "固定规则"
+        limit: 0.15  # 下单数据量/合同数据量 < 115% 即增量 < 15%
+        note: "下单数据量占比限制规则。加测文库比例限制见R5A规则"
+        definition: "下单数据量/合同数据量 < 115%的限制规则"
+      pooling_coefficient_adjustment:
+        rule_id: "规则11"
+        rule_type: "固定规则"
+        validation_type: "人工核对"
+        limits:
+          - "单文库最小下单数据量 ≥ 1G"
+          - "下单数据量 - 合同数据量 < 30G"
+
+  - rule_id: "R11"
+    rule_name: "优先级档位执行"
+    description: "临检>YC>S级>交付临近>其他，遵循数据类型55%+交付时间45%权重（数据类型优先）"
+    priority: "high"
+    compliance_target: 0.95
+    doc_section: "优先级排机规则"
+    doc_reference: "docs/排机规则文档.md#优先级排机规则"
+    details:
+      data_type_priority:
+        rule_type: "固定规则"
+        purpose: "用于筛选通道和检验的文库，按数据类型标签分类"
+        priority_classification:
+          - priority: 1
+            name: "临检"
+            description: "最高优先级"
+          - priority: 2
+            name: "YC"
+            description: "中等优先级"
+          - priority: 3
+            name: "S级客户"
+            description: "特殊客户优先级"
+          - priority: 4
+            name: "交付临近"
+            description: "时间紧急优先级"
+          - priority: 5
+            name: "其他"
+            description: "普通优先级"
+      priority_1_clinical:
+        library_identification:
+          prefix_4_chars:
+            - "FDYE"
+            - "FDYT"
+            - "FDYG"
+            - "FDYP"
+            - "FDYK"
+            - "FDYX"
+            - "FICR"
+            - "FIPM"
+          international_clinical:
+            - country: "英国"
+              prefix: "E"
+              description: "英国临检文库首字母为E"
+            - country: "美国"
+              prefix: "C"
+              description: "美国临检文库首字母为C"
+        scheduling_process:
+          - step: 1
+            action: "优先生成临检Lane"
+            description: "优先将临检文库生成N条完整Lane，进入排机池"
+          - step: 2
+            action: "不足一条Lane时的补充策略"
+            description: |
+              优先补充"其他"池子的DHE、DHG文库（"其他"指非临检及YC，剩余全部为其他）
+              其次按顺序补充手工诺禾碱基均衡文库：按校准后交付时间排序
+          - step: 3
+            action: "剩余处理"
+            description: "补充文库后，仍有剩余的临检文库不够一条Lane，则留在文库池等待下次排机"
+          - step: 4
+            action: "大小数据量混排"
+            description: "临检文库大于70G和小于70G的文库排机规则相同，且可以同Lane排机"
+        same_priority_sorting: "按下单时间升序"
+      priority_2_yc:
+        library_identification:
+          prefix_4_chars: "FKDL"
+          subproject_name: "带YC标识的文库"
+        large_data_definition: "单个index合同数据量 > 70G的文库"
+        scheduling_process:
+          - step: 1
+            action: "优先处理碱基不均衡大数据量"
+            description: "优先挑出碱基不均衡的大数据量文库，按照排机规则生成整N条Lane"
+          - step: 2
+            action: "不足Lane时的补充"
+            description: "补充当前档位（YC）的碱基均衡大数据量文库，生成整N条Lane"
+          - step: 3
+            action: "剔除至整数Lane"
+            description: "补充后仍不够整N条Lane，则剔除大数据文库至整数Lane（碱基不均衡+碱基均衡）"
+            removal_order: "优先级从低到高，数据量从小到大"
+          - step: 4
+            action: "文库拆分"
+            description: "将大数据量文库（剔除的文库）拆分成小数据量"
+          - step: 5
+            action: "小数据量排机"
+            description: "拆分后，将小数据量文库按照碱基不均衡文库、碱基均衡文库的顺序，根据排机规则依次生成1条Lane、2条Lane、3条Lane..."
+        special_rules_9_26_discussion:
+          - "YC档位都是紧急，其他档位分紧急、不紧急（按扣减规则）"
+          - "只按碱基不均衡大数据量文库包Lane排"
+          - "找下一档位大数据量文库凑时，凑够1条Lane即可"
+          - examples:
+              - "YC档位分组9数据量为2.6条Lane，则找其他档位紧急凑够3条Lane"
+              - "其他档位紧急分组9数据量为1.6条Lane，则找其他不紧急文库凑够2条Lane"
+          - "如果差的数据量少，可以找一个同类型的小数据量文库凑近"
+          - "先用大数据量凑、再用小数据量凑"
+          - "小数据量从大到小排序，平分后单个文库数据量大于2G"
+          - "如果没有能凑的数据量、多出来数据量，可以拆出来数据量"
+        same_priority_sorting: "按下单时间升序"
+      priority_3_s_level:
+        library_identification:
+          project_name: "带SJ标识"
+          manual_selection: "批次/文库编号/子项目编号/子项目名称，人工填写信息后，系统自动勾选"
+        large_data_definition: "合同数据量 > 70G的文库"
+        scheduling_process:
+          - step: 1
+            action: "优先处理碱基不均衡大数据量"
+            description: "优先挑出碱基不均衡的大数据量文库，按照排机规则生成整N条Lane"
+          - step: 2
+            action: "不足Lane时的补充"
+            description: "补充当前档位的碱基均衡大数据量文库，生成整N条Lane"
+          - step: 3
+            action: "剔除至整数Lane"
+            description: "补充后仍不够整N条Lane，则剔除大数据文库至整数Lane"
+            removal_order: "优先级从低到高，数据量从小到大"
+          - step: 4
+            action: "文库拆分"
+            description: "将大数据量文库（剔除的文库）拆分成小数据量"
+          - step: 5
+            action: "小数据量排机"
+            description: "拆分后，将小数据量文库按照碱基不均衡文库、碱基均衡文库的顺序，根据排机规则依次生成Lane"
+        special_considerations:
+          - "拆分成小数据量文库 > 临近交付（临近交付时间规则表）"
+          - "同板文库优先级相同（按该板剩余文库中交付时间最早的文库来）"
+          - "在操作人账号下-排机池界面的文库 > 在选择文库池的文库"
+        same_priority_sorting: "按下单时间升序"
+      priority_4_delivery_urgent:
+        sorting_rule: "按校准后交付时间升序"
+        description: "根据临近交付时间规则表计算，确保临近交付时间的文库优先排机"
+      time_priority:
+        rule_type: "固定规则"
+        sorting_rules:
+          - rule: "下单时间"
+            description: "越早下单越优先排机"
+          - rule: "交付时间"
+            description: "离当前时间越近越优先排机（校准后交付时间）"
+          - rule: "样本编码"
+            description: "包含扣减时间规则的样本优先处理"
+        weight_distribution:
+          order_time: 0.4
+          delivery_time: 0.35
+          data_type: 0.25
+      large_vs_small_data_definition:
+        large_data_libraries:
+          - type: "YC文库"
+            definition: "单个index合同数据量 > 70G"
+          - type: "S级客户文库"
+            definition: "合同数据量 > 70G"
+          - type: "临检文库"
+            definition: "大于70G与小于70G可同Lane排机"
+        small_data_libraries:
+          - "合同数据量 ≤ 70G的文库"
+          - "拆分后的文库（要求单个文库数据量 > 2G）"
+        splitting_rules:
+          - "大数据量文库拆分成小数据量文库"
+          - "拆分后单个文库数据量必须 > 2G"
+          - "小数据量从大到小排序进行排机"
+
+  - rule_id: "R12"
+    rule_name: "特殊混排禁忌"
+    description: "Visium/ATAC等碱基不均衡文库遵循分组限制，禁与指定文库同Lane"
+    priority: "critical"
+    compliance_target: 1.0
+    doc_section: "碱基不均衡文库处理"
+    doc_reference: "docs/排机规则文档.md#碱基不均衡排机限制固定规则"
+    details:
+      rule_type: "固定规则"
+      forbidden_combinations:
+        - library: "10x HD Visium空间转录组文库(新)"
+          also_applies_to: "10x HD Visium空间转录组文库"
+          forbidden_with:
+            - "10X转录组-3'文库"
+            - "10X转录组-3'膜蛋白文库"
+            - "墨卓转录组-3端文库"
+        - library: "10X ATAC文库"
+          forbidden_with:
+            - "10x_cellranger拆分方式的文库"
+          note: "不排同Run"
+
+  - rule_id: "R13"
+    rule_name: "S/Z取样体积限制"
+    description: "S类型文库取样体积≥0.3μL，Z类型文库取样体积≤5000nL，成Lane后校验"
+    priority: "high"
+    compliance_target: 0.95
+    doc_section: "机器类型相关规则"
+    doc_reference: "docs/排机规则文档.md#sz最大最小取样体积限制-规则8"
+    details:
+      volume_limits:
+        - library_type: "S"
+          min_volume_ul: 0.3
+          note: "管式文库，在手工诺禾池子"
+        - library_type: "Z"
+          max_volume_nl: 5000
+          note: "板式文库，在自动线池子"
+      calculation_formula: "取样体积 = 样本数据量占比 × 排机浓度 × 总体积 ÷ 样本浓度"
+      validation_timing: "成Lane后进行计算和校验"
+      update_frequency: "一年一次，不同实验室值不同"
+      note: "计算时可以把不符合规则的文库，通过算法符合要求，基本不影响成Lane"
+
+  - rule_id: "R14"
+    rule_name: "上机备注与特殊需求处理"
+    description: "处理特殊需求：批次组合、避开特定物种、指定测序参数、分Run排机等"
+    priority: "high"
+    compliance_target: 0.95
+    doc_section: "机器类型相关规则"
+    doc_reference: "docs/排机规则文档.md#上机备注run-cycle-规则9"
+    details:
+      special_requirements:
+        - type: "批次组合"
+          description: "A批次X个样本+B批次Y个样本，同Lane/同Run排机"
+        - type: "避开特定物种"
+          description: "避开特定物种排机"
+        - type: "指定测序参数"
+          description: "151+10+24+151/R1 index10, R2 index24"
+        - type: "分Run排机"
+          description: "指定不同机器的分Run排机"
+      validation_type: "人工核对"
+      note: "RunCycle一致性已在R4中覆盖，本规则主要处理其他特殊需求"
+
+  - rule_id: "R15"
+    rule_name: "数据时间消耗周期"
+    description: "数据消耗周期约20个工作日，当天数据优先消耗，超过20天的数据忽略不计"
+    priority: "medium"
+    compliance_target: 0.90
+    doc_section: "数据时间消耗周期规则"
+    doc_reference: "docs/排机规则文档.md#数据时间消耗周期规则-规则12"
+    details:
+      rule_type: "固定规则"
+      rule_number: "规则12"
+      core_principle:
+        - "每日下单的文库数据不会在当日完全消耗，而是在后续排机中逐步安排"
+        - "数据消耗遵循时间递减模式：当天数据利用最多，然后逐渐减少"
+      consumption_cycle_features:
+        standard_cycle_days: 20
+        consumption_mode: "当天数据优先消耗，后续各天消耗量逐渐递减"
+        data_status: "超过20天的剩余数据忽略不计"
+      rule_application:
+        - "排机系统优先选择较新的下单数据进行排机"
+        - "同等条件下，时间较近的数据具有更高的被选中概率"
+        - "随着数据时间增长，其在排机中的权重逐步降低"
+        - "数据超过20天期限后不再参与排机计算"
+      influencing_factors:
+        - "文库优先级（临检 > YC > 其他）"
+        - "机器类型容量限制"
+        - "Index冲突检测结果"
+        - "特殊文库包Lane需求"
+      implementation_requirements:
+        - "排机算法需要考虑数据的下单时间标签"
+        - "实现基于时间的权重衰减机制"
+        - "确保新数据优先得到排机机会"
+
+  - rule_id: "R16"
+    rule_name: "文库拆分规则"
+    description: "非1.0模式单index超过100G拆分；1.0模式单index超过200G拆分；多index超过300G拆分；触发后优先按对半方式持续拆分，直到片段不超过阈值"
+    priority: "high"
+    compliance_target: 0.95
+    doc_section: "文库标签分类规则"
+    doc_reference: "docs/排机规则文档.md#文库拆分规则"
+    details:
+      rule_type: "固定规则（2025-11-26更新）"
+      splitting_mode_distinction:
+        mode_1_0:
+          description: "1.0模式（手工/常规产线 S）"
+          rules:
+            - "单index 文库合同量 >200G 时触发拆分"
+        non_1_0_single_index:
+          description: "非1.0模式 + 单index"
+          rules:
+            - "合同量 >100G 时触发拆分"
+        multi_index:
+          description: "多index 文库"
+          rules:
+            - "合同量 >300G 时触发拆分"
+      splitting_conditions:
+        - condition: "包Lane / 包FC / 指定 Lane 文库"
+          action: "保持原有指定，不拆分"
+        - condition: "阈值计算"
+          formula: "非1.0单index=100G；1.0单index=200G；多index=300G"
+          examples:
+            - "非1.0单index：100G以内不拆，超过100G拆分"
+            - "1.0单index：200G以内不拆，超过200G拆分"
+            - "多index：300G以内不拆，超过300G拆分"
+        - condition: "触发拆分"
+          description: "当合同数据量严格大于对应阈值时，判定为「需拆分」"
+        - condition: "拆分方式"
+          description: "优先对半拆分（1→2→4→8），直到每个子片段不超过对应阈值；拆分后的每条子文库需要 >2G，除数据量外其他字段保持一致"
+      splitting_impact:
+        - "非1.0模式单index拆分阈值：100G"
+        - "1.0模式单index拆分阈值：200G"
+        - "多index拆分阈值：300G"
+        - "受样本取样体积影响时，可在保持「优先对半」原则下进行人工复核"
+
+  - rule_id: "R21"
+    rule_name: "标识类规则"
+    description: "文库成Lane后的标识，与排机规则无关，仅用于后续数据处理"
+    priority: "low"
+    compliance_target: 1.0
+    doc_section: "文库标签分类规则"
+    doc_reference: "docs/排机规则文档.md#标识类规则"
+    details:
+      rule_type: "固定规则"
+      purpose: "文库成Lane后的标识，与排机规则无关"
+      identifier_rules:
+        - "标识类标签仅用于文库测序完成后的数据处理"
+        - "不参与排机逻辑判断"
+        - "作为后续数据分析的分类标签"
+      note: "此规则不参与排机逻辑，仅用于数据标识和后续分析"
+
+  - rule_id: "R17"
+    rule_name: "特殊处理标签规则"
+    description: "包Lane、Lane ID、FC编号、RunCycle、上机备注等特殊标签的组合规则。包Lane前置校验：同一包Lane编号下文库合同数据量≥1000G且Index对数≥5才允许包Lane"
+    priority: "high"
+    compliance_target: 0.95
+    doc_section: "文库标签分类规则"
+    doc_reference: "docs/排机规则文档.md#特殊处理标签"
+    details:
+      rule_type: "固定规则"
+      special_labels:
+        - label: "包Lane与否"
+          description: "指定文库是否独立成Lane"
+        - label: "Lane ID"
+          description: "指定Lane编号，相同编号文库排同一Lane"
+        - label: "FC编号"
+          description: "Flow Cell编号，相同FC编号组成Run"
+        - label: "RunCycle编号"
+          description: "测序参数备注，相同RunCycle排同一Lane"
+        - label: "上机备注"
+          description: "特殊需求说明"
+      combination_rules:
+        - "相同编号的文库排在同一条Lane上"
+        - "相同编号成Lane"
+        - "相同FC成Run"
+      version_rule:
+        rule_type: "可打破的固定规则"
+        description: "相同版号的文库尽量排在同一Lane中，在满足其他约束条件下优先考虑版号一致性"
+      package_lane_pre_validation:
+        rule_type: "固定规则（2025-11-26补充）"
+        requirements:
+          - requirement: "数据量要求"
+            description: "同一包Lane编号下的文库合同数据量必须达到 ≥1000G 才允许保持包Lane身份"
+          - requirement: "Index对数要求"
+            description: "仅当文库的 Index 对数 ≥ 5（即含有至少5对Index）时，包Lane才能建立即时调度"
+          - requirement: "碱基不均衡限制"
+            description: "碱基不均衡文库若申请包Lane，需同时满足所属分组的最大数据量（240G/150G/90G）与类型混排规则"
+        validation_method: "在进入排机流程前，系统应先做包Lane校验，不满足条件的文库需自动解除包Lane标记并回到普通排机池"
+
+  - rule_id: "R18"
+    rule_name: "质量控制要求"
+    description: "测序质量阈值、产出要求、QPCR检测、错位Barcode比例等质量控制标准"
+    priority: "critical"
+    compliance_target: 1.0
+    doc_section: "质量控制要求"
+    doc_reference: "docs/排机规则文档.md#质量控制要求"
+    details:
+      sequencing_quality_requirements:
+        - library_type: "PE150测序"
+          requirement: "双端质量 > 85%"
+        - library_type: "3'单细胞类型"
+          requirement: "R2质量 > 85%"
+        - library_type: "5'单细胞类型"
+          requirement: "R1质量 > 85%"
+        - library_type: "未注明单细胞类型"
+          requirement: "平均质量 > 70%"
+      quality_failure_handling: "降低非均衡文库类型比例"
+      output_requirements:
+        - "全部样本真实产率趋近1"
+        - "CV值 < 1.15（lane总下单数据量/lane总合同数据量），最大误差15%以内，越小越好"
+      qpcr_molarity_detection:
+        process: "T7工序"
+        threshold: 1.5
+        action: "QPCR摩尔浓度 ≤ 1.5的文库需告知实验员（不影响排机规则）"
+      misaligned_barcode_ratio:
+        applicable_process: "PE250工序"
+        condition: "该类型总数据量占整条Lane数据量的比例 ≥ 85%时适用该规则"
+        rules:
+          - barcode_ratio: "≥ 85%"
+            lane_capacity: 400
+            phix_add: "不添加PhiX"
+          - barcode_ratio: "70-85%"
+            lane_capacity: 410
+            phix_add: "添加5%PhiX"
+          - barcode_ratio: "< 70%"
+            lane_capacity: 420
+            phix_add: "添加33%PhiX"
+        note: "根据错位Barcode比例调整Lane数据量和PhiX添加量，详细数据量规则见规则1中的Novaseq PE250工序部分"
+
+  - rule_id: "R19"
+    rule_name: "产出评判标准"
+    description: "有效合同总量、真实产率、溢出比、产出稳定性等评判指标"
+    priority: "high"
+    compliance_target: 0.95
+    doc_section: "产出评判标准"
+    doc_reference: "docs/排机规则文档.md#产出评判标准"
+    details:
+      valid_contract_total:
+        target: "值 ≥ 合同数据量，越接近越好"
+        description: "衡量排机效果的核心指标，确保满足合同数据量要求"
+      real_yield_rate:
+        target: "≥ 1，越接近1越好"
+        formula: "真实产率 = 实际产出量 / 预期产出量"
+        description: "衡量测序产出效率的指标"
+      overflow_ratio:
+        target: "越接近0越好"
+        formula: "溢出比 = (测序产出量 - 有效产出量) / 合同数据量"
+        description: "衡量数据浪费程度，越低越经济"
+      output_stability_indicators:
+        - "全部样本真实产率趋近1"
+        - "CV值 < 1.15（lane总下单数据量/lane总合同数据量），最大误差15%以内，越小越好"
+
+  - rule_id: "R20"
+    rule_name: "特殊限制条件"
+    description: "甲基化文库特殊处理、T7-C4工序特殊规则、库检结果要求等"
+    priority: "high"
+    compliance_target: 0.95
+    doc_section: "特殊限制条件"
+    doc_reference: "docs/排机规则文档.md#特殊限制条件"
+    details:
+      library_type_exclusion_rules:
+        strict_restrictions:
+          - library: "10x HD Visium空间转录组文库(新)"
+            forbidden_with:
+              - "10X转录组-3'文库"
+              - "10X转录组-3'膜蛋白文库"
+              - "墨卓转录组-3端文库"
+          - library: "10X ATAC文库"
+            forbidden_with:
+              - "10x_cellranger拆分方式的文库"
+            note: "不排同Run"
+      methylation_library_special_handling:
+        - "甲基化文库自主包Lane时，添加8.33% PhiX"
+        - "含甲基化文库且数据量占比 ≤ 160G时，T7机器Lane数据量调整为1600G"
+      t7_c4_process_special_rules:
+        data_volume_rules:
+          - machine: "T7-C4"
+            lane_capacity: 4500
+            method: "S4"
+            description: "标准T7-C4工序"
+          - machine: "T7-Stereo-FFPE"
+            lane_capacity: 5000
+            method: "Stereo FFPE"
+            description: "FFPE样本空间转录组"
+          - machine: "T7-Stereo"
+            lane_capacity: 4000
+            method: "StereoV1_2/V1_3"
+            description: "标准空间转录组"
+        mixing_rules:
+          - condition: "cDNA与oligo混排时"
+            rule: "oligo上限数据量 < 700G"
+          - condition: "仅cDNA排机"
+            rule: "无限制"
+          - condition: "仅oligo排机"
+            rule: "无限制"
+      library_inspection_requirements:
+        - "库检结果要求不为0"
+        - "T7工序的文库，QPCR摩尔浓度 ≤ 1.5需特别告知实验员"
+
+# 规则分类统计
+rule_statistics:
+  total_rules: 22
+  by_priority:
+    critical: 4
+    high: 10
+    medium: 7
+    low: 1
+  by_compliance_target:
+    "1.0": 5
+    "0.95": 10
+    "0.90": 5
+    "0.85": 1
+
+# 上机浓度规则
+# 更新时间: 2025-11-26
+loading_concentration:
+  # 碱基不均衡包Lane（文库名包含10×3'或10×5'的碱基不均衡文库的包Lane）
+  base_imbalance_package_lane: 2.5
+  # 碱基不均衡散样混排
+  base_imbalance_mixed: 1.78
+  # 含临检文库的Lane
+  clinical_lane: 2.3
+  # 默认浓度
+  default: 1.5
+
+# Pooling系数调整规则
+# 更新时间: 2025-11-26
+pooling_adjustment:
+  # 下单数据量 < 1G 时的调整
+  min_order_amount: 1.0  # GB
+  min_order_coefficient_range:
+    min: 1.5
+    max: 2.0
+  # 下单量 > 2×合同量 时的调整
+  max_order_ratio: 2.0
+  max_order_coefficient_range:
+    min: 1.3
+    max: 2.0
+
+# 文档映射信息
+documentation:
+  source_file: "docs/排机规则文档.md"
+  last_sync_date: "2025-11-26"
+  sync_notes: |
+    配置从文档同步，确保一致性。主要更新内容（2025-11-26）：
+    1. 更新R16（文库拆分规则）：统一为非1.0单index阈值100G、1.0单index阈值200G、多index阈值300G，并保持对半拆分
+    2. 更新R17（特殊处理标签规则）：添加包Lane前置校验（数据量≥1000G且Index对数≥5）
+    3. 更新R7（碱基不均衡）：区分常规场景（<40%）和3.6T-NEW模式（≤30%），确认分组29规则（分组27占比≤20%）
+    4. 添加R5A（加测文库比例限制）：同一条Lane中，加测文库合同数据量占比≤25%且允许额外10G缓冲
+    5. 更新浓度规则和Pooling调整规则

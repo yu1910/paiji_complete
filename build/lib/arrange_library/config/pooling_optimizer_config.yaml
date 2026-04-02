@@ -1,0 +1,18 @@
+# Pooling优化器配置
+# 创建时间：2025-12-30 15:30:00
+# 更新时间：2026-01-08 14:34:43
+
+pooling_optimizer:
+  enabled: true
+  model_path: "models/loutput_pre_lane_v5/lightgbm_model.pkl"
+  encoders_path: "models/loutput_pre_lane_v5/label_encoders.pkl"
+  safety_factor: 1.08
+  under_delivery_tolerance_ratio: 0
+  strategy: "delivery_first"
+  max_coefficient: 2.0
+  min_coefficient: 0.7
+  min_ordered_data_gb: 1.0
+  order_cv_ratio_threshold: 1.15
+  fallback_on_error: false
+  model_timeout_seconds: 5
+  target_output_gb: 90.0
