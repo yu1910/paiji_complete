@@ -83,10 +83,10 @@ lane_capacities:
     max: 2100
     description: "1.0模式混排Lane容量上限"
   package_lane:
-    min: 995
-    max: 1005
+    min: 999.99
+    max: 1000.01
     target: 1000
-    description: "包Lane容量范围（1000G±5G）"
+    description: "包Lane容量范围（1000G±0.01G）"
 
 # =============================================================================
 # 1.0模式规则配置

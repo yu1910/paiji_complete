@@ -43,7 +43,7 @@ from arrange_library.core.ai.pooling_coefficient_optimizer import (
     PoolingOptimizationResult,
 )
 from arrange_library.core.config.scheduling_config import get_scheduling_config, SchedulingMode
-from models.library_info import EnhancedLibraryInfo, MachineType
+from arrange_library.models.library_info import EnhancedLibraryInfo, MachineType
 from arrange_library.core.constraints.index_validator_verified import IndexConflictValidator
 from arrange_library.core.constraints.lane_validator import LaneValidator
 from arrange_library.core.scheduling.scheduling_types import LaneAssignment, SchedulingSolution
@@ -278,11 +278,37 @@ class GreedyLaneScheduler:
             validation_metadata.setdefault('process_code', getattr(first_lib, 'test_code', None))
             validation_metadata.setdefault('test_code', getattr(first_lib, 'test_code', None))
             validation_metadata.setdefault('test_no', getattr(first_lib, 'test_no', ''))
-        return self.scheduling_config.get_lane_capacity_range(
+        return self._get_scheduling_lane_capacity_range(
             libraries=libraries or [],
             machine_type=machine_type,
             metadata=validation_metadata,
         )
+
+    @staticmethod
+    def _apply_scheduling_capacity_cap(selection: Any) -> Any:
+        """仅在排机阶段收紧标准25B规则上限，不影响LaneValidator。"""
+        rule_code = str(getattr(selection, "rule_code", "") or "")
+        if rule_code in {"tj_1595_standard_pe150_25b", "tj_1595_standard_pe150_25b_other"}:
+            selection = replace(
+                selection,
+                max_target_gb=min(float(selection.max_target_gb), 1100.0),
+                effective_max_gb=min(float(selection.effective_max_gb), 1105.0),
+            )
+        return selection
+
+    def _get_scheduling_lane_capacity_range(
+        self,
+        libraries: List[EnhancedLibraryInfo],
+        machine_type: str,
+        metadata: Optional[Dict[str, Any]] = None,
+    ) -> Any:
+        """获取仅用于排机的容量规则，允许比校验规则更保守。"""
+        selection = self.scheduling_config.get_lane_capacity_range(
+            libraries=libraries,
+            machine_type=machine_type,
+            metadata=metadata,
+        )
+        return self._apply_scheduling_capacity_cap(selection)
 
     def _resolve_lane_capacity_limits(
         self,
@@ -1242,9 +1268,90 @@ class GreedyLaneScheduler:
     
     def _sort_libraries(self, libraries: List[EnhancedLibraryInfo]) -> List[EnhancedLibraryInfo]:
         """
-        简单排序：按数据量降序（大文库优先，更容易填满Lane）
+        普通排序：按优先级分层后，再按数据量降序。
         """
-        return sorted(libraries, key=lambda lib: -lib.get_data_amount_gb())
+        return sorted(
+            libraries,
+            key=lambda lib: (
+                self._get_scattered_mix_priority_rank(lib),
+                self._get_scattered_mix_delete_date_sort_value(lib),
+                -lib.get_data_amount_gb(),
+            ),
+        )
+
+    def _get_scattered_mix_priority_rank(self, lib: EnhancedLibraryInfo) -> int:
+        """散样混排优先级：临检和SJ > YC > 其他。"""
+        data_type = str(getattr(lib, "data_type", "") or "").strip()
+        if data_type in {"临检", "SJ"} or lib.is_clinical_by_code() or lib.is_s_level_customer():
+            return 0
+        if data_type == "YC" or lib.is_yc_library():
+            return 1
+        return 2
+
+    def _parse_scattered_mix_delete_date(self, lib: EnhancedLibraryInfo) -> Optional[float]:
+        """解析散样混排的delete_date天数字段，数值越小表示越临近越优先。"""
+        raw_value = getattr(lib, "_delete_date_raw", None)
+        if raw_value in (None, ""):
+            raw_value = getattr(lib, "deduction_time", None)
+        if raw_value in (None, ""):
+            return None
+
+        try:
+            return float(raw_value)
+        except (TypeError, ValueError):
+            return None
+
+    def _get_scattered_mix_delete_date_sort_value(self, lib: EnhancedLibraryInfo) -> float:
+        """其他文库按delete_date排序，越临近越优先；缺失值排最后。"""
+        if self._get_scattered_mix_priority_rank(lib) < 2:
+            return 0.0
+        parsed = self._parse_scattered_mix_delete_date(lib)
+        if parsed is None:
+            return float("inf")
+        return parsed
+
+    def _sort_remaining_for_scattered_mix_lane(
+        self,
+        libraries: List[EnhancedLibraryInfo],
+    ) -> List[EnhancedLibraryInfo]:
+        """散样混排成Lane顺序：优先聚拢高优先级同类文库。"""
+        if not libraries:
+            return libraries
+
+        board_sorted = self._sort_by_board_preference(libraries)
+        board_order = {id(lib): idx for idx, lib in enumerate(board_sorted)}
+        return sorted(
+            libraries,
+            key=lambda lib: (
+                self._get_scattered_mix_priority_rank(lib),
+                self._get_scattered_mix_delete_date_sort_value(lib),
+                board_order.get(id(lib), len(board_order)),
+                -lib.get_data_amount_gb(),
+            ),
+        )
+
+    def _sort_remaining_for_lane_seed(
+        self,
+        libraries: List[EnhancedLibraryInfo],
+        seed_lib: EnhancedLibraryInfo,
+    ) -> List[EnhancedLibraryInfo]:
+        """单条Lane内优先吞同级高优先级文库，降低临检/SJ/YC被打散概率。"""
+        if not libraries:
+            return libraries
+
+        seed_rank = self._get_scattered_mix_priority_rank(seed_lib)
+        base_sorted = self._sort_remaining_for_scattered_mix_lane(libraries)
+        base_order = {id(lib): idx for idx, lib in enumerate(base_sorted)}
+        return sorted(
+            libraries,
+            key=lambda lib: (
+                0 if self._get_scattered_mix_priority_rank(lib) == seed_rank else 1,
+                self._get_scattered_mix_priority_rank(lib),
+                self._get_scattered_mix_delete_date_sort_value(lib),
+                base_order.get(id(lib), len(base_order)),
+                -lib.get_data_amount_gb(),
+            ),
+        )
 
     def _sort_by_board_preference(
         self, libraries: List[EnhancedLibraryInfo]
@@ -1340,7 +1447,7 @@ class GreedyLaneScheduler:
             remaining_all: List[EnhancedLibraryInfo] = []
 
             for target_group, libs in grouped.items():
-                remaining = sorted(libs, key=lambda lib: -lib.get_data_amount_gb())
+                remaining = self._sort_remaining_for_scattered_mix_lane(libs)
                 target_ratio = 1.0 if target_group == "G29" else self.imbalance_handler.get_group_data_ratio(target_group)
                 target_imbalance = self.config.lane_capacity_gb * target_ratio
                 min_imbalance = target_imbalance * 0.95
@@ -2268,7 +2375,7 @@ class GreedyLaneScheduler:
             bin_start = bin_idx * bin_width
             bin_end = (bin_idx + 1) * bin_width
             
-            sorted_cluster = sorted(cluster_libs, key=lambda lib: -lib.get_data_amount_gb())
+            sorted_cluster = self._sort_remaining_for_scattered_mix_lane(cluster_libs)
             available = [lib for lib in sorted_cluster if lib.origrec not in used_libs]
             
             if len(available) < min_count:
@@ -2444,8 +2551,8 @@ class GreedyLaneScheduler:
                            f"{len(all_internal_libs)}个可用内部文库")
                 
                 # 按数据量排序
-                high_ratio_libs.sort(key=lambda lib: -lib.get_data_amount_gb())
-                all_internal_libs.sort(key=lambda lib: -lib.get_data_amount_gb())
+                high_ratio_libs = self._sort_remaining_for_scattered_mix_lane(high_ratio_libs)
+                all_internal_libs = self._sort_remaining_for_scattered_mix_lane(all_internal_libs)
                 
                 # 尝试混合组Lane（确保客户占比<=50%）
                 mixed_lanes = self._form_mixed_customer_lanes(
@@ -2832,7 +2939,7 @@ class GreedyLaneScheduler:
             machine_type_enum = MachineType.NOVA_X_25B
         
         # 按数据量排序（大文库优先）
-        sorted_non_10bp = sorted(non_10bp_libs, key=lambda lib: -lib.get_data_amount_gb())
+        sorted_non_10bp = self._sort_remaining_for_scattered_mix_lane(non_10bp_libs)
         
         non_10bp_lanes: List[LaneAssignment] = []
         used_libs: Set[str] = set()
@@ -3209,9 +3316,9 @@ class GreedyLaneScheduler:
             machine_type_enum = MachineType.NOVA_X_25B
         
         # 按数据量排序骨架（大的优先）
-        sorted_backbone = sorted(backbone_libs, key=lambda lib: -lib.get_data_amount_gb())
+        sorted_backbone = self._sort_remaining_for_scattered_mix_lane(backbone_libs)
         # 按数据量排序小文库（大的优先，更快填满）
-        sorted_small = sorted(small_libs, key=lambda lib: -lib.get_data_amount_gb())
+        sorted_small = self._sort_remaining_for_scattered_mix_lane(small_libs)
         
         backbone_lanes: List[LaneAssignment] = []
         remaining_backbone: List[EnhancedLibraryInfo] = list(sorted_backbone)
@@ -3523,10 +3630,11 @@ class GreedyLaneScheduler:
         
         # 逐条Lane排机
         while remaining:
-            # 软约束：每条Lane开始前按板号频次重排，同板号文库聚合优先进入同一Lane
-            remaining = self._sort_by_board_preference(remaining)
+            # 散样混排策略优先于一般排序：临检 > YC > delete_date > 其他，尽量集中到连续Lane。
+            remaining = self._sort_remaining_for_scattered_mix_lane(remaining)
+            lane_candidate_order = self._sort_remaining_for_lane_seed(remaining, remaining[0])
 
-            seed_rule = self.scheduling_config.get_lane_capacity_range(
+            seed_rule = self._get_scheduling_lane_capacity_range(
                 libraries=[remaining[0]],
                 machine_type=machine_type_enum.value,
             )
@@ -3549,20 +3657,40 @@ class GreedyLaneScheduler:
             
             # 遍历剩余文库，尝试放入当前Lane
             next_remaining: List[EnhancedLibraryInfo] = []
-            for lib in remaining:
+            deferred_remaining: List[EnhancedLibraryInfo] = []
+            placed_ids: Set[str] = set()
+            break_index: Optional[int] = None
+            for lib in lane_candidate_order:
                 # 检查是否能放入
                 if self._can_add_to_lane(current_lane, lib):
                     current_lane.add_library(lib)
+                    placed_ids.add(str(getattr(lib, "origrec", "") or id(lib)))
                     
                     # 检查是否达到软目标容量（非硬上限）
                     if current_lane.total_data_gb >= target_capacity_gb:
                         # 达到软目标，剩余文库留给下一条Lane
-                        idx = remaining.index(lib)
-                        next_remaining.extend(remaining[idx+1:])
+                        break_index = lane_candidate_order.index(lib)
                         break
                 else:
                     # 放不进去，留给下一条Lane
-                    next_remaining.append(lib)
+                    deferred_remaining.append(lib)
+
+            if break_index is not None:
+                trailing_candidates = lane_candidate_order[break_index + 1 :]
+                deferred_remaining.extend(trailing_candidates)
+
+            if lane_candidate_order:
+                seen_ids = {id(lib) for lib in deferred_remaining}
+                for lib in remaining:
+                    lib_key = str(getattr(lib, "origrec", "") or id(lib))
+                    if lib_key in placed_ids:
+                        continue
+                    if id(lib) in seen_ids:
+                        continue
+                    deferred_remaining.append(lib)
+                    seen_ids.add(id(lib))
+
+            next_remaining = deferred_remaining
             
             # 当前Lane排完，检查是否有效
             if not current_lane.libraries:
@@ -3570,7 +3698,7 @@ class GreedyLaneScheduler:
                 logger.warning(f"剩余 {len(remaining)} 个文库无法分配（全部有约束冲突）")
                 break
             
-            completed_rule = self.scheduling_config.get_lane_capacity_range(
+            completed_rule = self._get_scheduling_lane_capacity_range(
                 libraries=current_lane.libraries,
                 machine_type=machine_type_enum.value,
                 metadata=self._build_lane_validation_metadata(current_lane),
@@ -3670,7 +3798,7 @@ class GreedyLaneScheduler:
         
         # 1. 容量上限检查
         new_total = lane.total_data_gb + lib_data
-        lane_rule = self.scheduling_config.get_lane_capacity_range(
+        lane_rule = self._get_scheduling_lane_capacity_range(
             libraries=test_libraries,
             machine_type=machine_type_str,
             metadata=lane_metadata,

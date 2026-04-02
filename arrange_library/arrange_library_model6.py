@@ -1,7 +1,7 @@
 """
 端到端排机流程测试 - 排机与 Pooling 预测
 创建时间：2026-01-12 11:23:30
-更新时间：2026-03-16 17:26:55
+更新时间：2026-03-31 16:59:35
 
 功能：
 - 支持完整排机流程（GreedyLaneScheduler）
@@ -26,6 +26,7 @@ from dataclasses import dataclass
 from copy import deepcopy
 from datetime import datetime
 from enum import Enum
+from functools import lru_cache
 from pathlib import Path
 from typing import Any, Dict, List, Optional, Set, Tuple, Union
 
@@ -73,6 +74,18 @@ SPECIAL_SPLIT_GROUP_B: Set[str] = {
     "10x_cellranger_atac_indexset",
     "10x_cellranger_atac",
 }
+SCHEDULING_MAX_TARGET_CAP_GB = 1100.0
+SCHEDULING_MAX_EFFECTIVE_CAP_GB = 1105.0
+SCHEDULING_CAP_RULE_CODES: Set[str] = {
+    "tj_1595_standard_pe150_25b",
+    "tj_1595_standard_pe150_25b_other",
+}
+INDEX_RULE_CONFIG_PATH = Path(__file__).resolve().parents[2] / "merge_deal" / "config"
+PACKAGE_LANE_TARGET_GB = 1000.0
+PACKAGE_LANE_TOLERANCE_GB = 0.01
+PACKAGE_LANE_MIN_GB = PACKAGE_LANE_TARGET_GB - PACKAGE_LANE_TOLERANCE_GB
+PACKAGE_LANE_MAX_GB = PACKAGE_LANE_TARGET_GB + PACKAGE_LANE_TOLERANCE_GB
+PACKAGE_LANE_MIN_INDEX_PAIRS = 5
 
 
 def _normalize_text_for_match(value: Any) -> str:
@@ -92,23 +105,59 @@ def _normalize_text_for_match(value: Any) -> str:
     )
 
 
+def _machine_type_to_text(machine_type: Any, default: str = "") -> str:
+    """将机型对象统一转换为业务文本，兼容不同模块中的同名枚举。"""
+    if machine_type is None:
+        return default
+    value = getattr(machine_type, "value", machine_type)
+    text = str(value).strip()
+    return text or default
+
+
 def _normalize_seq_strategy_keyword(value: Any) -> str:
     """统一测序策略匹配口径。"""
     return _normalize_text_for_match(value).replace("BP", "").replace(" ", "")
 
 
-def _get_lane_loading_target_machine_texts() -> Set[str]:
-    """从统一规则表获取Lane上机浓度规则适用机型集合。"""
-    scope = get_scheduling_config().get_loading_rule_scope()
-    return set(scope.get("machine_types", set()) or set())
-
-
-def _get_lane_loading_target_testno_text() -> str:
-    """从统一规则表获取Lane上机浓度规则适用工序。"""
-    test_nos = sorted(set(get_scheduling_config().get_loading_rule_scope().get("test_nos", set()) or set()))
-    if len(test_nos) == 1:
-        return str(test_nos[0])
-    return ""
+LANE_LOADING_COMBO_GROUP_A = {
+    _normalize_text_for_match(item)
+    for item in [
+        "10X转录组-5'文库",
+        "10X转录组文库-5V3文库",
+        "10X转录组V(D)J-BCR文库",
+        "10X转录组V(D)J-TCR文库",
+        "客户-10X VDJ文库",
+        "10X转录组-5‘膜蛋白文库",
+        "客户-10X 5 Feature Barcode文库",
+        "客户-10X 5 单细胞转录组文库",
+        "客户-10X转录组V(D)J-BCR文库",
+        "客户-10X转录组V(D)J-TCR文库",
+    ]
+}
+LANE_LOADING_COMBO_GROUP_B = {
+    _normalize_text_for_match(item)
+    for item in [
+        "10X Visium FFPEV2空间转录组文库(V2)",
+        "10X Visium空间转录组文库",
+        "10X转录组-3‘膜蛋白文库",
+        "客户-10X 3 Feature Barcode文库",
+        "客户-10X 3 单细胞转录组文库",
+        "客户文库-10X Visium 文库",
+        "客户-10X Visium FFPEV2空间转录组文库(V2)",
+        "客户-10X Visium空间转录组文库",
+        "墨卓转录组-3端文库",
+        "10X转录组-3'文库",
+        "10X转录组文库-3V4文库",
+    ]
+}
+LANE_LOADING_10_PLUS_24_ATAC_TYPES = {
+    _normalize_text_for_match(item)
+    for item in [
+        "客户-10X ATAC文库",
+        "客户-10X ATAC (Multiome)文库",
+        "10xATAC-seq文库",
+    ]
+}
 
 
 class ConflictType(Enum):
@@ -326,10 +375,19 @@ def _resolve_machine_type_enum_simple(eq_type: Optional[str]) -> MachineType:
     """将机型字符串转换为MachineType枚举"""
     if not eq_type:
         return MachineType.NOVA_X_25B
-    text = str(eq_type)
-    if "10B" in text:
+    text = str(eq_type).strip()
+    text_lower = text.lower()
+    text_upper = text.upper()
+    if "novaseq x plus" in text_lower or "nova seq x plus" in text_lower:
+        return MachineType.NOVASEQ_X_PLUS
+    if "10B" in text_upper and "25B" not in text_upper:
         return MachineType.NOVA_X_10B
     return MachineType.NOVA_X_25B
+
+
+def _is_machine_supported_for_arrangement(machine_type: MachineType) -> bool:
+    """当前V6排机主流程仅支持25B与NovaSeq X Plus，显式排除10B。"""
+    return machine_type in {MachineType.NOVA_X_25B, MachineType.NOVASEQ_X_PLUS}
 
 
 def _lane_capacity_for_machine(machine_type: MachineType) -> float:
@@ -347,15 +405,17 @@ def _resolve_lane_capacity_selection(
     lane_metadata: Optional[Dict[str, Any]] = None,
 ) -> Any:
     """按统一配置表解析Lane容量范围，未命中时自动回退到系统默认配置。"""
-    machine_type_text = (
-        machine_type.value if isinstance(machine_type, MachineType) else str(machine_type or "Nova X-25B")
-    )
+    machine_type_text = _machine_type_to_text(machine_type, default="Nova X-25B")
     metadata = _build_lane_metadata_for_validator(lane_id, lane_metadata)
-    return get_scheduling_config().get_lane_capacity_range(
+    selection = get_scheduling_config().get_lane_capacity_range(
         libraries=libraries,
         machine_type=machine_type_text,
         metadata=metadata,
     )
+    if getattr(selection, "rule_code", "") in SCHEDULING_CAP_RULE_CODES:
+        selection.max_target_gb = min(float(selection.max_target_gb), SCHEDULING_MAX_TARGET_CAP_GB)
+        selection.effective_max_gb = min(float(selection.effective_max_gb), SCHEDULING_MAX_EFFECTIVE_CAP_GB)
+    return selection
 
 
 def _resolve_lane_capacity_limits(
@@ -377,6 +437,162 @@ def _resolve_lane_capacity_limits(
 def _total_lane_data(libraries: List[EnhancedLibraryInfo]) -> float:
     """计算文库列表的总数据量"""
     return sum(lib.get_data_amount_gb() for lib in libraries)
+
+
+def _count_library_index_pairs(lib: EnhancedLibraryInfo) -> int:
+    """统计单个文库的Index对数。"""
+    index_seq = str(getattr(lib, "index_seq", "") or "").strip()
+    if not index_seq:
+        return 0
+    return len([item for item in index_seq.split(",") if str(item).strip()])
+
+
+def _count_lane_index_pairs(libraries: List[EnhancedLibraryInfo]) -> int:
+    """统计整条Lane的Index对总数。"""
+    return sum(_count_library_index_pairs(lib) for lib in libraries)
+
+
+def _get_package_lane_number_from_lane(lane: LaneAssignment) -> str:
+    """提取Lane对应的包Lane编号。"""
+    package_id = _safe_str(getattr(lane, "metadata", {}).get("package_id", ""), default="")
+    if package_id:
+        return package_id
+    for lib in getattr(lane, "libraries", []) or []:
+        baleno = _safe_str(
+            getattr(lib, "package_lane_number", None) or getattr(lib, "baleno", None),
+            default="",
+        )
+        if baleno:
+            return baleno
+    return ""
+
+
+def _validate_package_lane_rules(lane: LaneAssignment) -> List[str]:
+    """仅对带包Lane编号的Lane执行专项规则校验。"""
+    package_lane_number = _get_package_lane_number_from_lane(lane)
+    if not package_lane_number:
+        return []
+
+    libraries = getattr(lane, "libraries", []) or []
+    total_contract_data = sum(float(getattr(lib, "contract_data_raw", 0.0) or 0.0) for lib in libraries)
+    total_index_pairs = _count_lane_index_pairs(libraries)
+    conflicts = _validate_index_conflicts_latest(libraries)
+
+    errors: List[str] = []
+    if total_index_pairs < PACKAGE_LANE_MIN_INDEX_PAIRS:
+        errors.append(
+            f"包Lane {package_lane_number} Index对数不足: 当前{total_index_pairs}对, 要求>={PACKAGE_LANE_MIN_INDEX_PAIRS}对"
+        )
+    if conflicts:
+        preview = [
+            f"{conflict.record_id_1} vs {conflict.record_id_2}"
+            for conflict in conflicts[:3]
+        ]
+        errors.append(
+            f"包Lane {package_lane_number} 存在Index重复: {', '.join(preview)}"
+        )
+    if total_contract_data < PACKAGE_LANE_MIN_GB or total_contract_data > PACKAGE_LANE_MAX_GB:
+        errors.append(
+            f"包Lane {package_lane_number} 合同数据量不满足1000G±0.01G: 当前{total_contract_data:.3f}G"
+        )
+    return errors
+
+
+def _validate_final_package_lanes(solution: Any) -> None:
+    """排机完成后复核所有包Lane规则。"""
+    all_errors: List[str] = []
+    for lane in getattr(solution, "lane_assignments", []) or []:
+        all_errors.extend(_validate_package_lane_rules(lane))
+
+    if all_errors:
+        for error in all_errors:
+            logger.error(error)
+        raise ValueError("排后包Lane校验失败，请检查日志中的包Lane规则明细")
+
+    logger.info("排后包Lane校验通过")
+
+
+def _validate_no_split_for_package_lane_libraries(solution: Any) -> None:
+    """复核带包Lane编号文库仅允许多包Lane编号特例拆分。"""
+    errors: List[str] = []
+    multi_split_lane_ids: Dict[str, Set[str]] = {}
+    multi_split_expected_package_ids: Dict[str, Set[str]] = {}
+    lane_purity_checked: Set[str] = set()
+
+    for lane in getattr(solution, "lane_assignments", []) or []:
+        lane_id = _safe_str(getattr(lane, "lane_id", ""), default="")
+        lane_package_lane_number = _get_package_lane_number_from_lane(lane)
+        for lib in getattr(lane, "libraries", []) or []:
+            package_lane_number = _safe_str(
+                getattr(lib, "package_lane_number", None) or getattr(lib, "baleno", None),
+                default="",
+            )
+            if not package_lane_number:
+                continue
+            is_split = _is_split_library(lib) or int(getattr(lib, "total_fragments", 0) or 0) > 1
+            if not is_split:
+                continue
+
+            is_allowed_multi_pkg_split = bool(getattr(lib, "_package_lane_multi_split", False))
+            original_numbers = getattr(lib, "_package_lane_original_numbers", None) or ()
+            expected_package_ids = {
+                _safe_str(item, default="")
+                for item in original_numbers
+                if _safe_str(item, default="")
+            }
+            family_id = _safe_str(
+                getattr(lib, "_package_lane_multi_split_family_id", None),
+                default="",
+            )
+
+            if not (
+                is_allowed_multi_pkg_split
+                and family_id
+                and len(expected_package_ids) > 1
+                and package_lane_number in expected_package_ids
+                and lane_package_lane_number == package_lane_number
+                and int(getattr(lib, "total_fragments", 0) or 0) == len(expected_package_ids)
+            ):
+                errors.append(
+                    "包Lane {} 文库 {} 被拆分，但不属于允许的“多包Lane编号专用拆分”".format(
+                        package_lane_number,
+                        _safe_str(getattr(lib, "origrec", ""), default="UNKNOWN"),
+                    )
+                )
+                continue
+
+            if lane_id and lane_id not in lane_purity_checked:
+                lane_purity_checked.add(lane_id)
+                non_package_lane_libs = [
+                    lane_lib
+                    for lane_lib in getattr(lane, "libraries", []) or []
+                    if not _safe_str(
+                        getattr(lane_lib, "package_lane_number", None) or getattr(lane_lib, "baleno", None),
+                        default="",
+                    )
+                ]
+                if non_package_lane_libs:
+                    errors.append(
+                        f"多包Lane拆分目标Lane {lane_id} 混入了{len(non_package_lane_libs)}个非包Lane文库"
+                    )
+
+            multi_split_lane_ids.setdefault(family_id, set()).add(str(lane.lane_id))
+            multi_split_expected_package_ids.setdefault(family_id, set()).update(expected_package_ids)
+
+    for family_id, expected_package_ids in multi_split_expected_package_ids.items():
+        actual_lane_ids = multi_split_lane_ids.get(family_id, set())
+        if len(actual_lane_ids) != len(expected_package_ids):
+            errors.append(
+                f"多包Lane拆分家族 {family_id} 未分配到足够多的不同Lane: "
+                f"目标包Lane数={len(expected_package_ids)}, 实际Lane数={len(actual_lane_ids)}"
+            )
+
+    if errors:
+        for error in errors:
+            logger.error(error)
+        raise ValueError("排后校验失败：包Lane编号文库拆分规则不满足")
+
+    logger.info("排后校验通过：包Lane编号文库拆分规则满足约束")
 
 
 def _is_index_conflict_only(result: Any) -> bool:
@@ -1027,6 +1243,52 @@ def _get_lane_sample_types(libraries: List[EnhancedLibraryInfo]) -> Set[str]:
     return sample_types
 
 
+def _lane_contains_customer_prefixed_sample_type(
+    lane_sample_types: Set[str],
+) -> bool:
+    """判断Lane文库类型中是否存在客户前缀。"""
+    return any("客户-" in sample_type for sample_type in lane_sample_types)
+
+
+def _resolve_explicit_lane_loading_concentration(
+    libraries: List[EnhancedLibraryInfo],
+    lane_sample_types: Set[str],
+) -> Tuple[Optional[float], str]:
+    """按业务显式规则优先解析Lane排机浓度。"""
+    if not libraries:
+        return None, "empty_lane"
+
+    medical_project_data = sum(
+        float(getattr(lib, "contract_data_raw", 0.0) or 0.0)
+        for lib in libraries
+        if _is_medical_commission_library(lib)
+    )
+    if medical_project_data > 100.0:
+        return 2.3, "medical_commission_over_100g_2_3"
+
+    has_10_plus_24 = any(
+        _matches_lane_seq_strategy_keyword(lib, "10+24")
+        for lib in libraries
+    )
+    if has_10_plus_24 and any(
+        _library_sample_type_matches_rule(lib, LANE_LOADING_10_PLUS_24_ATAC_TYPES)
+        for lib in libraries
+    ):
+        return 2.0, "10_plus_24_atac_2_0"
+
+    if lane_sample_types and lane_sample_types.issubset(LANE_LOADING_COMBO_GROUP_A):
+        if _lane_contains_customer_prefixed_sample_type(lane_sample_types):
+            return 2.5, "special_10x_combo_group_a_customer_2_5"
+        return 1.78, "special_10x_combo_group_a_non_customer_1_78"
+
+    if lane_sample_types and lane_sample_types.issubset(LANE_LOADING_COMBO_GROUP_B):
+        if _lane_contains_customer_prefixed_sample_type(lane_sample_types):
+            return 2.5, "special_10x_combo_group_b_customer_2_5"
+        return 1.78, "special_10x_combo_group_b_non_customer_1_78"
+
+    return None, "no_explicit_loading_rule_matched"
+
+
 def _is_medical_commission_library(lib: EnhancedLibraryInfo) -> bool:
     """判断文库是否属于医学委托项目。"""
     sub_project_name = _normalize_text_for_match(getattr(lib, "sub_project_name", ""))
@@ -1109,10 +1371,146 @@ def _match_lane_loading_concentration_rule(
 def _resolve_lane_loading_concentration(
     libraries: List[EnhancedLibraryInfo],
 ) -> Tuple[Optional[float], str]:
-    """按统一规则表计算Lane上机浓度（未命中返回空）。"""
+    """按显式业务规则优先，其次走统一规则表计算Lane上机浓度。"""
     if not libraries:
         return None, "empty_lane"
+    lane_sample_types = _get_lane_sample_types(libraries)
+    explicit_concentration, explicit_rule = _resolve_explicit_lane_loading_concentration(
+        libraries,
+        lane_sample_types,
+    )
+    if explicit_concentration is not None:
+        return explicit_concentration, explicit_rule
     return get_scheduling_config().resolve_loading_concentration(libraries)
+
+
+def _resolve_lane_output_rule_fields(
+    libraries: List[EnhancedLibraryInfo],
+    machine_type: MachineType | str,
+    lane_id: str = "",
+    lane_metadata: Optional[Dict[str, Any]] = None,
+) -> Tuple[str, str, str]:
+    """解析Lane输出字段所需的规则结果。
+
+    Returns:
+        (loading_method, sequencing_mode, rule_code)
+    """
+    if not libraries:
+        return "", "", "empty_lane"
+    selection = _resolve_lane_capacity_selection(
+        libraries=libraries,
+        machine_type=machine_type,
+        lane_id=lane_id,
+        lane_metadata=lane_metadata,
+    )
+    machine_type_text = _machine_type_to_text(machine_type, default="")
+    normalized_machine_type = _normalize_text_for_match(machine_type_text)
+    loading_method = str(getattr(selection, "loading_method", "") or "").strip()
+    sequencing_mode = str(getattr(selection, "sequencing_mode", "") or "").strip()
+    rule_code = str(getattr(selection, "rule_code", "") or "").strip()
+
+    # Nova X-25B 与 NovaSeq X Plus 业务上统一按 25B 上机方式输出。
+    if not loading_method and normalized_machine_type in {
+        _normalize_text_for_match("Nova X-25B"),
+        _normalize_text_for_match("NovaSeq X Plus"),
+    }:
+        loading_method = "25B"
+
+    return loading_method, sequencing_mode, rule_code
+
+
+@lru_cache(maxsize=1)
+def _load_lane_index_rule_mapping() -> Tuple[Dict[Tuple[str, str], str], Dict[str, str]]:
+    """加载显式排机规则映射。
+
+    返回:
+        (
+            {(标准化工序名称, 标准化上机方式): 排机规则},
+            {标准化工序名称: 唯一排机规则}
+        )
+    """
+    pair_map: Dict[Tuple[str, str], str] = {}
+    test_rule_candidates: Dict[str, Set[str]] = {}
+
+    if not INDEX_RULE_CONFIG_PATH.exists():
+        logger.warning(f"排机规则映射文件不存在，跳过显式排机规则解析: {INDEX_RULE_CONFIG_PATH}")
+        return pair_map, {}
+
+    try:
+        df = pd.read_csv(INDEX_RULE_CONFIG_PATH, sep="\t", dtype=str).fillna("")
+    except Exception as exc:
+        logger.warning(f"加载排机规则映射失败: {exc}")
+        return pair_map, {}
+
+    for _, row in df.iterrows():
+        test_no = _normalize_text_for_match(row.get("工序名称", ""))
+        loading_method = _normalize_text_for_match(row.get("上机方式", ""))
+        index_rule = str(row.get("排机规则", "") or "").strip().upper()
+        if not test_no or not index_rule:
+            continue
+        if loading_method:
+            pair_map[(test_no, loading_method)] = index_rule
+        test_rule_candidates.setdefault(test_no, set()).add(index_rule)
+
+    unique_test_rule_map = {
+        test_no: next(iter(rule_values))
+        for test_no, rule_values in test_rule_candidates.items()
+        if len(rule_values) == 1
+    }
+    return pair_map, unique_test_rule_map
+
+
+def _resolve_lane_index_rule_display(
+    libraries: List[EnhancedLibraryInfo],
+    loading_method: str,
+) -> str:
+    """解析Lane显式排机规则显示值，不再依赖wkindexseq是否含分号。"""
+    if not libraries:
+        return ""
+
+    pair_map, unique_test_rule_map = _load_lane_index_rule_mapping()
+    normalized_loading_method = _normalize_text_for_match(loading_method)
+
+    matched_rules: Set[str] = set()
+    for lib in libraries:
+        test_no = _normalize_text_for_match(getattr(lib, "test_no", "") or getattr(lib, "testno", ""))
+        if not test_no:
+            continue
+
+        pair_key = (test_no, normalized_loading_method)
+        if normalized_loading_method and pair_key in pair_map:
+            matched_rules.add(pair_map[pair_key])
+            continue
+
+        unique_rule = unique_test_rule_map.get(test_no, "")
+        if unique_rule:
+            matched_rules.add(unique_rule)
+
+    if len(matched_rules) == 1:
+        return next(iter(matched_rules))
+
+    # NovaSeq X Plus / 25B / 10B 业务上默认走双端查重规则。
+    lane_test_nos = {
+        _normalize_text_for_match(getattr(lib, "test_no", "") or getattr(lib, "testno", ""))
+        for lib in libraries
+        if _normalize_text_for_match(getattr(lib, "test_no", "") or getattr(lib, "testno", ""))
+    }
+    if lane_test_nos == {_normalize_text_for_match("Novaseq X Plus-PE150")} and normalized_loading_method in {
+        "10B",
+        "25B",
+    }:
+        return "P7P5"
+
+    if matched_rules:
+        resolved_rule = sorted(matched_rules)[0]
+        logger.warning(
+            "Lane排机规则存在多个候选，使用排序后首个值: loading_method={}, rules={}",
+            loading_method,
+            sorted(matched_rules),
+        )
+        return resolved_rule
+
+    return ""
 
 
 def _get_lib_attr_float(
@@ -1133,6 +1531,61 @@ def _get_lib_attr_float(
         except (TypeError, ValueError):
             continue
     return default
+
+
+def _get_row_attr_float(
+    row: pd.Series,
+    column_names: List[str],
+    default: Optional[float] = None,
+) -> Optional[float]:
+    """按候选列名顺序读取DataFrame行中的浮点值。"""
+    for column_name in column_names:
+        if column_name not in row.index:
+            continue
+        value = row[column_name]
+        if value is None:
+            continue
+        try:
+            value_float = float(value)
+            if pd.isna(value_float):
+                continue
+            return value_float
+        except (TypeError, ValueError):
+            continue
+    return default
+
+
+def _get_row_attr_text(
+    row: pd.Series,
+    column_names: List[str],
+    default: str = "",
+) -> str:
+    """按候选列名顺序读取DataFrame行中的文本值。"""
+    for column_name in column_names:
+        if column_name not in row.index:
+            continue
+        value = row[column_name]
+        if value is None or pd.isna(value):
+            continue
+        text = str(value).strip()
+        if text and text.lower() not in {"nan", "none", "null"}:
+            return text
+    return default
+
+
+def _normalize_rate_to_decimal(rate_value: Optional[float]) -> Optional[float]:
+    """将产出率统一换算为小数；百分数口径如50会转换为0.5。"""
+    if rate_value is None:
+        return None
+    try:
+        rate_float = float(rate_value)
+    except (TypeError, ValueError):
+        return None
+    if pd.isna(rate_float):
+        return None
+    if rate_float > 1.0:
+        rate_float = rate_float / 100.0
+    return rate_float
 
 
 def _is_add_test_library(lib: EnhancedLibraryInfo) -> bool:
@@ -1159,7 +1612,7 @@ def _apply_add_test_output_rate_rule(
         "qpcr_deviation_ratio": None,
         "historical_based_order": None,
         "effective_last_outrate": None,
-        "wklistqpcr": None,
+        "wklastqpcr": None,
         "wklastorderdata": None,
         "wklastoutput": None,
         "wklastoutrate": None,
@@ -1169,12 +1622,12 @@ def _apply_add_test_output_rate_rule(
 
     result["applied"] = True
     current_qpcr = _get_lib_attr_float(lib, ["qpcr_molar", "qpcr_concentration"])
-    last_qpcr = _get_lib_attr_float(lib, ["_last_qpcr_raw", "last_qpcr", "wklistqpcr"])
+    last_qpcr = _get_lib_attr_float(lib, ["_last_qpcr_raw", "last_qpcr", "wklastqpcr", "wklistqpcr"])
     last_outrate = _get_lib_attr_float(lib, ["_last_outrate_raw", "last_outrate", "wklastoutrate"])
     last_order = _get_lib_attr_float(lib, ["_last_order_data_raw", "last_order_data", "wklastorderdata"])
     last_output = _get_lib_attr_float(lib, ["_last_output_raw", "last_output", "wklastoutput"])
 
-    result["wklistqpcr"] = last_qpcr
+    result["wklastqpcr"] = last_qpcr
     result["wklastorderdata"] = last_order
     result["wklastoutput"] = last_output
     result["wklastoutrate"] = last_outrate
@@ -1210,6 +1663,95 @@ def _apply_add_test_output_rate_rule(
     return result
 
 
+def _apply_add_test_output_rate_rule_to_prediction_df(
+    prediction_df: pd.DataFrame,
+    output_path: Optional[Path] = None,
+) -> pd.DataFrame:
+    """对prediction_delivery结果应用加测产出率规则。"""
+    if prediction_df is None or prediction_df.empty:
+        return prediction_df
+
+    df = prediction_df.copy()
+
+    applied_count = 0
+    override_count = 0
+
+    for idx, row in df.iterrows():
+        remark = _get_row_attr_text(row, ["wkaddtestsremark", "addtestsremark"])
+        if "加测" not in remark:
+            continue
+
+        ai_order = _get_row_attr_float(row, ["lorderdata"])
+        current_qpcr = _get_row_attr_float(row, ["wkqpcr", "qpcrmolar", "qpcr_molar"])
+        last_qpcr = _get_row_attr_float(row, ["wklastqpcr", "wklistqpcr"])
+        last_outrate = _get_row_attr_float(row, ["wklastoutrate"])
+        add_test_output_rate = _normalize_rate_to_decimal(
+            _get_row_attr_float(row, ["wkoutputrate", "outputrate", "output_rate"])
+        )
+        contract_data = _get_row_attr_float(row, ["wkcontractdata", "contractdata", "wkcontractdata_raw"])
+
+        if ai_order is None or contract_data is None or contract_data <= 0:
+            continue
+
+        selected_order = ai_order
+        rule_applied = False
+
+        if (
+            current_qpcr is not None
+            and last_qpcr is not None
+            and last_qpcr > 0
+            and last_outrate is not None
+        ):
+            rule_applied = True
+            qpcr_deviation_ratio = abs(current_qpcr - last_qpcr) / last_qpcr
+            qpcr_within = qpcr_deviation_ratio <= 0.15
+
+            if qpcr_within:
+                effective_last_outrate = max(last_outrate, 0.3)
+                historical_based_order = contract_data / effective_last_outrate
+                selected_order = max(selected_order, historical_based_order)
+
+        if add_test_output_rate is not None:
+            rule_applied = True
+            effective_add_test_output_rate = max(add_test_output_rate, 0.3)
+            add_test_rate_based_order = contract_data / effective_add_test_output_rate
+            selected_order = max(selected_order, add_test_rate_based_order)
+
+        if not rule_applied:
+            continue
+
+        applied_count += 1
+        if selected_order > ai_order:
+            override_count += 1
+        df.at[idx, "lorderdata"] = round(float(selected_order), 6)
+
+    logger.info(
+        "加测产出率规则应用完成: 评估{}条，覆盖{}条".format(
+            applied_count, override_count
+        )
+    )
+
+    df = df.drop(
+        columns=[
+            "ai_predicted_lorderdata",
+            "ai_predicted_lai_output",
+            "add_test_rule_applied",
+            "add_test_rule_reason",
+            "qpcr_within_15pct",
+            "qpcr_deviation_ratio",
+            "historical_based_lorderdata",
+            "effective_last_outrate",
+        ],
+        errors="ignore",
+    )
+
+    if output_path is not None:
+        df.to_csv(output_path, index=False)
+        logger.info(f"已写回加测产出率修正结果: {output_path}")
+
+    return df
+
+
 def _build_origrec_key(df: pd.DataFrame) -> pd.Series:
     """构建origrec唯一键"""
     keys: List[str] = []
@@ -1234,6 +1776,29 @@ def _build_runid_by_lane(
         run_index = idx // lanes_per_run + 1
         runid_by_lane[lane.lane_id] = f"RUN_{timestamp}_{run_index:03d}"
     return runid_by_lane
+
+
+def _partition_remaining_package_libraries(
+    libraries: List[EnhancedLibraryInfo],
+) -> Tuple[List[EnhancedLibraryInfo], List[EnhancedLibraryInfo]]:
+    """拆分包Lane失败文库与可回流普通排机的文库。
+
+    包Lane失败后的文库必须保持失败状态，不允许回流普通排机混排，也不允许拆分。
+    这里额外兜底区分，避免后续流程误把仍带包Lane编号的文库塞回 normal_libs。
+    """
+    failed_package_libraries: List[EnhancedLibraryInfo] = []
+    remaining_normal_libraries: List[EnhancedLibraryInfo] = []
+
+    for lib in libraries:
+        baleno = getattr(lib, "package_lane_number", None) or getattr(lib, "baleno", None)
+        if baleno and str(baleno).strip():
+            lib.package_lane_number = str(baleno).strip()
+            lib.is_package_lane = "是"
+            failed_package_libraries.append(lib)
+        else:
+            remaining_normal_libraries.append(lib)
+
+    return failed_package_libraries, remaining_normal_libraries
 
 
 def _build_lane_metadata_for_validator(
@@ -1759,9 +2324,26 @@ def _collect_prediction_rows(
         if not libs:
             continue
         lane_loading_concentration, lane_concentration_rule = _resolve_lane_loading_concentration(libs)
+        lane_loading_method, lane_sequencing_mode, lane_rule_code = _resolve_lane_output_rule_fields(
+            libraries=libs,
+            machine_type=lane.machine_type,
+            lane_id=lane.lane_id,
+            lane_metadata=lane.metadata,
+        )
+        lane_index_rule = _resolve_lane_index_rule_display(
+            libraries=libs,
+            loading_method=lane_loading_method,
+        )
         logger.info(
             f"{tag} Lane {lane.lane_id} 排机浓度规则命中: {lane_concentration_rule}, "
             f"lsjnd={'' if lane_loading_concentration is None else format(lane_loading_concentration, '.3f')}"
+        )
+        logger.info(
+            f"{tag} Lane {lane.lane_id} 输出规则命中: {lane_rule_code or 'unknown_rule'}, "
+            f"lsjfs={lane_loading_method or ''}, lcxms={lane_sequencing_mode or ''}"
+        )
+        logger.info(
+            f"{tag} Lane {lane.lane_id} 显式排机规则: {lane_index_rule or ''}"
         )
         runid = runid_by_lane.get(lane.lane_id)
         lane_balance_data = None
@@ -1804,6 +2386,9 @@ def _collect_prediction_rows(
                         if lane_loading_concentration is None
                         else round(float(lane_loading_concentration), 3)
                     ),
+                    "resolved_lsjfs": lane_loading_method or None,
+                    "resolved_lcxms": lane_sequencing_mode or None,
+                    "resolved_index_check_rule": lane_index_rule or None,
                     "wkcontractdata": contract,
                     "wkbalancedata": lane_balance_data_value,
                     "predicted_lorderdata": None if selected_order is None else round(float(selected_order), 3),
@@ -1819,7 +2404,7 @@ def _collect_prediction_rows(
                         if add_test_rule_result["historical_based_order"] is None
                         else round(float(add_test_rule_result["historical_based_order"]), 3)
                     ),
-                    "wklistqpcr": add_test_rule_result["wklistqpcr"],
+                    "wklastqpcr": add_test_rule_result["wklastqpcr"],
                     "wklastorderdata": add_test_rule_result["wklastorderdata"],
                     "wklastoutput": add_test_rule_result["wklastoutput"],
                     "wklastoutrate": add_test_rule_result["wklastoutrate"],
@@ -1847,8 +2432,6 @@ def _build_detail_output(
         if column_name in df.columns:
             df[column_name] = df[column_name].astype(object)
 
-    target_machine_types = _get_lane_loading_target_machine_texts()
-    target_test_no = _get_lane_loading_target_testno_text()
     merged = df_raw.copy()
     if "origrec_key" not in merged.columns:
         merged["origrec_key"] = _build_origrec_key(merged)
@@ -1865,12 +2448,28 @@ def _build_detail_output(
     if not pred_df.empty:
         pred_for_merge = pred_df.copy()
         pred_for_merge["origrec_key"] = pred_for_merge["origrec"].astype(str).str.strip()
+        for missing_column in [
+            "runid",
+            "lane_id",
+            "lsjnd",
+            "resolved_lsjfs",
+            "resolved_lcxms",
+            "resolved_index_check_rule",
+            "wkbalancedata",
+            "predicted_lorderdata",
+            "lai_output",
+        ]:
+            if missing_column not in pred_for_merge.columns:
+                pred_for_merge[missing_column] = pd.NA
         pred_for_merge = pred_for_merge[
             [
                 "origrec_key",
                 "runid",
                 "lane_id",
                 "lsjnd",
+                "resolved_lsjfs",
+                "resolved_lcxms",
+                "resolved_index_check_rule",
                 "wkbalancedata",
                 "predicted_lorderdata",
                 "lai_output",
@@ -1891,7 +2490,7 @@ def _build_detail_output(
             ).combine_first(pd.to_numeric(merged["wkbalancedata"], errors="coerce"))
             merged.drop(columns=["wkbalancedata_pred"], inplace=True)
 
-    # 仅对已成Lane的数据填充默认测序模式，未成Lane记录保持原值不改
+    # 仅对已成Lane的数据填充测序模式，优先使用统一规则结果，未成Lane记录保持原值不改
     if "lcxms" not in merged.columns:
         merged["lcxms"] = pd.NA
     _ensure_object_column(merged, "lcxms")
@@ -1899,6 +2498,15 @@ def _build_detail_output(
         merged["laneid"].notna()
         & ~merged["laneid"].astype(str).str.strip().isin({"", "nan", "None", "NONE", "null", "NULL"})
     )
+    resolved_lcxms_mask = (
+        "resolved_lcxms" in merged.columns
+        and merged["resolved_lcxms"].notna()
+        & ~merged["resolved_lcxms"].astype(str).str.strip().isin({"", "nan", "None", "NONE", "null", "NULL"})
+    )
+    if isinstance(resolved_lcxms_mask, pd.Series):
+        merged.loc[lane_assigned_mask & resolved_lcxms_mask, "lcxms"] = merged.loc[
+            lane_assigned_mask & resolved_lcxms_mask, "resolved_lcxms"
+        ]
     missing_lcxms_mask = (
         merged["lcxms"].isna()
         | merged["lcxms"].astype(str).str.strip().isin({"", "nan", "None", "NONE", "null", "NULL"})
@@ -1911,7 +2519,7 @@ def _build_detail_output(
     _ensure_object_column(merged, "lanecreatetype")
     merged.loc[lane_assigned_mask, "lanecreatetype"] = "AI"
 
-    # AI排机次数：默认0，AI可排文库统一+1（无论是否成lane）
+    # AI排机次数：默认0，仅对真正参与本轮排机的AI可排文库统一+1（无论是否成lane）
     if "aiarrangenumber" not in merged.columns:
         merged["aiarrangenumber"] = 0
     ai_arrange_series = pd.to_numeric(merged["aiarrangenumber"], errors="coerce").fillna(0).astype(int)
@@ -1931,20 +2539,44 @@ def _build_detail_output(
     merged.loc[lane_assigned_mask, "lrunid"] = merged.loc[lane_assigned_mask, "runid"]
     merged.loc[lane_assigned_mask, "llaneid"] = merged.loc[lane_assigned_mask, "laneid"]
 
-    # 工序+机型映射覆盖lsjfs：仅对已成Lane数据写回，未成Lane记录保持空值
+    # lsjfs优先读取统一规则表中的loading_method，未成Lane记录保持原值
     if "lsjfs" not in merged.columns:
         merged["lsjfs"] = pd.NA
     _ensure_object_column(merged, "lsjfs")
-    if "wktestno" in merged.columns and "wkeqtype" in merged.columns:
-        testno_norm = merged["wktestno"].map(_normalize_text_for_match)
-        eqtype_norm = merged["wkeqtype"].map(_normalize_text_for_match)
-        lsjfs_override_mask = (
-            lane_assigned_mask
-            &
-            (testno_norm == target_test_no)
-            & eqtype_norm.isin(target_machine_types)
+    resolved_lsjfs_mask = (
+        "resolved_lsjfs" in merged.columns
+        and merged["resolved_lsjfs"].notna()
+        & ~merged["resolved_lsjfs"].astype(str).str.strip().isin({"", "nan", "None", "NONE", "null", "NULL"})
+    )
+    if isinstance(resolved_lsjfs_mask, pd.Series):
+        merged.loc[lane_assigned_mask & resolved_lsjfs_mask, "lsjfs"] = merged.loc[
+            lane_assigned_mask & resolved_lsjfs_mask, "resolved_lsjfs"
+        ]
+    missing_lsjfs_mask = (
+        merged["lsjfs"].isna()
+        | merged["lsjfs"].astype(str).str.strip().isin({"", "nan", "None", "NONE", "null", "NULL"})
+    )
+    # 当前V6仅支持25B与NovaSeq X Plus，两类机型业务上统一按25B上机方式输出。
+    merged.loc[lane_assigned_mask & missing_lsjfs_mask, "lsjfs"] = "25B"
+
+    # 显式输出排机规则，避免下游再按wkindexseq是否含分号反推P7/P7P5。
+    for column_name in ["排机规则", "index查重规则"]:
+        if column_name not in merged.columns:
+            merged[column_name] = pd.NA
+        _ensure_object_column(merged, column_name)
+    resolved_index_rule_mask = (
+        "resolved_index_check_rule" in merged.columns
+        and merged["resolved_index_check_rule"].notna()
+        & ~merged["resolved_index_check_rule"].astype(str).str.strip().isin(
+            {"", "nan", "None", "NONE", "null", "NULL"}
         )
-        merged.loc[lsjfs_override_mask, "lsjfs"] = "25B"
+    )
+    if isinstance(resolved_index_rule_mask, pd.Series):
+        for column_name in ["排机规则", "index查重规则"]:
+            merged.loc[lane_assigned_mask & resolved_index_rule_mask, column_name] = merged.loc[
+                lane_assigned_mask & resolved_index_rule_mask,
+                "resolved_index_check_rule",
+            ]
 
     # lane_show规则：包FC+包Lane均有值 或 所在lane包含拆分文库
     if "lane_show" not in merged.columns:
@@ -1975,6 +2607,10 @@ def _build_detail_output(
     # 显式排除中间列runid/laneid及预测中间列，避免重复
     merged = merged.drop(columns=["runid", "laneid"], errors="ignore")
     merged = merged.drop(columns=["predicted_lorderdata"], errors="ignore")
+    merged = merged.drop(
+        columns=["resolved_lsjfs", "resolved_lcxms", "resolved_index_check_rule"],
+        errors="ignore",
+    )
 
     if output_path.exists():
         logger.info(f"明细文件已存在，将覆盖: {output_path}")
@@ -2048,13 +2684,17 @@ def load_standardized_csv(data_file: str, limit: int | None = None) -> List[Enha
             # 保存V6需要但EnhancedLibraryInfo不支持的额外字段
             jkhj_val = row_dict.get("wkjkhj") or row_dict.get("jkhj")
             lib._jkhj_raw = str(jkhj_val) if jkhj_val else "诺禾自动"
-            lib._last_qpcr_raw = _safe_float(row_dict.get("wklistqpcr"), default=None)
+            lib._last_qpcr_raw = _safe_float(
+                row_dict.get("wklastqpcr", row_dict.get("wklistqpcr")),
+                default=None,
+            )
             lib._last_order_data_raw = _safe_float(
                 row_dict.get("wklastorderdata", row_dict.get("wklastlorderdata")),
                 default=None,
             )
             lib._last_output_raw = _safe_float(row_dict.get("wklastoutput"), default=None)
             lib._last_outrate_raw = _safe_float(row_dict.get("wklastoutrate"), default=None)
+            lib._delete_date_raw = row_dict.get("delete_date", row_dict.get("扣减时间"))
             # 保存测序模式相关原始字段，供拆分规则识别模式（1.0/非1.0）使用
             lib._lane_sj_mode_raw = _safe_str(row_dict.get("lsjfs"), default="")
             lib._current_seq_mode_raw = _safe_str(row_dict.get("lcxms"), default="")
@@ -2359,7 +2999,12 @@ def _run_prediction_delivery(input_data: Union[Path, pd.DataFrame], output_path:
     if output_path.exists():
         logger.info(f"预测输出文件已存在，将覆盖: {output_path}")
     logger.info(f"调用 prediction_delivery，模型目录: {MODELS_DIR}")
-    return predict_pooling(input_data=input_data, output_file=output_path)
+    predict_pooling(input_data=input_data, output_file=output_path)
+    prediction_df = _read_csv_with_encoding_fallback(output_path)
+    return _apply_add_test_output_rate_rule_to_prediction_df(
+        prediction_df=prediction_df,
+        output_path=output_path,
+    )
 
 
 def arrange_library(
@@ -2433,18 +3078,36 @@ def arrange_library(
 
     ai_schedulable_libraries: List[EnhancedLibraryInfo] = []
     non_ai_libraries: List[EnhancedLibraryInfo] = []
+    excluded_machine_libraries: List[EnhancedLibraryInfo] = []
     ai_schedulable_keys: Set[str] = set()
     for lib in libraries:
+        machine_type = getattr(lib, "machine_type", None) or _resolve_machine_type_enum_simple(getattr(lib, "eq_type", ""))
+        lib.machine_type = machine_type
+        origrec_key = _safe_str(getattr(lib, "_origrec_key", getattr(lib, "origrec", "")))
+        if not _is_machine_supported_for_arrangement(machine_type):
+            excluded_machine_libraries.append(lib)
+            continue
         if _is_yes_value(getattr(lib, "_aiavailable_raw", "")):
             ai_schedulable_libraries.append(lib)
-            ai_schedulable_keys.add(_safe_str(getattr(lib, "_origrec_key", getattr(lib, "origrec", ""))))
+            ai_schedulable_keys.add(origrec_key)
         else:
             non_ai_libraries.append(lib)
     logger.info(
-        "AI可排文库筛选完成: 可排={}，不可排={}".format(
-            len(ai_schedulable_libraries), len(non_ai_libraries)
+        "AI可排文库筛选完成: 可排={}，不可排={}，机型排除={}".format(
+            len(ai_schedulable_libraries), len(non_ai_libraries), len(excluded_machine_libraries)
         )
     )
+    if excluded_machine_libraries:
+        excluded_machine_summary = sorted(
+            {
+                _safe_str(getattr(lib, "eq_type", ""), default="Unknown")
+                for lib in excluded_machine_libraries
+            }
+        )
+        logger.warning(
+            "以下机型已从V6排机主流程中显式排除: {}",
+            ", ".join(excluded_machine_summary),
+        )
     if not ai_schedulable_libraries:
         logger.warning("无AI可排文库（aiavailable!=yes），本次不执行排机，仅输出明细规则结果")
 
@@ -2456,6 +3119,7 @@ def arrange_library(
     package_lanes = []
     package_libs = []
     normal_libs = []
+    failed_package_libs = []
     
     for lib in ai_schedulable_libraries:
         baleno = getattr(lib, 'package_lane_number', None) or getattr(lib, 'baleno', None)
@@ -2493,8 +3157,17 @@ def arrange_library(
                     metadata={'is_package_lane': True, 'package_id': lane_result.package_id}
                 )
                 package_lanes.append(lane_assignment)
-        
-        normal_libs.extend(package_result.remaining_libraries)
+
+        failed_package_libs, recovered_normal_libs = _partition_remaining_package_libraries(
+            package_result.remaining_libraries
+        )
+        normal_libs.extend(recovered_normal_libs)
+        if failed_package_libs:
+            logger.warning(
+                "包Lane失败文库保持未分配，不进入普通排机: {}个文库，{}个失败包",
+                len(failed_package_libs),
+                len(package_result.failed_packages),
+            )
         
         logger.info(f"\n包Lane处理完成，形成{len(package_lanes)}条包Lane")
         logger.info(f"剩余{len(normal_libs)}个文库进入普通排机流程")
@@ -2513,6 +3186,12 @@ def arrange_library(
         from types import SimpleNamespace
         stats = {}
         solution = SimpleNamespace(lane_assignments=[], unassigned_libraries=[])
+
+    if failed_package_libs:
+        solution.unassigned_libraries.extend(failed_package_libs)
+
+    _validate_final_package_lanes(solution)
+    _validate_no_split_for_package_lane_libraries(solution)
 
     # 收集预测结果
     pred_df = _collect_prediction_rows(

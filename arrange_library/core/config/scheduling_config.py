@@ -1,7 +1,7 @@
 """
 排机系统统一配置管理模块
 创建时间：2025-12-03 14:00:00
-更新时间：2026-03-13 11:52:16
+更新时间：2026-03-31 16:19:35
 
 集中管理所有排机相关的配置常量，避免硬编码分散在各个模块中。
 配置来源：docs/排机规则文档.md、config/business_rules.yaml
@@ -673,6 +673,11 @@ class SchedulingConfigManager:
     def _resolve_process_code(self, libraries: List[Any], metadata: Optional[Dict[str, Any]] = None) -> Optional[int]:
         """解析Lane工序编码。"""
         metadata = metadata or {}
+        inferred = self._infer_process_code_from_test_no(
+            self._resolve_test_no(libraries, metadata)
+        )
+        if inferred is not None:
+            return inferred
         for key in ('process_code', 'test_code'):
             parsed = self._parse_valid_process_code(metadata.get(key))
             if parsed is not None:
@@ -682,12 +687,6 @@ class SchedulingConfigManager:
                 parsed = self._parse_valid_process_code(getattr(lib, attr_name, None))
                 if parsed is not None:
                     return parsed
-        # 历史数据中常见 test_code=0 或缺失，尝试按 test_no 从规则矩阵反推唯一工序码
-        inferred = self._infer_process_code_from_test_no(
-            self._resolve_test_no(libraries, metadata)
-        )
-        if inferred is not None:
-            return inferred
         return None
 
     @staticmethod
@@ -878,6 +877,11 @@ class SchedulingConfigManager:
 
         target_capacity = self.get_lane_capacity(machine_type, SchedulingMode.NON_1_0)
         tolerance_gb = self.lane_capacity.standard_tolerance
+        fallback_loading_method = ''
+        normalized_machine_type = self._normalize_text(machine_type)
+        if '25B' in normalized_machine_type or normalized_machine_type == self._normalize_text('NovaSeq X Plus'):
+            fallback_loading_method = '25B'
+
         return LaneRuleSelection(
             rule_code="fallback_machine_capacity",
             soft_target_gb=float(target_capacity),
@@ -887,7 +891,7 @@ class SchedulingConfigManager:
             effective_min_gb=float(target_capacity - tolerance_gb),
             effective_max_gb=float(target_capacity + tolerance_gb),
             lane_count=8,
-            loading_method='25B' if '25B' in machine_type else '',
+            loading_method=fallback_loading_method,
             sequencing_mode='',
             fc_min_data_gb=0.0,
             profile={},
