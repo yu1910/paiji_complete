@@ -22,7 +22,7 @@ from typing import List, Dict, Optional, Tuple
 from dataclasses import dataclass
 from loguru import logger
 
-from models.library_info import EnhancedLibraryInfo
+from arrange_library.models.library_info import EnhancedLibraryInfo
 
 
 # ---------------------------------------------------------------------------
@@ -589,4 +589,3 @@ class PoolingPredictor:
             logger.warning(f"Pooling系数预测完成：所有{len(libraries)}个文库均被过滤")
         
         return predictions
-

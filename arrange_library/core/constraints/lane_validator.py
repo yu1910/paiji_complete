@@ -1,7 +1,7 @@
 """
 成Lane校验程序
 创建时间：2025-12-02 18:00:00
-更新时间：2026-03-06 17:45:00
+更新时间：2026-04-07 15:21:20
 
 变更记录：
 - 2026-03-06: 移除类内LANE_CAPACITY/LANE_MIN_DATA/LANE_MAX_DATA死代码常量，
@@ -25,7 +25,7 @@
 - 碱基不均衡占比：碱基不均衡文库占比<=40%
 - 容量校验：Lane总数据量由规则矩阵决定，Nova X-25B标准规则effective_min=970G，effective_max=980G
 - Peak Size校验：最大-最小<=150bp 或 150bp窗口覆盖>=75%
-- 特殊文库限制：特殊文库类型<=3种且<=阈值
+- 特殊文库限制：特殊文库总量<=阈值（不再限制类型数量）
 - FC最小数据量校验：Nova X-25B整个FC最小1150G
 """
 
@@ -706,7 +706,6 @@ class LaneValidator:
         
         使用jjbj字段优先判断碱基不均衡，然后使用关键词匹配
         """
-        special_types = set()
         special_data = 0.0
         special_libs = []
         imbalance_count = 0
@@ -723,18 +722,6 @@ class LaneValidator:
                 imbalance_count += 1
                 special_data += lib_data
                 special_libs.append(lib.origrec)
-                
-                # 统计特殊文库类型（用于类型数量检查）
-                lab_type = getattr(lib, 'lab_type', '') or ''
-                sub_project = getattr(lib, 'sub_project_name', '') or ''
-                product_name = getattr(lib, 'product_name', '') or ''
-                sample_type = getattr(lib, 'sample_type_code', '') or ''
-                combined_type = f"{lab_type} {sub_project} {product_name} {sample_type}"
-                
-                for keyword in self.special_library_keywords:
-                    if keyword.lower() in combined_type.lower():
-                        special_types.add(keyword)
-                        break
             else:
                 balanced_count += 1
         
@@ -748,15 +735,19 @@ class LaneValidator:
             return None
         
         # ===== 混排Lane的原有检查逻辑 =====
-        # 检查类型数量
-        if len(special_types) > self.special_library_type_limit:
+        # 仅保留特殊文库总量检查，类型数量不再作为限制条件
+        capacity_limit = self.special_library_capacity.get(
+            machine_type,
+            self.special_library_capacity.get('default', 240.0),
+        )
+        if special_data > float(capacity_limit):
             return ValidationError(
                 rule_type=ValidationRuleType.SPECIAL_LIBRARY_LIMIT,
                 severity=ValidationSeverity.ERROR,
-                message=f"特殊文库类型{len(special_types)}种超过{self.special_library_type_limit}种限制",
-                current_value=len(special_types),
-                threshold_value=self.special_library_type_limit,
-                affected_libraries=special_libs
+                message=f"特殊文库总量{special_data:.1f}G超过{float(capacity_limit):.1f}G限制",
+                current_value=special_data,
+                threshold_value=float(capacity_limit),
+                affected_libraries=special_libs,
             )
         
         return None
@@ -1147,4 +1138,3 @@ class LaneValidator:
                 lines.append(f"  - [{warning.rule_type.value}] {warning.message}")
         
         return "\n".join(lines)
-

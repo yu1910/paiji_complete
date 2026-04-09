@@ -1172,7 +1172,7 @@ rules:
 
   - rule_id: "R16"
     rule_name: "文库拆分规则"
-    description: "非1.0模式单index超过100G拆分；1.0模式单index超过200G拆分；多index超过300G拆分；触发后优先按对半方式持续拆分，直到片段不超过阈值"
+    description: "1.1模式文库（兼容旧名1.0）不拆分；3.6T-NEW模式中，单index超过100G拆分，多index超过300G拆分；触发后优先按对半方式持续拆分，直到片段不超过阈值"
     priority: "high"
     compliance_target: 0.95
     doc_section: "文库标签分类规则"
@@ -1180,35 +1180,35 @@ rules:
     details:
       rule_type: "固定规则（2025-11-26更新）"
       splitting_mode_distinction:
-        mode_1_0:
-          description: "1.0模式（手工/常规产线 S）"
+        mode_1_1:
+          description: "1.1模式（兼容旧名1.0）"
           rules:
-            - "单index 文库合同量 >200G 时触发拆分"
-        non_1_0_single_index:
-          description: "非1.0模式 + 单index"
+            - "文库不触发预拆分"
+        mode_3_6t_new_single_index:
+          description: "3.6T-NEW模式 + 单index"
           rules:
             - "合同量 >100G 时触发拆分"
-        multi_index:
-          description: "多index 文库"
+        mode_3_6t_new_multi_index:
+          description: "3.6T-NEW模式 + 多index 文库"
           rules:
             - "合同量 >300G 时触发拆分"
       splitting_conditions:
         - condition: "包Lane / 包FC / 指定 Lane 文库"
           action: "保持原有指定，不拆分"
         - condition: "阈值计算"
-          formula: "非1.0单index=100G；1.0单index=200G；多index=300G"
+          formula: "1.1模式（兼容旧名1.0）=不拆分；3.6T-NEW模式单index=100G；3.6T-NEW模式多index=300G"
           examples:
-            - "非1.0单index：100G以内不拆，超过100G拆分"
-            - "1.0单index：200G以内不拆，超过200G拆分"
-            - "多index：300G以内不拆，超过300G拆分"
+            - "1.1模式（兼容旧名1.0）：不触发预拆分"
+            - "3.6T-NEW模式单index：100G以内不拆，超过100G拆分"
+            - "3.6T-NEW模式多index：300G以内不拆，超过300G拆分"
         - condition: "触发拆分"
           description: "当合同数据量严格大于对应阈值时，判定为「需拆分」"
         - condition: "拆分方式"
           description: "优先对半拆分（1→2→4→8），直到每个子片段不超过对应阈值；拆分后的每条子文库需要 >2G，除数据量外其他字段保持一致"
       splitting_impact:
-        - "非1.0模式单index拆分阈值：100G"
-        - "1.0模式单index拆分阈值：200G"
-        - "多index拆分阈值：300G"
+        - "1.1模式文库（兼容旧名1.0）不参与预拆分"
+        - "3.6T-NEW模式单index拆分阈值：100G"
+        - "3.6T-NEW模式多index拆分阈值：300G"
         - "受样本取样体积影响时，可在保持「优先对半」原则下进行人工复核"
 
   - rule_id: "R21"

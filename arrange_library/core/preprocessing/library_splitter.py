@@ -7,6 +7,7 @@
 
 import copy
 import math
+import re
 import uuid
 from typing import Any, Dict, List, Tuple
 
@@ -19,13 +20,14 @@ from arrange_library.core.config.scheduling_config import get_library_split_conf
 class LibrarySplitter:
     """文库拆分器"""
 
-    MODE_ONE_POINT_ZERO = "1.0"
+    MODE_ONE_POINT_ONE = "1.1"
+    MODE_ONE_POINT_ONE_ALIASES = ("1.1", "1.0")
+    MODE_3_6T_NEW = "3.6t-new"
     MODE_OTHER = "other"
 
     def __init__(self):
         split_config = get_library_split_config()
         self.single_index_non_1_0_threshold = split_config.single_index_non_1_0_threshold_gb
-        self.single_index_mode_1_0_threshold = split_config.single_index_mode_1_0_threshold_gb
         self.multi_index_threshold = split_config.multi_index_threshold_gb
         self.min_split_size = split_config.min_split_size_gb
         
@@ -42,9 +44,8 @@ class LibrarySplitter:
         logger.info("=" * 60)
         logger.info("[拆分] 开始文库拆分预处理")
         logger.info(
-            "  拆分规则: 非1.0单index >{}G；1.0单index >{}G；多index >{}G".format(
+            "  拆分规则: 1.1模式文库（兼容旧名1.0）不拆分；3.6T-NEW模式按 单index >{}G、多index >{}G".format(
                 self.single_index_non_1_0_threshold,
-                self.single_index_mode_1_0_threshold,
                 self.multi_index_threshold,
             )
         )
@@ -93,9 +94,9 @@ class LibrarySplitter:
         """判断是否需要拆分
 
         新规则：
-        1. 非1.0模式单index合同数据量 > 100G 时拆分
-        2. 1.0模式单index合同数据量 > 200G 时拆分
-        3. 多index合同数据量 > 300G 时拆分
+        1. 1.1模式文库（兼容旧名1.0）不拆分
+        2. 3.6T-NEW模式单index合同数据量 > 100G 时拆分
+        3. 3.6T-NEW模式多index合同数据量 > 300G 时拆分
         """
         # 1. 包Lane编号文库绝对禁止拆分
         if self._has_package_lane_binding(lib):
@@ -121,6 +122,14 @@ class LibrarySplitter:
             return False
 
         rule_label, max_data_per_fragment = self._resolve_split_rule(lib)
+        if math.isinf(max_data_per_fragment):
+            logger.debug(
+                "  文库 {} 命中 {}，跳过拆分".format(
+                    getattr(lib, "origrec", ""),
+                    rule_label,
+                )
+            )
+            return False
 
         should_split = data_amount > max_data_per_fragment
         if should_split:
@@ -136,14 +145,17 @@ class LibrarySplitter:
 
     def _resolve_split_rule(self, lib: EnhancedLibraryInfo) -> Tuple[str, float]:
         """根据业务规则解析拆分阈值。"""
+        mode = self._detect_sequence_mode(lib)
+        if mode == self.MODE_ONE_POINT_ONE:
+            return "mode_1.1_disabled_compat_1.0", math.inf
+        if mode != self.MODE_3_6T_NEW:
+            return "non_3.6t_new_mode_disabled", math.inf
+
         index_count = self._count_index_pairs(lib)
         if index_count > 1:
-            return "multi_index", self.multi_index_threshold
+            return "3.6t_new_multi_index", self.multi_index_threshold
 
-        mode = self._detect_sequence_mode(lib)
-        if mode == self.MODE_ONE_POINT_ZERO:
-            return "single_index_mode_1.0", self.single_index_mode_1_0_threshold
-        return "single_index_mode_other", self.single_index_non_1_0_threshold
+        return "3.6t_new_single_index", self.single_index_non_1_0_threshold
 
     def _count_index_pairs(self, lib: EnhancedLibraryInfo) -> int:
         """计算index对数
@@ -192,7 +204,7 @@ class LibrarySplitter:
         return False
 
     def _detect_sequence_mode(self, lib: EnhancedLibraryInfo) -> str:
-        """识别测序模式，匹配到1.0即返回1.0模式，否则为非1.0模式。"""
+        """识别测序模式，区分1.1模式族与3.6T-NEW模式。"""
         mode_candidates = [
             getattr(lib, "_lane_sj_mode_raw", None),
             getattr(lib, "lane_sj_mode", None),
@@ -209,9 +221,19 @@ class LibrarySplitter:
             text = str(value).strip().lower()
             if not text:
                 continue
-            if "1.0" in text:
-                return self.MODE_ONE_POINT_ZERO
+            if any(
+                self._contains_mode_token(text, mode_token)
+                for mode_token in self.MODE_ONE_POINT_ONE_ALIASES
+            ):
+                return self.MODE_ONE_POINT_ONE
+            if self._contains_mode_token(text, self.MODE_3_6T_NEW):
+                return self.MODE_3_6T_NEW
         return self.MODE_OTHER
+
+    @staticmethod
+    def _contains_mode_token(text: str, mode_token: str) -> bool:
+        """判断文本中是否包含独立的模式标记，如1.0或1.1。"""
+        return re.search(rf"(?<!\d){re.escape(mode_token.lower())}(?!\d)", text) is not None
 
     def _perform_split(self, lib: EnhancedLibraryInfo) -> List[EnhancedLibraryInfo]:
         """执行拆分操作 - 支持多级拆分
@@ -230,6 +252,8 @@ class LibrarySplitter:
             data_amount=data_amount,
             max_data_per_fragment=max_data_per_fragment,
         )
+        if split_count <= 1:
+            return [lib]
 
         logger.debug(
             f"  文库 {lib.origrec} ({data_amount}G) 按规则 {rule_label} 需拆分为 {split_count} 份"
@@ -264,6 +288,14 @@ class LibrarySplitter:
             new_lib.wkaidbid = new_aidbid
             new_lib.aidbid = new_aidbid
             new_lib._split_source_library = lib
+            source_origrec_key = str(
+                getattr(lib, "_source_origrec_key", None)
+                or getattr(lib, "_origrec_key", None)
+                or getattr(lib, "origrec", "")
+                or ""
+            ).strip()
+            new_lib._source_origrec_key = source_origrec_key
+            new_lib._detail_output_key = str(new_lib.fragment_id or new_aidbid or source_origrec_key).strip()
             split_libs.append(new_lib)
         
         return split_libs

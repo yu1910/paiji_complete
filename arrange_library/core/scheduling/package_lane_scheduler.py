@@ -426,6 +426,16 @@ class PackageLaneScheduler:
                     new_aidbid = str(uuid.uuid4())
                 fragment.wkaidbid = new_aidbid
                 fragment.aidbid = new_aidbid
+                source_origrec_key = str(
+                    getattr(lib, '_source_origrec_key', None)
+                    or getattr(lib, '_origrec_key', None)
+                    or getattr(lib, 'origrec', '')
+                    or ''
+                ).strip()
+                fragment._source_origrec_key = source_origrec_key
+                fragment._detail_output_key = str(
+                    fragment.fragment_id or new_aidbid or source_origrec_key
+                ).strip()
 
                 expanded_libraries.append(fragment)
 

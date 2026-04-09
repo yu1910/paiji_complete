@@ -9,12 +9,13 @@
 - 规则15-24：Lane级别规则（需要Lane整体数据）
 
 创建时间：2025-12-05 14:21:32
-更新时间：2025-12-30 13:59:15
+更新时间：2026-04-07 15:21:20
 
 变更记录：
 - 2025-12-24: 补充分组21-26的文库类型定义和占比系数
 """
 
+import re
 from typing import Dict, List, Tuple, Optional, Set
 
 import pandas as pd
@@ -644,9 +645,9 @@ class RuleChecker:
         """检查文库是否需要拆分
 
         规则：
-        - 非1.0模式单index >100G
-        - 1.0模式单index >200G
-        - 多index >300G
+        - 1.1模式文库（兼容旧名1.0）不拆分
+        - 3.6T-NEW模式单index >100G
+        - 3.6T-NEW模式多index >300G
         """
         contract_vol = lib.get('合同数据量_文库', 0)
         
@@ -664,20 +665,37 @@ class RuleChecker:
             index_pairs = [seg.strip() for seg in str(index_seq).split(',') if seg.strip()]
             index_count = max(len(index_pairs), 1)
 
+            mode_candidates = [
+                lib.get('lane_sj_mode'),
+                lib.get('current_seq_mode'),
+                lib.get('测序模式'),
+                lib.get('测序策略'),
+                lib.get('cxms'),
+                lib.get('工序'),
+                lib.get('test_no'),
+            ]
+            normalized_modes = [
+                str(value).strip().lower()
+                for value in mode_candidates
+                if value is not None and str(value).strip()
+            ]
+            is_mode_1_1 = any(
+                re.search(r'(?<!\d)(1\.1|1\.0)(?!\d)', value) is not None
+                for value in normalized_modes
+            )
+            if is_mode_1_1:
+                return False
+            is_mode_3_6t_new = any(
+                re.search(r'(?<!\d)3\.6t-new(?!\d)', value) is not None
+                for value in normalized_modes
+            )
+            if not is_mode_3_6t_new:
+                return False
+
             if index_count > 1:
                 threshold = 300.0
             else:
-                mode_candidates = [
-                    lib.get('lane_sj_mode'),
-                    lib.get('current_seq_mode'),
-                    lib.get('测序模式'),
-                    lib.get('测序策略'),
-                    lib.get('cxms'),
-                    lib.get('工序'),
-                    lib.get('test_no'),
-                ]
-                is_mode_1_0 = any('1.0' in str(value).strip().lower() for value in mode_candidates if value is not None)
-                threshold = 200.0 if is_mode_1_0 else 100.0
+                threshold = 100.0
             return vol > threshold
         except (ValueError, TypeError):
             return False
@@ -758,7 +776,7 @@ class RuleChecker:
     
     # ========== 规则23：Lane级别分组文库类型数量检查 ==========
     def check_imbalance_type_count(self, lane_libraries: List[Dict],
-                                   max_types: int = 3) -> int:
+                                   max_types: int = 5) -> int:
         """检查Lane中碱基不均衡文库类型数量
         
         混排时文库类型不超过3种
@@ -778,6 +796,10 @@ class RuleChecker:
         
         只在分组27和分组28混排时检查
         """
+        # 1-57新规则下不再沿用历史G27/G28占比20%的强约束。
+        # 该混排约束由 BaseImbalanceHandler 统一处理。
+        return 0
+
         group27_data = 0.0
         group28_data = 0.0
         total_data = 0.0

@@ -226,6 +226,9 @@ class EnhancedLibraryInfo:
         if isinstance(self.test_code, str) and self.test_code.isdigit():
             self.test_code = int(self.test_code)
 
+        if isinstance(self.data_flag, property):
+            self.data_flag = None
+
         if isinstance(self.balance_data, str):
             try:
                 self.balance_data = float(self.balance_data)
@@ -1364,6 +1367,8 @@ class EnhancedLibraryInfo:
 
     @special_splits.setter
     def special_splits(self, value: Optional[str]) -> None:
+        if isinstance(value, property):
+            value = None
         self.data_flag = value
 
     @property
