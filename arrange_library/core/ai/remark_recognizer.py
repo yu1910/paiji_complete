@@ -20,9 +20,9 @@ from loguru import logger
 
 # setup_liblane_paths()
 
-from core.ai.azure_openai_client import AzureOpenAIClient
-from models.library_info import EnhancedLibraryInfo
-from models.remark_recognition_v2 import CommandItem, RemarkRecognitionResultV2
+from arrange_library.core.ai.azure_openai_client import AzureOpenAIClient
+from arrange_library.models.library_info import EnhancedLibraryInfo
+from arrange_library.models.remark_recognition_v2 import CommandItem, RemarkRecognitionResultV2
 
 SYSTEM_START_MARKER: str = "=====SYSTEM_PROMPT_START====="
 SYSTEM_END_MARKER: str = "=====SYSTEM_PROMPT_END====="

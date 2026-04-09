@@ -1,0 +1,79 @@
+INPUT_ROWS=1691 OUTPUT_ROWS=1691 SCHEDULED_ROWS=535 UNSCHEDULED_ROWS=1156
+
+[1] lane合同容量
+LANE_COUNT=8 MAX_LANE_TOTAL=1104.867
+OVER_1105_LLANEID_COUNT=0 OVER_2000_LLANEID_COUNT=0 REUSED_LLANEID_MULTI_RUN_COUNT=0
+TOP_LLANEID_TOTALS:
+                   total_contract  row_count  run_count                  runids
+llaneid                                                                        
+BL_Nova X-25B_006        1104.867         94          1  RUN_20260408155725_001
+BL_Nova X-25B_005        1104.813         68          1  RUN_20260408155725_001
+BL_Nova X-25B_004        1104.709         92          1  RUN_20260408155725_001
+BL_Nova X-25B_007        1104.520        121          1  RUN_20260408155725_001
+NB_Nova X-25B_001        1102.155         94          1  RUN_20260408155725_001
+MX_Nova X-25B_001        1009.204         14          1  RUN_20260408155725_001
+BL_Nova X-25B_003        1004.609         51          1  RUN_20260408155725_001
+LANE_0001                1000.000          1          1  RUN_20260408155725_001
+
+TOP_RUN_LANE_TOTALS:
+                                          total_contract  row_count
+lrunid                 llaneid                                     
+RUN_20260408155725_001 BL_Nova X-25B_006        1104.867         94
+                       BL_Nova X-25B_005        1104.813         68
+                       BL_Nova X-25B_004        1104.709         92
+                       BL_Nova X-25B_007        1104.520        121
+                       NB_Nova X-25B_001        1102.155         94
+                       MX_Nova X-25B_001        1009.204         14
+                       BL_Nova X-25B_003        1004.609         51
+                       LANE_0001                1000.000          1
+OVER_1105_RUN_LANE_COUNT=0
+
+[2] 临检/SJ/YC集中情况
+临检/SJ: rows=52, scheduled=14, unassigned=38, lanes=3, contract=747.129, theoretical_min_lanes_by_1105=1, single_high_mixed_lanes=0
+YC: rows=286, scheduled=82, unassigned=204, lanes=6, contract=3651.757, theoretical_min_lanes_by_1105=4, single_high_mixed_lanes=0
+TOP_PRIORITY_LANES:
+                   total_contract  rows  rank0  rank1  rank2
+llaneid                                                     
+BL_Nova X-25B_003        1004.609    51     10     27     14
+MX_Nova X-25B_001        1009.204    14      2      7      5
+NB_Nova X-25B_001        1102.155    94      2      0     92
+BL_Nova X-25B_004        1104.709    92      0     29     63
+BL_Nova X-25B_007        1104.520   121      0      8    113
+BL_Nova X-25B_005        1104.813    68      0      7     61
+BL_Nova X-25B_006        1104.867    94      0      4     90
+
+[3] 文库拆分
+SHOULD_SPLIT_BY_LIBRARY_SPLITTER=4 OUTPUT_DUPLICATE_ORIGREC_KEYS=0 WKISSPLIT_YES_ROWS=0
+SHOULD_SPLIT_SAMPLE=12521366,12521367,10175953,12521368
+
+[4] 测序模式返回
+SCHEDULED_ROWS=535 SEQ_BLANK={'lcxms': 0, 'lsjfs': 0} SEQ_BLANK_ANY=0
+BLANK_SEQ_SAMPLE:
+Empty DataFrame
+Columns: [origrec_key, llaneid, lrunid, lcxms, lsjfs]
+Index: []
+
+[5] 带包lane编号未成lane
+PACKAGE_ROWS=42 PACKAGE_ASSIGNED_ROWS=1 PACKAGE_UNASSIGNED_ROWS=41 PACKAGE_NUMBERS=20
+PACKAGE_UNASSIGNED_SAMPLE:
+ origrec_key                wkbaleno  wkcontractdata                                                                                                                                                                                                                                                              wkindexseq aiavailable llaneid
+    10171906             C2511040189          375.00 GATTTCCCCC;TTTTTAAAGC,CCCAATTTTG;CAAAAGGTTT,TCAACAACCG;CTTGGTGGTA,CAGATAATAC;TGAGGAGCGT,TATTGGCGGC;TCCTCCAAGA,AGAGGCCGAA;GGCTTCCGCG,ATTATATCTG;CATAGAGAAG,TGCTAAATTA;GAAGGGATCA,CTATGCAAGC;TCGGTCAGAT,CCGGGCGTCA;GTACTCCCTT,TGGAGACTGG;CCATGCGCCA,CTTACCGGGT;ACCCTTGAAT         yes     NaN
+    10171910             C2511040193          375.00 GAAAATTTAC;TGAAAGGGGC,AAACTAACTG;CATGGATGGG,TAATTACAAA;GGGTGAAGGA,GTGGCACCAC;TGTTGTCCAC,ATTCAACCTC;TATTGGTAAG,GTCAAATGTC;TACAGGGTAC,ATTCCTGAGT;ACGCATTAAG,ATCCGCCAGG;CCGTTCTTAG,CTCTCCATCG;CTAGTTATAT,CCCACCGTAA;GGACTTGTTT,TAACCAGCAC;TGTCGTTGGA,TTGCGTTCTC;TATAACTCAA         yes     NaN
+    10172822             L2412310026          356.25                                                                                                                                                                                                                                                         AAAAAAA;AAAAAAA         yes     NaN
+    10172827             L2412310031          356.25                                                                                                                                                                                                                                                         AAAAAAA;AAAAAAA         yes     NaN
+    10173533             C2511040200            9.00                                                                                                                                                                                                                                                   TCTTACTTGC;TGACCTCTAG         yes     NaN
+    10173542             C2511040200            9.00                                                                                                                                                                                                                                                   TGGTTCGGGT;GTGGCAGGAG         yes     NaN
+    10173544             C2511040200            9.00                                                                                                                                                                                                                                                   CCTGTCAGGG;AGCCCGTAAC         yes     NaN
+    10170786 L2412170085,L2412170084          123.75                                                                                                                                                                                                                                                   CGCTGAAATC;AGGTGTCTGC         yes     NaN
+    10171905             C2511040188          375.00 CGGGAACCCG;CTTTGGCCCT,AAACGTTCAT;AGTAACTGGG,TTGTCCGATA;GAGCTTACAA,GTTTAAAGGC;TCCGGGAAAC,CCAAAGAGGG;CCCGCGGGTT,TCCTCTCTTC;TAATATATTA,GAAGGGTAAA;GGGACCCGGC,AGTCTCAGCA;GTCGTATACG,ATCGACTTGT;ACAATGCTAG,AACCCTGGGA;GCCCATTTGG,AGGTGGTTCT;ATAACCACCG,TACGCCCACG;CTGTTTCTGA         yes     NaN
+    10172824             L2412310028          356.25                                                                                                                                                                                                                                                         AAAAAAA;AAAAAAA         yes     NaN
+    10173548             C2511040200            9.00                                                                                                                                                                                                                                                   CGTGACATGC;ATGGTCTAAA         yes     NaN
+    10173556             C2511040200            9.00                                                                                                                                                                                                                                                   TTGCCCGTGC;GCGTGAGATT         yes     NaN
+    10173558             C2511040200            9.00                                                                                                                                                                                                                                                   CTCCTTTAGA;GACATAGCTC         yes     NaN
+    10170788 L2412170085,L2412170084          123.75                                                                                                                                                                                                                                                   ATGCGAATGG;ACAAGTGTCG         yes     NaN
+    10172821             L2412310025          356.25                                                                                                                                                                                                                                                         AAAAAAA;AAAAAAA         yes     NaN
+    10172823             L2412310027          356.25                                                                                                                                                                                                                                                         AAAAAAA;AAAAAAA         yes     NaN
+    10173541             C2511040200            9.00                                                                                                                                                                                                                                                   CCTTCTAGAG;AATACAACGA         yes     NaN
+    10173546             C2511040200            9.00                                                                                                                                                                                                                                                   TCTTACTTGC;TGACCTCTAG         yes     NaN
+    10173547             C2511040200            9.00                                                                                                                                                                                                                                                   AAGTGGAGAG;TTCCTGTTAC         yes     NaN
+    10173550             C2511040200            9.00                                                                                                                                                                                                                                                   CACCGCACCA;GACTGTCAAT         yes     NaN

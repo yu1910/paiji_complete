@@ -2,7 +2,7 @@
 逐Lane贪心排机器 - 简化高效的排机算法
 采用逐Lane填充策略，一条Lane排满后再排下一条
 创建时间：2025-12-24 13:30:00
-更新时间：2026-03-09 11:00:00
+更新时间：2026-04-07 15:21:20
 
 核心思想：
 - 按优先级排序文库
@@ -275,7 +275,7 @@ class GreedyLaneScheduler:
             validation_metadata.update(metadata)
         if libraries:
             first_lib = libraries[0]
-            validation_metadata.setdefault('process_code', getattr(first_lib, 'test_code', None))
+            validation_metadata.setdefault('process_code', getattr(first_lib, 'process_code', None))
             validation_metadata.setdefault('test_code', getattr(first_lib, 'test_code', None))
             validation_metadata.setdefault('test_no', getattr(first_lib, 'test_no', ''))
         return self._get_scheduling_lane_capacity_range(
@@ -346,6 +346,20 @@ class GreedyLaneScheduler:
         """重置Lane计数器（每次schedule调用前重置）"""
         self._lane_counters = {}
 
+    @staticmethod
+    def _get_library_runtime_key(lib: EnhancedLibraryInfo) -> str:
+        """获取调度阶段识别文库对象的稳定键，拆分子文库必须彼此不同。"""
+        for attr_name in ("_detail_output_key", "fragment_id", "wkaidbid", "aidbid"):
+            value = str(getattr(lib, attr_name, "") or "").strip()
+            if value:
+                return value
+        source_key = str(
+            getattr(lib, "_origrec_key", None) or getattr(lib, "origrec", "") or ""
+        ).strip()
+        if source_key:
+            return source_key
+        return str(id(lib))
+
     def _resolve_machine_type_enum(
         self,
         machine_type: str,
@@ -402,13 +416,21 @@ class GreedyLaneScheduler:
         logger.info(f"专用Lane创建完成: {len(lanes)}条Lane, {len(remaining_imbalance)}个碱基不均衡文库待分配, {len(neutral_libs)}个中性文库待分配")
         return lanes, remaining
 
-    def schedule(self, libraries: List[EnhancedLibraryInfo], keep_failed_lanes: bool = False) -> SchedulingSolution:
+    def schedule(
+        self,
+        libraries: List[EnhancedLibraryInfo],
+        keep_failed_lanes: bool = False,
+        libraries_already_split: bool = False,
+        perform_presplit_family_rollback: bool = True,
+    ) -> SchedulingSolution:
         """
         执行逐Lane贪心排机
         
         Args:
             libraries: 待排机文库列表
             keep_failed_lanes: 是否保留验证失败的Lane（不拆解），供外层矫正处理
+            libraries_already_split: 外层是否已完成预拆分
+            perform_presplit_family_rollback: 是否在调度器内部执行拆分家族回滚
             
         Returns:
             SchedulingSolution: 排机结果
@@ -425,9 +447,15 @@ class GreedyLaneScheduler:
         logger.info(f"开始逐Lane贪心排机 - 文库数: {len(libraries)}")
 
         # 0. 先按业务规则执行文库拆分，再进入后续排机分析与调度
-        working_libraries, split_records = self.library_splitter.split_libraries(libraries)
+        if libraries_already_split:
+            working_libraries = list(libraries)
+            split_records: List[dict] = []
+        else:
+            working_libraries, split_records = self.library_splitter.split_libraries(libraries)
         presplit_family_context = self._build_presplit_family_context(working_libraries)
-        if split_records:
+        if libraries_already_split:
+            logger.info("预拆分完成: 使用外层已拆分文库")
+        elif split_records:
             logger.info(
                 "预拆分完成: 原始文库{}个，触发拆分{}个，拆分后文库{}个",
                 len(libraries),
@@ -536,7 +564,7 @@ class GreedyLaneScheduler:
             lanes, failed = self._schedule_machine_group(libs, machine_type)
             all_lanes.extend(lanes)
             
-            # 第二轮：打乱顺序重新排未分配的文库
+            # 第二轮：打乱输入池做探索，但真正构Lane前仍会按临检/SJ > YC > 其他重排。
             if failed and len(failed) >= 10:
                 random.shuffle(failed)
                 logger.info(f"第二轮排机: {len(failed)} 个未分配文库（随机顺序）")
@@ -544,7 +572,7 @@ class GreedyLaneScheduler:
                 all_lanes.extend(lanes2)
                 failed = failed2
             
-            # 第三轮：小文库优先排
+            # 第三轮：小文库优先探索，但单条Lane内仍由高优先级重排逻辑主导。
             if failed and len(failed) >= 10:
                 failed.sort(key=lambda lib: lib.get_data_amount_gb())
                 logger.info(f"第三轮排机: {len(failed)} 个未分配文库（小文库优先）")
@@ -567,7 +595,7 @@ class GreedyLaneScheduler:
                         consecutive_failures = 0  # 重置连续失败计数
                     else:
                         consecutive_failures += 1
-                        if consecutive_failures >= 5:  # 连续5轮没有新Lane，停止
+                        if consecutive_failures >= 8:  # 连续8轮没有新Lane，停止
                             logger.info(f"连续{consecutive_failures}轮无新Lane，停止尝试")
                             break
 
@@ -907,7 +935,7 @@ class GreedyLaneScheduler:
             all_lanes.extend(new_lanes)
 
         # 统一回滚预拆分文库：任一拆分家族未全部成Lane，则整组回滚为原始文库
-        if presplit_family_context:
+        if perform_presplit_family_rollback and presplit_family_context:
             all_lanes, unassigned, rollback_records = self._rollback_incomplete_presplit_families(
                 lanes=all_lanes,
                 unassigned=unassigned,
@@ -1186,15 +1214,7 @@ class GreedyLaneScheduler:
         for lane in solution.lane_assignments:
             lane_id = lane.lane_id
             libs = lane.libraries
-            
-            # 根据Lane ID前缀确定metadata
-            metadata = {}
-            if lane_id.startswith('NB_'):
-                metadata['is_pure_non_10bp_lane'] = True
-            if lane_id.startswith('DL_'):
-                metadata['is_dedicated_imbalance_lane'] = True
-            if lane_id.startswith('BL_'):
-                metadata['is_backbone_lane'] = True
+            metadata = self._build_lane_validation_metadata(lane)
             
             # 获取机器类型
             machine_type = lane.machine_type.value if lane.machine_type else "Nova X-25B"
@@ -1341,6 +1361,8 @@ class GreedyLaneScheduler:
 
         seed_rank = self._get_scattered_mix_priority_rank(seed_lib)
         base_sorted = self._sort_remaining_for_scattered_mix_lane(libraries)
+        if seed_rank >= 2:
+            return base_sorted
         base_order = {id(lib): idx for idx, lib in enumerate(base_sorted)}
         return sorted(
             libraries,
@@ -1350,6 +1372,85 @@ class GreedyLaneScheduler:
                 self._get_scattered_mix_delete_date_sort_value(lib),
                 base_order.get(id(lib), len(base_order)),
                 -lib.get_data_amount_gb(),
+            ),
+        )
+
+    @staticmethod
+    def _normalize_profile_text(value: Any) -> str:
+        """统一规则画像中的文本口径。"""
+        if value is None:
+            return ""
+        return str(value).strip().replace("＋", "+").replace("×", "X").upper()
+
+    def _is_customer_library(self, lib: EnhancedLibraryInfo) -> bool:
+        """判断文库是否为客户文库。"""
+        checker = getattr(lib, "is_customer_library", None)
+        if callable(checker):
+            try:
+                return bool(checker())
+            except Exception:
+                pass
+        customer_flag = self._normalize_profile_text(getattr(lib, "customer_library", "") or "")
+        if customer_flag in {"是", "客户", "Y", "YES", "TRUE", "1"}:
+            return True
+        if customer_flag in {"否", "N", "NO", "FALSE", "0"}:
+            return False
+        lab_type = self._normalize_profile_text(getattr(lib, "lab_type", "") or "")
+        return "客户" in lab_type
+
+    def _is_soft_single_lane_target_library(
+        self,
+        lib: EnhancedLibraryInfo,
+        profile: Dict[str, Any],
+    ) -> bool:
+        """判断文库是否命中“软优先单独成lane”目标集合。"""
+        customer_complex_targets = {
+            self._normalize_profile_text(item)
+            for item in profile.get("customer_complex_results_any", set()) or set()
+            if self._normalize_profile_text(item)
+        }
+        internal_risk_targets = {
+            self._normalize_profile_text(item)
+            for item in profile.get("internal_risk_build_flags_any", set()) or set()
+            if self._normalize_profile_text(item)
+        }
+        if not customer_complex_targets and not internal_risk_targets:
+            return False
+
+        if self._is_customer_library(lib):
+            complex_result = self._normalize_profile_text(
+                getattr(lib, "complex_result", None) or getattr(lib, "wkcomplexresult", None) or ""
+            )
+            return complex_result in customer_complex_targets
+
+        risk_build_flag = self._normalize_profile_text(
+            getattr(lib, "risk_build_flag", None) or getattr(lib, "wkriskbuildflag", None) or ""
+        )
+        return risk_build_flag in internal_risk_targets
+
+    def _sort_by_soft_single_lane_preference(
+        self,
+        libraries: List[EnhancedLibraryInfo],
+        seed_lib: EnhancedLibraryInfo,
+        seed_rule: Any,
+    ) -> List[EnhancedLibraryInfo]:
+        """软优先：命中规则时，优先将同类风险文库聚拢到当前Lane。"""
+        if not libraries:
+            return libraries
+        if not bool(getattr(seed_rule, "soft_single_lane_preferred", False)):
+            return libraries
+
+        profile = dict(getattr(seed_rule, "profile", {}) or {})
+        seed_is_target = self._is_soft_single_lane_target_library(seed_lib, profile)
+        if not seed_is_target:
+            return libraries
+
+        base_order = {id(lib): idx for idx, lib in enumerate(libraries)}
+        return sorted(
+            libraries,
+            key=lambda lib: (
+                0 if self._is_soft_single_lane_target_library(lib, profile) else 1,
+                base_order.get(id(lib), len(base_order)),
             ),
         )
 
@@ -1440,7 +1541,7 @@ class GreedyLaneScheduler:
                 if not group_id or group_id == "G_UNKNOWN":
                     unmatched.append(lib)
                     continue
-                target_group = "G29" if group_id in {"G27", "G28"} else group_id
+                target_group = group_id
                 grouped.setdefault(target_group, []).append(lib)
 
             generated_lanes: List[LaneAssignment] = []
@@ -1448,7 +1549,7 @@ class GreedyLaneScheduler:
 
             for target_group, libs in grouped.items():
                 remaining = self._sort_remaining_for_scattered_mix_lane(libs)
-                target_ratio = 1.0 if target_group == "G29" else self.imbalance_handler.get_group_data_ratio(target_group)
+                target_ratio = self.imbalance_handler.get_group_data_ratio(target_group)
                 target_imbalance = self.config.lane_capacity_gb * target_ratio
                 min_imbalance = target_imbalance * 0.95
                 if target_imbalance <= 0:
@@ -2172,43 +2273,9 @@ class GreedyLaneScheduler:
         return True
 
     def _check_special_library_type_compatible(self, libraries: List[EnhancedLibraryInfo]) -> bool:
-        """
-        检查特殊文库类型数量是否满足约束
-
-        规则：特殊文库类型数量 <= max_special_library_types
-        仅统计碱基不均衡文库中的特殊类型，与LaneValidator逻辑对齐。
-        """
-        if len(libraries) < 1:
-            return True
-
-        special_types = set()
-        imbalance_count = 0
-        balanced_count = 0
-
-        for lib in libraries:
-            jjbj = getattr(lib, 'jjbj', None)
-            is_imbalance = (jjbj is not None and str(jjbj).strip() == '是')
-
-            if is_imbalance:
-                imbalance_count += 1
-                lab_type = getattr(lib, 'lab_type', '') or ''
-                sub_project = getattr(lib, 'sub_project_name', '') or ''
-                product_name = getattr(lib, 'product_name', '') or ''
-                sample_type = getattr(lib, 'sample_type_code', '') or ''
-                combined_type = f"{lab_type} {sub_project} {product_name} {sample_type}"
-
-                for keyword in self.lane_validator.special_library_keywords:
-                    if keyword.lower() in combined_type.lower():
-                        special_types.add(keyword)
-                        break
-            else:
-                balanced_count += 1
-
-        # 专用碱基不均衡Lane跳过类型数量限制
-        if imbalance_count > 0 and balanced_count == 0:
-            return True
-
-        return len(special_types) <= self.config.max_special_library_types
+        """特殊文库种类数不再作为排机约束。"""
+        _ = libraries
+        return True
 
     def _check_add_test_ratio_compatible(self, libraries: List[EnhancedLibraryInfo]) -> bool:
         """
@@ -2379,7 +2446,10 @@ class GreedyLaneScheduler:
             bin_end = (bin_idx + 1) * bin_width
             
             sorted_cluster = self._sort_remaining_for_scattered_mix_lane(cluster_libs)
-            available = [lib for lib in sorted_cluster if lib.origrec not in used_libs]
+            available = [
+                lib for lib in sorted_cluster
+                if self._get_library_runtime_key(lib) not in used_libs
+            ]
             
             if len(available) < min_count:
                 continue
@@ -2458,7 +2528,7 @@ class GreedyLaneScheduler:
                         continue
                     
                     current_lane.add_library(lib)
-                    used_libs.add(lib.origrec)
+                    used_libs.add(self._get_library_runtime_key(lib))
                 
                 if not current_lane.libraries:
                     break
@@ -2511,11 +2581,11 @@ class GreedyLaneScheduler:
                     else:
                         # 验证失败，回退
                         for lib in current_lane.libraries:
-                            used_libs.discard(lib.origrec)
+                            used_libs.discard(self._get_library_runtime_key(lib))
                         break
                 else:
                     for lib in current_lane.libraries:
-                        used_libs.discard(lib.origrec)
+                        used_libs.discard(self._get_library_runtime_key(lib))
                     break
         
         # ========== 阶段2：预处理分流 - 高客户占比区间与低客户占比区间混合 ==========
@@ -2526,20 +2596,20 @@ class GreedyLaneScheduler:
             high_ratio_libs = []
             for bin_idx in high_customer_ratio_bins:
                 for lib in large_clusters[bin_idx]:
-                    if lib.origrec not in used_libs:
+                    if self._get_library_runtime_key(lib) not in used_libs:
                         high_ratio_libs.append(lib)
             
             # 收集低客户占比区间的剩余内部文库（非客户文库）
             low_ratio_internal_libs = []
             for bin_idx in low_customer_ratio_bins:
                 for lib in large_clusters[bin_idx]:
-                    if lib.origrec not in used_libs and not lib.is_customer_library():
+                    if self._get_library_runtime_key(lib) not in used_libs and not lib.is_customer_library():
                         low_ratio_internal_libs.append(lib)
             
             # 收集其他未使用的小文库中的内部文库
             other_internal_libs = []
             for lib in small_libs:
-                if lib.origrec not in used_libs and not lib.is_customer_library():
+                if self._get_library_runtime_key(lib) not in used_libs and not lib.is_customer_library():
                     # 检查是否不在大聚类中
                     data_gb = lib.get_data_amount_gb()
                     bin_idx = int(data_gb / bin_width)
@@ -2570,7 +2640,10 @@ class GreedyLaneScheduler:
                 logger.info(f"预处理分流: 成功形成{len(mixed_lanes)}条混合Lane")
         
         # 收集剩余文库
-        remaining_libs = [lib for lib in libraries if lib.origrec not in used_libs]
+        remaining_libs = [
+            lib for lib in libraries
+            if self._get_library_runtime_key(lib) not in used_libs
+        ]
         
         return clustering_lanes, remaining_libs
     
@@ -2608,10 +2681,16 @@ class GreedyLaneScheduler:
         
         # 合并所有内部文库
         all_internal = internal_libs + high_customer_internal_libs
-        all_internal = [lib for lib in all_internal if lib.origrec not in used_libs]
+        all_internal = [
+            lib for lib in all_internal
+            if self._get_library_runtime_key(lib) not in used_libs
+        ]
         
         # 客户文库
-        customer_libs = [lib for lib in high_customer_customer_libs if lib.origrec not in used_libs]
+        customer_libs = [
+            lib for lib in high_customer_customer_libs
+            if self._get_library_runtime_key(lib) not in used_libs
+        ]
         
         if not customer_libs:
             return []
@@ -2622,8 +2701,16 @@ class GreedyLaneScheduler:
         max_attempts = 10  # 最多尝试形成10条混合Lane
         for attempt in range(max_attempts):
             # 检查是否还有足够的文库
-            remaining_customer = [lib for lib in customer_libs if lib.origrec not in used_libs]
-            remaining_internal = [lib for lib in all_internal if lib.origrec not in used_libs]
+            remaining_customer = [
+                lib for lib in customer_libs
+                if self._get_library_runtime_key(lib) not in used_libs
+            ]
+            remaining_internal = [
+                lib for lib in all_internal
+                if self._get_library_runtime_key(lib) not in used_libs
+            ]
+            remaining_customer = self._sort_remaining_for_scattered_mix_lane(remaining_customer)
+            remaining_internal = self._sort_remaining_for_scattered_mix_lane(remaining_internal)
             
             if not remaining_customer:
                 break
@@ -2700,14 +2787,14 @@ class GreedyLaneScheduler:
                     continue
                 
                 current_lane.add_library(lib)
-                used_libs.add(lib.origrec)
+                used_libs.add(self._get_library_runtime_key(lib))
             
             internal_data_in_lane = current_lane.total_data_gb
             
             if internal_data_in_lane < self.config.lane_capacity_gb * 0.3:
                 # 内部文库太少，无法形成有效的混合Lane
                 for lib in current_lane.libraries:
-                    used_libs.discard(lib.origrec)
+                    used_libs.discard(self._get_library_runtime_key(lib))
                 break
             
             # 第二步：加入客户文库（确保客户占比<=50%）
@@ -2770,7 +2857,7 @@ class GreedyLaneScheduler:
                     continue
                 
                 current_lane.add_library(lib)
-                used_libs.add(lib.origrec)
+                used_libs.add(self._get_library_runtime_key(lib))
             
             # 检查Lane是否有效
             utilization = current_lane.total_data_gb / self.config.lane_capacity_gb
@@ -2790,7 +2877,7 @@ class GreedyLaneScheduler:
                 if final_customer_ratio > 0.50 and abs(final_customer_ratio - 1.0) > 1e-6:
                     logger.warning(f"混合Lane {current_lane.lane_id} 客户占比{final_customer_ratio:.1%}不符合规则，拒绝形成")
                     for lib in current_lane.libraries:
-                        used_libs.discard(lib.origrec)
+                        used_libs.discard(self._get_library_runtime_key(lib))
                     continue
                 
                 # 2. Index冲突检查
@@ -2798,43 +2885,43 @@ class GreedyLaneScheduler:
                     if not self.index_validator.validate_lane_quick(current_lane.libraries):
                         logger.warning(f"混合Lane {current_lane.lane_id} Index冲突，拒绝形成")
                         for lib in current_lane.libraries:
-                            used_libs.discard(lib.origrec)
+                            used_libs.discard(self._get_library_runtime_key(lib))
                         continue
                 
                 # 3. 碱基不均衡占比检查
                 if not self._check_base_imbalance_compatible(current_lane.libraries):
                     logger.warning(f"混合Lane {current_lane.lane_id} 碱基不均衡占比不符合规则，拒绝形成")
                     for lib in current_lane.libraries:
-                        used_libs.discard(lib.origrec)
+                        used_libs.discard(self._get_library_runtime_key(lib))
                     continue
                 
                 # 4. Peak Size检查
                 if not self._check_peak_size_compatible(current_lane.libraries):
                     logger.warning(f"混合Lane {current_lane.lane_id} Peak Size不符合规则，拒绝形成")
                     for lib in current_lane.libraries:
-                        used_libs.discard(lib.origrec)
+                        used_libs.discard(self._get_library_runtime_key(lib))
                     continue
                 
                 # 5. 10bp Index占比检查
                 if not self._check_10bp_index_ratio_compatible(current_lane.libraries):
                     logger.warning(f"混合Lane {current_lane.lane_id} 10bp Index占比不符合规则，拒绝形成")
                     for lib in current_lane.libraries:
-                        used_libs.discard(lib.origrec)
+                        used_libs.discard(self._get_library_runtime_key(lib))
                     continue
                 
                 # 所有检查通过，添加Lane
-                    mixed_lanes.append(current_lane)
-                    customer_count = sum(1 for l in current_lane.libraries if l.is_customer_library())
-                    internal_count = len(current_lane.libraries) - customer_count
-                    logger.info(f"混合Lane {current_lane.lane_id} 形成成功 - "
-                               f"文库数: {len(current_lane.libraries)} (客户{customer_count}+内部{internal_count}), "
-                               f"数据量: {current_lane.total_data_gb:.1f}GB, "
-                               f"客户占比: {final_customer_ratio:.1%}, "
-                               f"利用率: {utilization:.1%}")
+                mixed_lanes.append(current_lane)
+                customer_count = sum(1 for l in current_lane.libraries if l.is_customer_library())
+                internal_count = len(current_lane.libraries) - customer_count
+                logger.info(f"混合Lane {current_lane.lane_id} 形成成功 - "
+                           f"文库数: {len(current_lane.libraries)} (客户{customer_count}+内部{internal_count}), "
+                           f"数据量: {current_lane.total_data_gb:.1f}GB, "
+                           f"客户占比: {final_customer_ratio:.1%}, "
+                           f"利用率: {utilization:.1%}")
             else:
                 # 容量不足，回退
                 for lib in current_lane.libraries:
-                    used_libs.discard(lib.origrec)
+                    used_libs.discard(self._get_library_runtime_key(lib))
         
         return mixed_lanes
     
@@ -2949,6 +3036,7 @@ class GreedyLaneScheduler:
         remaining_non_10bp = list(sorted_non_10bp)
         
         while remaining_non_10bp:
+            remaining_non_10bp = self._sort_remaining_for_scattered_mix_lane(remaining_non_10bp)
             # 检查剩余文库是否足以形成一条Lane
             remaining_total = sum(lib.get_data_amount_gb() for lib in remaining_non_10bp)
             min_lane_data, _ = self._resolve_lane_capacity_limits(
@@ -3041,7 +3129,7 @@ class GreedyLaneScheduler:
                 
                 # 通过检查，加入Lane
                 current_lane.add_library(lib)
-                used_libs.add(lib.origrec)
+                used_libs.add(self._get_library_runtime_key(lib))
             
             # 检查Lane是否有效
             if not current_lane.libraries:
@@ -3063,7 +3151,7 @@ class GreedyLaneScheduler:
                 if final_customer_ratio > 0.50 and abs(final_customer_ratio - 1.0) > 1e-6:
                     logger.warning(f"NB Lane {current_lane.lane_id} 客户占比{final_customer_ratio:.1%}不符合规则，拒绝形成")
                     for lib in current_lane.libraries:
-                        used_libs.discard(lib.origrec)
+                        used_libs.discard(self._get_library_runtime_key(lib))
                     break
                 
                 # 验证Lane（非10bp专用Lane放宽10bp占比规则）
@@ -3080,16 +3168,19 @@ class GreedyLaneScheduler:
                 else:
                     # 验证失败，回退
                     for lib in current_lane.libraries:
-                        used_libs.discard(lib.origrec)
+                        used_libs.discard(self._get_library_runtime_key(lib))
                     break
             else:
                 # 容量不足，回退
                 for lib in current_lane.libraries:
-                    used_libs.discard(lib.origrec)
+                    used_libs.discard(self._get_library_runtime_key(lib))
                 break
         
         # 收集剩余文库（未被使用的非10bp文库 + 10bp文库）
-        remaining_libs = [lib for lib in libraries if lib.origrec not in used_libs]
+        remaining_libs = [
+            lib for lib in libraries
+            if self._get_library_runtime_key(lib) not in used_libs
+        ]
         
         return non_10bp_lanes, remaining_libs
     
@@ -3257,7 +3348,7 @@ class GreedyLaneScheduler:
         mid_sized = [lib for lib in large_libs if 30 <= lib.get_data_amount_gb() <= 100]
         large_sized = [lib for lib in large_libs if lib.get_data_amount_gb() > 100]
         small_large = [lib for lib in large_libs if 20 < lib.get_data_amount_gb() < 30]
-        
+
         # 按优先级排序：中等 > 小大 > 大
         # 中等文库内部按数据量升序（用小的凑数，保留大的给核心项目）
         candidates = sorted(mid_sized, key=lambda lib: lib.get_data_amount_gb())
@@ -3331,6 +3422,19 @@ class GreedyLaneScheduler:
         
         # 循环尝试形成骨架Lane
         while remaining_backbone and remaining_small:
+            remaining_backbone = [
+                lib for lib in remaining_backbone
+                if lib.origrec not in used_backbone_ids
+            ]
+            remaining_small = [
+                lib for lib in remaining_small
+                if lib.origrec not in used_small_ids
+            ]
+            if not remaining_backbone or not remaining_small:
+                break
+
+            remaining_backbone = self._sort_remaining_for_scattered_mix_lane(remaining_backbone)
+
             # 使用全局计数器获取唯一Lane ID
             lane_id = self._get_next_lane_id("BL", machine_type)
             current_lane = LaneAssignment(
@@ -3438,8 +3542,11 @@ class GreedyLaneScheduler:
             # 用小文库填充剩余空间
             next_remaining_small: List[EnhancedLibraryInfo] = []
             small_in_lane: List[EnhancedLibraryInfo] = []
-            
-            for lib in remaining_small:
+
+            lane_seed = self._sort_remaining_for_scattered_mix_lane(current_lane.libraries)[0]
+            candidate_small_pool = self._sort_remaining_for_lane_seed(remaining_small, lane_seed)
+
+            for lib in candidate_small_pool:
                 if lib.origrec in used_small_ids:
                     continue
                 
@@ -3640,6 +3747,11 @@ class GreedyLaneScheduler:
             seed_rule = self._get_scheduling_lane_capacity_range(
                 libraries=[remaining[0]],
                 machine_type=machine_type_enum.value,
+            )
+            lane_candidate_order = self._sort_by_soft_single_lane_preference(
+                lane_candidate_order,
+                remaining[0],
+                seed_rule,
             )
             # 为当前Lane抽取一个软目标容量（在下限和上限之间随机），硬上限仍由验证控制
             target_capacity_gb = self._sample_target_capacity(seed_rule)
@@ -3851,7 +3963,7 @@ class GreedyLaneScheduler:
         if not self._check_peak_size_compatible(test_libraries):
             return False
 
-        # 9. 特殊文库类型数量限制（非DL/NB/BL Lane）
+        # 9. 特殊文库类型数量限制已取消
         if not (is_dl_lane or is_nb_lane or is_bl_lane):
             if not self._check_special_library_type_compatible(test_libraries):
                 return False
@@ -3969,7 +4081,7 @@ class GreedyLaneScheduler:
         return {
             '机器类型': getattr(lib, 'eq_type', '') or '',
             '工序编码': getattr(lib, 'process_code', None),
-            '样本类型': getattr(lib, 'data_type', '') or getattr(lib, 'lab_type', '') or '',
+            '样本类型': getattr(lib, 'sample_type_code', '') or getattr(lib, 'data_type', '') or getattr(lib, 'lab_type', '') or '',
             'Index序列': index_seq,
             'PeakSize': getattr(lib, 'peak_size', None),
             '测序策略': getattr(lib, 'seq_strategy', '') or '',
@@ -4604,8 +4716,21 @@ class GreedyLaneScheduler:
         return result.is_valid
 
     def _build_lane_validation_metadata(self, lane: LaneAssignment) -> Dict[str, Any]:
-        """根据Lane前缀构造验证元信息（与LaneValidator规则保持一致）"""
-        metadata: Dict[str, Any] = dict(getattr(lane, "metadata", {}) or {})
+        """构造校验元信息，只保留当前Lane真实需要的上下文。"""
+        lane_metadata = dict(getattr(lane, "metadata", {}) or {})
+        metadata: Dict[str, Any] = {}
+
+        # 只透传会影响校验行为、且不会因种子文库变化而过期的元数据。
+        if lane_metadata.get("is_package_lane"):
+            metadata["is_package_lane"] = True
+        balance_data = lane_metadata.get("wkbalancedata")
+        if balance_data is None:
+            balance_data = lane_metadata.get("wkadd_balance_data")
+        if balance_data is None:
+            balance_data = lane_metadata.get("required_balance_data_gb")
+        if balance_data is not None:
+            metadata["wkbalancedata"] = balance_data
+
         metadata.update({
             'is_dedicated_imbalance_lane': lane.lane_id.startswith('DL_'),
             'is_pure_non_10bp_lane': lane.lane_id.startswith('NB_'),
@@ -4613,9 +4738,15 @@ class GreedyLaneScheduler:
         })
         if lane.libraries:
             first_lib = lane.libraries[0]
-            metadata.setdefault('process_code', getattr(first_lib, 'test_code', None))
-            metadata.setdefault('test_code', getattr(first_lib, 'test_code', None))
-            metadata.setdefault('test_no', getattr(first_lib, 'test_no', ''))
+            process_code = getattr(first_lib, 'process_code', None)
+            if process_code is not None:
+                metadata['process_code'] = process_code
+            test_code = getattr(first_lib, 'test_code', None)
+            if test_code is not None:
+                metadata['test_code'] = test_code
+            test_no = getattr(first_lib, 'test_no', '')
+            if test_no is not None and str(test_no).strip() != '':
+                metadata['test_no'] = test_no
         return metadata
 
 

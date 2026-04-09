@@ -1,7 +1,7 @@
 """
 排机系统统一配置管理模块
 创建时间：2025-12-03 14:00:00
-更新时间：2026-03-31 16:19:35
+更新时间：2026-04-09 10:06:45
 
 集中管理所有排机相关的配置常量，避免硬编码分散在各个模块中。
 配置来源：docs/排机规则文档.md、config/business_rules.yaml
@@ -83,7 +83,7 @@ class ValidationLimitsConfig:
     # 单端Index占比上限
     single_end_ratio_limit: float = 0.30
 
-    # 碱基不均衡占比上限（2026-01-30：统一调整为35%）
+    # 碱基不均衡占比上限（当前调度与严格校验统一按35%口径）
     base_imbalance_ratio_limit: float = 0.35
     # 3.6T-NEW 模式碱基不均衡上限（与常规场景保持一致）
     base_imbalance_ratio_limit_3_6t: float = 0.35
@@ -96,8 +96,8 @@ class ValidationLimitsConfig:
     peak_size_max_diff: int = 150           # bp，最大-最小差值
     peak_size_coverage_ratio: float = 0.75  # 150bp 窗口最低覆盖率
 
-    # 特殊文库类型数量上限
-    special_library_type_limit: int = 3
+    # 特殊文库类型数量上限（1-57规则：组合混排最多5种）
+    special_library_type_limit: int = 5
 
     # 特殊文库总量上限（按机器类型，单位 G）
     special_library_capacity: Dict[str, float] = field(default_factory=lambda: {
@@ -255,11 +255,12 @@ class GeneticAlgorithmConfig:
 @dataclass
 class LibrarySplitConfig:
     """文库拆分配置"""
-    # 非1.0模式 + 单index：单文库合同量 >100G 触发拆分
+    # 1.1模式（兼容旧名1.0）文库不参与预拆分；以下阈值仅适用于3.6T-NEW模式
+    # 3.6T-NEW模式 + 单index：单文库合同量 >100G 触发拆分
     single_index_non_1_0_threshold_gb: float = 100.0
-    # 1.0模式 + 单index：单文库合同量 >200G 触发拆分
+    # 兼容历史配置保留，当前文库拆分逻辑不再使用该阈值
     single_index_mode_1_0_threshold_gb: float = 200.0
-    # 多index：单文库合同量 >300G 触发拆分
+    # 3.6T-NEW模式 + 多index：单文库合同量 >300G 触发拆分
     multi_index_threshold_gb: float = 300.0
     # 拆分后最小数据量
     min_split_size_gb: float = 2.0
@@ -311,6 +312,7 @@ class LaneRuleSelection:
     sequencing_mode: str
     fc_min_data_gb: float = 0.0
     additional_balance_ratio: float = 0.0
+    soft_single_lane_preferred: bool = False
     profile: Dict[str, Any] = field(default_factory=dict)
 
 
@@ -581,6 +583,19 @@ class SchedulingConfigManager:
             normalized_profile['sample_type_group_codes_any'] = list(
                 profile.get('sample_type_group_codes_any', [])
             )
+            normalized_profile['customer_complex_results_any'] = _normalize_scope_list(
+                profile.get('customer_complex_results_any', [])
+            )
+            normalized_profile['internal_risk_build_flags_any'] = _normalize_scope_list(
+                profile.get('internal_risk_build_flags_any', [])
+            )
+            soft_single_lane_preferred = profile.get('soft_single_lane_preferred', False)
+            if isinstance(soft_single_lane_preferred, str):
+                normalized_profile['soft_single_lane_preferred'] = soft_single_lane_preferred.strip().lower() in {
+                    '1', 'true', 'yes', 'y', '是'
+                }
+            else:
+                normalized_profile['soft_single_lane_preferred'] = bool(soft_single_lane_preferred)
             normalized_profile['priority'] = int(profile.get('priority', 0))
             normalized_profile['soft_target_gb'] = float(profile.get('soft_target_gb', 0.0) or 0.0)
             normalized_profile['min_target_gb'] = float(profile.get('min_target_gb', 0.0) or 0.0)
@@ -653,6 +668,68 @@ class SchedulingConfigManager:
             for sample_type in (self._get_library_sample_type(lib) for lib in libraries)
             if sample_type
         }
+
+    def _is_customer_library(self, lib: Any) -> bool:
+        """判断文库是否为客户文库。"""
+        checker = getattr(lib, 'is_customer_library', None)
+        if callable(checker):
+            try:
+                return bool(checker())
+            except Exception:
+                pass
+
+        customer_flag = self._normalize_text(getattr(lib, 'customer_library', '') or '')
+        if customer_flag in {
+            self._normalize_text('是'),
+            self._normalize_text('客户'),
+            'Y',
+            'YES',
+            'TRUE',
+            '1',
+        }:
+            return True
+        if customer_flag in {
+            self._normalize_text('否'),
+            'N',
+            'NO',
+            'FALSE',
+            '0',
+        }:
+            return False
+        lab_type_text = self._normalize_text(getattr(lib, 'lab_type', '') or '')
+        return self._normalize_text('客户') in lab_type_text
+
+    def _matches_lane_quality_risk_scope(self, libraries: List[Any], profile: Dict[str, Any]) -> bool:
+        """评估规则中客户库检/诺禾风险建库组合条件。"""
+        customer_complex_targets = set(profile.get('customer_complex_results_any', set()) or set())
+        internal_risk_targets = set(profile.get('internal_risk_build_flags_any', set()) or set())
+
+        if not customer_complex_targets and not internal_risk_targets:
+            return True
+
+        has_customer_complex_match = not customer_complex_targets
+        has_internal_risk_match = not internal_risk_targets
+
+        for lib in libraries:
+            is_customer = self._is_customer_library(lib)
+            if not has_customer_complex_match and is_customer:
+                complex_result = self._normalize_text(
+                    getattr(lib, 'complex_result', None) or getattr(lib, 'wkcomplexresult', None) or ''
+                )
+                if complex_result in customer_complex_targets:
+                    has_customer_complex_match = True
+
+            if not has_internal_risk_match and not is_customer:
+                risk_build_flag = self._normalize_text(
+                    getattr(lib, 'risk_build_flag', None) or getattr(lib, 'wkriskbuildflag', None) or ''
+                )
+                if risk_build_flag in internal_risk_targets:
+                    has_internal_risk_match = True
+
+            if has_customer_complex_match and has_internal_risk_match:
+                return True
+
+        return has_customer_complex_match and has_internal_risk_match
 
     def _classify_lane_project_type(self, libraries: List[Any]) -> str:
         """按wkdatatype(data_type)识别Lane项目类型，不再按样本编号推断。"""
@@ -730,17 +807,58 @@ class SchedulingConfigManager:
     def _resolve_seq_mode(self, libraries: List[Any], metadata: Optional[Dict[str, Any]] = None) -> str:
         """解析Lane测序模式。"""
         metadata = metadata or {}
-        candidate_keys = ('seq_mode', 'lcxms', 'sequencing_mode')
-        for key in candidate_keys:
-            value = metadata.get(key)
-            if value is not None and str(value).strip() != '':
-                return self._normalize_text(value)
+        def _canonicalize_seq_mode(value: Any) -> str:
+            normalized_text = self._normalize_text(value)
+            if not normalized_text:
+                return ""
+            normalized_keyword = self._normalize_seq_keyword(value)
+            if "LANESEQ" in normalized_keyword:
+                return self._normalize_text("Lane seq")
+            if "3.6T" in normalized_keyword:
+                return self._normalize_text("3.6T-NEW")
+            # 业务上 1.0 与 1.1 视为同一模式族；容量规则矩阵统一使用 1.1 口径。
+            if normalized_keyword in {"1.0", "1.1", "1.0MODE", "1.1MODE"}:
+                return self._normalize_text("1.1")
+            return normalized_text
 
+        def _resolve_from_candidates(values: List[Any]) -> str:
+            normalized_candidates: List[str] = []
+            for value in values:
+                normalized_value = _canonicalize_seq_mode(value)
+                if normalized_value:
+                    normalized_candidates.append(normalized_value)
+            if not normalized_candidates:
+                return ""
+            unique_candidates = list(dict.fromkeys(normalized_candidates))
+            if len(unique_candidates) == 1:
+                return unique_candidates[0]
+            if self._normalize_text("Lane seq") in unique_candidates:
+                return self._normalize_text("Lane seq")
+            if (
+                self._normalize_text("3.6T-NEW") in unique_candidates
+                and self._normalize_text("1.1") not in unique_candidates
+            ):
+                return self._normalize_text("3.6T-NEW")
+            if (
+                self._normalize_text("1.1") in unique_candidates
+                and self._normalize_text("3.6T-NEW") not in unique_candidates
+            ):
+                return self._normalize_text("1.1")
+            return ""
+
+        metadata_candidates = [metadata.get(key) for key in ('seq_mode', 'lcxms', 'sequencing_mode')]
+        resolved_metadata_mode = _resolve_from_candidates(metadata_candidates)
+        if resolved_metadata_mode:
+            return resolved_metadata_mode
+
+        current_mode_candidates: List[Any] = []
         for lib in libraries:
-            for attr_name in ('seq_mode', 'lcxms', '_current_seq_mode_raw', 'last_cxms'):
-                value = getattr(lib, attr_name, None)
-                if value is not None and str(value).strip() != '':
-                    return self._normalize_text(value)
+            for attr_name in ('seq_mode', 'lcxms', '_current_seq_mode_raw'):
+                current_mode_candidates.append(getattr(lib, attr_name, None))
+
+        resolved_current_mode = _resolve_from_candidates(current_mode_candidates)
+        if resolved_current_mode:
+            return resolved_current_mode
 
         process_code = self._resolve_process_code(libraries, metadata)
         seq_strategy = self._resolve_seq_strategy(libraries, metadata)
@@ -840,6 +958,8 @@ class SchedulingConfigManager:
                 for group_code in group_codes
             ):
                 continue
+            if not self._matches_lane_quality_risk_scope(libraries, profile):
+                continue
 
             min_target_gb = float(profile.get('min_target_gb', 0.0) or 0.0)
             max_target_gb = float(profile.get('max_target_gb', 0.0) or 0.0)
@@ -859,6 +979,7 @@ class SchedulingConfigManager:
                 additional_balance_ratio=float(
                     profile.get('additional_balance_ratio', 0.0) or 0.0
                 ),
+                soft_single_lane_preferred=bool(profile.get('soft_single_lane_preferred', False)),
                 profile=profile,
             )
 
@@ -871,6 +992,28 @@ class SchedulingConfigManager:
         metadata: Optional[Dict[str, Any]] = None,
     ) -> LaneRuleSelection:
         """获取Lane容量区间，优先使用统一规则表，失败时回退到旧配置。"""
+        metadata = metadata or {}
+        normalized_machine_type = self._normalize_text(machine_type)
+
+        if self._has_package_lane_context(libraries, metadata):
+            loading_method = ''
+            if '25B' in normalized_machine_type or normalized_machine_type == self._normalize_text('NovaSeq X Plus'):
+                loading_method = '25B'
+            return LaneRuleSelection(
+                rule_code="package_lane_capacity",
+                soft_target_gb=float(self.lane_capacity.package_lane_target),
+                min_target_gb=float(self.lane_capacity.package_lane_min),
+                max_target_gb=float(self.lane_capacity.package_lane_max),
+                tolerance_gb=0.0,
+                effective_min_gb=float(self.lane_capacity.package_lane_min),
+                effective_max_gb=float(self.lane_capacity.package_lane_max),
+                lane_count=8,
+                loading_method=loading_method,
+                sequencing_mode=self._resolve_seq_mode(libraries, metadata),
+                fc_min_data_gb=0.0,
+                profile={},
+            )
+
         selection = self.resolve_lane_rule_selection(libraries, machine_type, metadata)
         if selection is not None:
             return selection
@@ -878,7 +1021,6 @@ class SchedulingConfigManager:
         target_capacity = self.get_lane_capacity(machine_type, SchedulingMode.NON_1_0)
         tolerance_gb = self.lane_capacity.standard_tolerance
         fallback_loading_method = ''
-        normalized_machine_type = self._normalize_text(machine_type)
         if '25B' in normalized_machine_type or normalized_machine_type == self._normalize_text('NovaSeq X Plus'):
             fallback_loading_method = '25B'
 
@@ -946,6 +1088,27 @@ class SchedulingConfigManager:
             or ''
         ).strip()
         return has_package_lane or bool(package_lane_number) or bool(package_fc_number)
+
+    def _has_package_lane_context(
+        self,
+        libraries: List[Any],
+        metadata: Optional[Dict[str, Any]] = None,
+    ) -> bool:
+        """判断当前Lane是否为包Lane上下文。"""
+        metadata = metadata or {}
+        if bool(metadata.get('is_package_lane')):
+            return True
+
+        for lib in libraries:
+            has_package_lane = str(getattr(lib, 'is_package_lane', '') or '').strip() == '是'
+            package_lane_number = str(
+                getattr(lib, 'package_lane_number', None)
+                or getattr(lib, 'baleno', None)
+                or ''
+            ).strip()
+            if has_package_lane or bool(package_lane_number):
+                return True
+        return False
 
     def _evaluate_forbid_condition(
         self,
@@ -1215,7 +1378,7 @@ class SchedulingConfigManager:
         """获取特殊文库总量限制"""
         return self.validation_limits.special_library_capacity.get(
             machine_type,
-            self.validation_limits.special_library_capacity.get('Nova X-25B', 240.0)
+            self.validation_limits.special_library_capacity.get('Nova X-25B', 350.0)
         )
     
     def get_concentration(self, lane_type: str) -> float:

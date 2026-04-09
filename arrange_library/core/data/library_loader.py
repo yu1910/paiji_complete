@@ -16,7 +16,7 @@ from typing import Dict, Iterable, List, Optional, Tuple
 import pandas as pd
 from loguru import logger
 
-from models.library_info import EnhancedLibraryInfo
+from arrange_library.models.library_info import EnhancedLibraryInfo
 
 # 配置常量
 REMARK_RECOGNITION_TIMEOUT: int = 300  # 备注识别超时时间（秒）
@@ -102,6 +102,7 @@ CSV_TO_MODEL_MAPPING: Dict[str, str] = {
     "wkeqtype": "EQTYPE",
     "wksamplename": "SAMPLE_NAME",
     "wksampletype": "SAMPLETYPECODE",
+    "wkdatatype": "DATATYPE",
     "wkspecies": "SPECIES",
     "wkindexseq": "INDEXSEQ",
     "wkindexcode": "INDEX_NUMBER",
@@ -428,9 +429,9 @@ async def _recognize_and_apply_remarks(
     Returns:
         tuple: (有效文库列表, 未识别退回的文库列表)
     """
-    from core.data.remark_processor import extract_remarks_from_libraries
-    from core.ai.remark_recognizer import RemarkRecognizer
-    from core.preprocessing.remark_intent_applier import RemarkIntentApplier
+    from arrange_library.core.data.remark_processor import extract_remarks_from_libraries
+    from arrange_library.core.ai.remark_recognizer import RemarkRecognizer
+    from arrange_library.core.preprocessing.remark_intent_applier import RemarkIntentApplier
     import os
     
     # 提取备注
@@ -459,4 +460,3 @@ async def _recognize_and_apply_remarks(
     )
     
     return valid_libs, unrecognized_libs
-

@@ -15,7 +15,7 @@ from loguru import logger
 
 # from liblane_paths import setup_liblane_paths
 # setup_liblane_paths()
-from models.library_info import EnhancedLibraryInfo
+from arrange_library.models.library_info import EnhancedLibraryInfo
 
 
 # 单端默认右端序列基准（从真实数据验证程序复制）
@@ -428,4 +428,3 @@ def get_index_conflicts_detail(libraries: List[EnhancedLibraryInfo]) -> dict:
 
 # 为了保持兼容性，创建一个别名
 IndexConflictValidator = IndexValidatorVerified
-

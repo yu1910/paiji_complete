@@ -33,7 +33,7 @@ from loguru import logger
 # from liblane_paths import setup_liblane_paths
 # setup_liblane_paths()
 
-from models.library_info import EnhancedLibraryInfo
+from arrange_library.models.library_info import EnhancedLibraryInfo
 
 
 class LOutputPredictorWrapper:
