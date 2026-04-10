@@ -1,7 +1,7 @@
 """
 端到端排机流程测试 - 排机与 Pooling 预测
-创建时间：2026-01-12 11:23:30
-更新时间：2026-04-09 10:22:31
+创建时间：2026-04-10 16:06:41
+更新时间：2026-04-10 16:06:41
 
 功能：
 - 支持完整排机流程（GreedyLaneScheduler）
@@ -3818,21 +3818,10 @@ def _build_detail_output(
         split_lane_show_mask = pd.Series(False, index=merged.index)
     merged["lane_show"] = np.where(package_lane_show_mask | split_lane_show_mask, "yes", "no")
 
-    # 对AI参与排机但未成lane的文库，将wkuser置空
+    # `wkuser` 字段保持输入原值，不随排机结果清空/覆盖
     if "wkuser" not in merged.columns:
         merged["wkuser"] = pd.NA
     _ensure_object_column(merged, "wkuser")
-    if ai_schedulable_keys:
-        wkuser_clear_mask = merged["origrec_key"].astype(str).isin(ai_schedulable_keys) & (~lane_assigned_mask)
-        merged.loc[wkuser_clear_mask, "wkuser"] = ""
-        merged.loc[wkuser_clear_mask, "llaneid"] = ""
-        merged.loc[wkuser_clear_mask, "lrunid"] = ""
-        if "lcxms" in merged.columns:
-            merged.loc[wkuser_clear_mask, "lcxms"] = ""
-        if "lsjfs" in merged.columns:
-            merged.loc[wkuser_clear_mask, "lsjfs"] = ""
-        if "lanecreatetype" in merged.columns:
-            merged.loc[wkuser_clear_mask, "lanecreatetype"] = ""
 
     # 输出字段改名：预测结果按业务字段名输出
     # 注意：这里使用预测值覆盖输出中的 lorderdata / lai_output
