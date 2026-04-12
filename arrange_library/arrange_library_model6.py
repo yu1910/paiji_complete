@@ -1,7 +1,7 @@
 """
 端到端排机流程测试 - 排机与 Pooling 预测
 创建时间：2026-04-10 16:06:41
-更新时间：2026-04-10 16:06:41
+更新时间：2026-04-12 10:00:00
 
 功能：
 - 支持完整排机流程（GreedyLaneScheduler）
@@ -21,6 +21,7 @@ import argparse
 import json
 import math
 import random
+import signal
 import sys
 from dataclasses import dataclass
 from copy import deepcopy
@@ -61,6 +62,10 @@ from arrange_library.core.constraints.lane_validator import (
     ValidationError,
     ValidationSeverity,
 )
+from arrange_library.core.constraints.index_validator_verified import IndexConflictValidator as _IndexConflictValidator
+
+# 模块级单例，避免在 _attempt_build_lane_from_pool 等高频函数中反复初始化
+_MODULE_IDX_VALIDATOR = _IndexConflictValidator()
 from arrange_library.core.data import load_libraries_from_csv
 from arrange_library.core.preprocessing.base_imbalance_handler import BaseImbalanceHandler
 from arrange_library.core.preprocessing.library_splitter import LibrarySplitter
@@ -71,6 +76,23 @@ from arrange_library.core.scheduling.scheduling_types import LaneAssignment
 
 # prediction_delivery 作为独立包依赖，由 pip 安装后直接导入
 from prediction_delivery import MODELS_DIR, predict_pooling
+
+# ==================== 排机超时控制 ====================
+# 排机最长允许运行时间（秒）。超过此时间视为异常，强制中断并返回失败。
+SCHEDULING_TIMEOUT_SECONDS = 600  # 10 分钟
+
+
+class SchedulingTimeoutError(Exception):
+    """排机超时异常：排机耗时超过允许上限，强制终止。"""
+    pass
+
+
+def _scheduling_timeout_handler(signum: int, frame: object) -> None:
+    """SIGALRM 信号处理器，超时时抛出 SchedulingTimeoutError。"""
+    raise SchedulingTimeoutError(
+        f"排机超时：超过 {SCHEDULING_TIMEOUT_SECONDS // 60} 分钟仍未完成，已强制终止"
+    )
+
 
 # ==================== Lane上机浓度规则 ====================
 LANE_ORDERDATA_FLOOR = 1.0
@@ -992,8 +1014,8 @@ def _attempt_build_lane_from_pool(
     if not active_pool:
         return None, []
 
-    from arrange_library.core.constraints.index_validator_verified import IndexConflictValidator
-    _idx_validator = IndexConflictValidator()
+    # 复用模块级单例，不重复初始化（每次 new 会打印 INFO 日志，高频调用有明显开销）
+    _idx_validator = _MODULE_IDX_VALIDATOR
 
     index_conflict_retry_count = 0
     other_failure_retry_count = 0
@@ -1009,6 +1031,9 @@ def _attempt_build_lane_from_pool(
             candidates = list(active_pool)
             random.shuffle(candidates)
         selected: List[EnhancedLibraryInfo] = []
+        # 与 selected 平行维护的预解析索引缓存，避免在 validate_new_lib_quick_with_cache
+        # 内部对同一文库反复调用 _parse_library_indices（逐个候选检查时累计百万次调用）
+        selected_idx_cache: List = []
         total = 0.0
         random_target: Optional[float] = None
         for lib in candidates:
@@ -1030,9 +1055,15 @@ def _attempt_build_lane_from_pool(
             )
             if not imbalance_mix_valid:
                 continue
-            if not _idx_validator.validate_lane_quick(trial_libs):
+            # 带缓存增量检查：new_lib 的 index 解析结果同步写入 selected_idx_cache，
+            # 后续再判断其他候选时不再重复解析 selected 中已有文库的索引
+            idx_valid, lib_indices = _idx_validator.validate_new_lib_quick_with_cache(
+                selected_idx_cache, lib
+            )
+            if not idx_valid:
                 continue
             selected.append(lib)
+            selected_idx_cache.append(lib_indices)
             total += data
             if random_target is None and total >= trial_min_allowed:
                 if prioritize_scattered_mix:
@@ -1048,6 +1079,16 @@ def _attempt_build_lane_from_pool(
                 break
         if not selected:
             other_failure_retry_count += 1
+            # 大池结构性快速失败：若大量随机尝试均无法选出任何文库，说明约束将整个候选
+            # 集锁死，继续随机尝试不会有改善，提前退出避免无效重试（仅在没有 index 冲突
+            # 且池较大时触发，保留对 index 冲突的多次随机重试机会）
+            if (
+                not prioritize_scattered_mix
+                and other_failure_retry_count >= 3
+                and index_conflict_retry_count == 0
+                and len(active_pool) > 200
+            ):
+                break
             continue
         selected_min_allowed, _ = _resolve_lane_capacity_limits(
             libraries=selected,
@@ -1056,6 +1097,14 @@ def _attempt_build_lane_from_pool(
         )
         if total < selected_min_allowed:
             other_failure_retry_count += 1
+            # 同理：数据够但始终不达下限，结构性约束问题，大池时早退出
+            if (
+                not prioritize_scattered_mix
+                and other_failure_retry_count >= 5
+                and index_conflict_retry_count == 0
+                and len(active_pool) > 200
+            ):
+                break
             continue
         lane_id_value = attempt_idx if lane_serial is None else lane_serial
         lane_id = f"{lane_id_prefix}_{machine_type.value}_{lane_id_value:03d}"
@@ -1179,9 +1228,8 @@ def _attempt_build_lane_from_prioritized_pool(
     if not active_primary_pool and not active_secondary_pool:
         return None, []
 
-    from arrange_library.core.constraints.index_validator_verified import IndexConflictValidator
-
-    idx_validator = IndexConflictValidator()
+    # 复用模块级单例，不重复初始化
+    idx_validator = _MODULE_IDX_VALIDATOR
     index_conflict_retry_count = 0
     other_failure_retry_count = 0
     while (
@@ -1189,6 +1237,8 @@ def _attempt_build_lane_from_prioritized_pool(
         and other_failure_retry_count < other_failure_attempts
     ):
         selected: List[EnhancedLibraryInfo] = []
+        # 与 selected 平行维护的预解析索引缓存，同 _attempt_build_lane_from_pool 的优化逻辑
+        selected_idx_cache: List = []
         total = 0.0
         random_target: Optional[float] = None
 
@@ -1229,9 +1279,14 @@ def _attempt_build_lane_from_prioritized_pool(
                 )
                 if not imbalance_mix_valid:
                     continue
-                if not idx_validator.validate_lane_quick(trial_libs):
+                # 带缓存增量检查，避免对 selected 中已有文库的索引反复解析
+                idx_valid, lib_indices = idx_validator.validate_new_lib_quick_with_cache(
+                    selected_idx_cache, lib
+                )
+                if not idx_valid:
                     continue
                 selected.append(lib)
+                selected_idx_cache.append(lib_indices)
                 total += data
                 if random_target is None and total >= trial_min_allowed:
                     random_target = random.uniform(trial_min_allowed, trial_max_allowed)
@@ -1242,6 +1297,13 @@ def _attempt_build_lane_from_prioritized_pool(
 
         if not selected:
             other_failure_retry_count += 1
+            # 大池结构性快速失败（同 _attempt_build_lane_from_pool 的逻辑）
+            if (
+                other_failure_retry_count >= 3
+                and index_conflict_retry_count == 0
+                and (len(active_primary_pool) + len(active_secondary_pool)) > 200
+            ):
+                break
             continue
 
         selected_min_allowed, _ = _resolve_lane_capacity_limits(
@@ -1250,6 +1312,12 @@ def _attempt_build_lane_from_prioritized_pool(
         )
         if total < selected_min_allowed:
             other_failure_retry_count += 1
+            if (
+                other_failure_retry_count >= 5
+                and index_conflict_retry_count == 0
+                and (len(active_primary_pool) + len(active_secondary_pool)) > 200
+            ):
+                break
             continue
 
         lane_id = f"{lane_id_prefix}_{machine_type.value}_{lane_serial:03d}"
@@ -4487,9 +4555,39 @@ def arrange_library(
 
     if ai_schedulable_libraries:
         random.seed(42)
-        stats, solution = test_with_model(
-            deepcopy(normal_libs), existing_lanes=package_lanes
-        )
+        # 设置排机超时保护：超过 SCHEDULING_TIMEOUT_SECONDS 秒强制中断
+        # signal.SIGALRM 仅在 Unix/Linux 下可用，且必须在主线程中调用
+        _old_handler = None
+        # SIG_ERR 是 C 层面的常量，Python signal 模块没有该属性，只需检查 SIGALRM 是否存在
+        _use_signal_timeout = hasattr(signal, "SIGALRM")
+        if _use_signal_timeout:
+            _old_handler = signal.signal(signal.SIGALRM, _scheduling_timeout_handler)
+            signal.alarm(SCHEDULING_TIMEOUT_SECONDS)
+            logger.info(f"排机超时保护已启动，最大允许时间: {SCHEDULING_TIMEOUT_SECONDS // 60} 分钟")
+
+        try:
+            stats, solution = test_with_model(
+                deepcopy(normal_libs), existing_lanes=package_lanes
+            )
+        except SchedulingTimeoutError as exc:
+            # 超时后取消闹钟、恢复旧信号处理器，再将异常继续向上抛出
+            if _use_signal_timeout:
+                signal.alarm(0)
+                signal.signal(signal.SIGALRM, _old_handler or signal.SIG_DFL)
+            elapsed_min = SCHEDULING_TIMEOUT_SECONDS // 60
+            logger.error(f"排机超时（{elapsed_min} 分钟），强制终止: {exc}")
+            raise
+        except Exception:
+            # 其他异常：同样先清理超时保护，再原样抛出
+            if _use_signal_timeout:
+                signal.alarm(0)
+                signal.signal(signal.SIGALRM, _old_handler or signal.SIG_DFL)
+            raise
+        else:
+            # 正常完成：取消闹钟、恢复旧信号处理器
+            if _use_signal_timeout:
+                signal.alarm(0)
+                signal.signal(signal.SIGALRM, _old_handler or signal.SIG_DFL)
     else:
         from types import SimpleNamespace
         stats = {}

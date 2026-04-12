@@ -2,7 +2,7 @@
 Index验证器 - 基于真实数据验证的Index冲突检测
 经过生产数据验证的Index重复检测算法
 创建时间：2025-12-17 18:00:00
-更新时间：2026-01-27 16:30:00
+更新时间：2026-04-12 10:00:00
 
 算法来源：output/check_lane_index_repeat.new.py（真实数据验证通过）
 修改记录：2026-01-27 - 单端与双端比对时只核对P7端，不再核对P5端
@@ -147,25 +147,26 @@ class IndexValidatorVerified:
     def validate_lane_quick(self, libraries: List[EnhancedLibraryInfo]) -> bool:
         """
         快速验证Lane内Index是否安全（静默模式，无日志）
-        
-        专门用于启发式改进等高频调用场景，只返回是否有效，不返回详细冲突信息
-        
+
+        适用于校验一个完整列表（非增量场景）。若是在循环内逐个尝试添加
+        文库，应优先使用 validate_new_lib_quick，避免重复检查已有文库对。
+
         Args:
             libraries: Lane内的文库列表
-            
+
         Returns:
             bool: True表示安全，False表示有冲突
         """
         if len(libraries) < 2:
             return True
-        
+
         # 解析所有文库的Index序列
         lib_indices = []
         for lib in libraries:
             indices = self._parse_library_indices(lib)
             if indices:
                 lib_indices.append(indices)
-        
+
         # 快速检查：发现第一个冲突就返回False
         for i in range(len(lib_indices)):
             for j in range(i + 1, len(lib_indices)):
@@ -176,8 +177,102 @@ class IndexValidatorVerified:
                         )
                         if is_repeat:
                             return False
-        
+
         return True
+
+    def validate_new_lib_quick(
+        self,
+        existing_libs: List[EnhancedLibraryInfo],
+        new_lib: EnhancedLibraryInfo,
+    ) -> bool:
+        """
+        增量检查：只验证新文库与已有文库之间的 Index 冲突（O(n)）。
+
+        在逐步向 Lane 添加文库的循环中，已有文库对之间不会再产生新冲突，
+        不需要重复检查。用此方法代替 validate_lane_quick(existing + [new])
+        可将复杂度从 O(n²) 降到 O(n)，对大 Lane（>50个文库）有显著提速。
+
+        Args:
+            existing_libs: Lane 中已确认无冲突的现有文库列表
+            new_lib: 待加入的新文库
+
+        Returns:
+            bool: True 表示新文库与现有文库没有 Index 冲突，可以加入
+        """
+        if not existing_libs:
+            return True
+
+        new_indices = self._parse_library_indices(new_lib)
+        # 新文库无 Index（如 NO INDEX），不需要检查
+        if not new_indices:
+            return True
+
+        for existing_lib in existing_libs:
+            existing_indices = self._parse_library_indices(existing_lib)
+            if not existing_indices:
+                continue
+            for left1, right1 in existing_indices:
+                for left2, right2 in new_indices:
+                    is_repeat, _, _, _ = self._check_index_pair_repeat(
+                        left1, right1, left2, right2
+                    )
+                    if is_repeat:
+                        return False
+
+        return True
+
+    def parse_lib_indices_cached(
+        self, lib: EnhancedLibraryInfo
+    ) -> List[Tuple[str, Optional[str]]]:
+        """
+        解析并返回文库的 Index 序列，外部可缓存结果以避免重复解析。
+
+        Args:
+            lib: 文库信息
+
+        Returns:
+            [(left, right), ...] 列表，空列表表示无 Index 或 NO INDEX
+        """
+        return self._parse_library_indices(lib)
+
+    def validate_new_lib_quick_with_cache(
+        self,
+        existing_indices_cache: List[List[Tuple[str, Optional[str]]]],
+        new_lib: EnhancedLibraryInfo,
+    ) -> Tuple[bool, List[Tuple[str, Optional[str]]]]:
+        """
+        带缓存的增量检查：接受预解析的 existing 索引列表，只解析 new_lib 一次。
+
+        在 _attempt_build_lane_from_pool 的候选遍历循环中，selected 里每个文库的
+        索引都应预先解析并缓存起来（和 selected 列表平行维护），避免对同一文库
+        反复调用 _parse_library_indices。这可以把单次检查的开销从 O(n * parse)
+        降低到 O(n * compare)，n 为已选文库数。
+
+        Args:
+            existing_indices_cache: 与 selected 平行的预解析索引列表
+            new_lib: 待加入的新文库
+
+        Returns:
+            (is_valid, new_lib_indices)
+                - is_valid: True 表示无冲突，可以加入
+                - new_lib_indices: new_lib 的解析结果，可追加到缓存供下次使用
+        """
+        new_indices = self._parse_library_indices(new_lib)
+        if not new_indices:
+            return True, new_indices
+
+        for existing_indices in existing_indices_cache:
+            if not existing_indices:
+                continue
+            for left1, right1 in existing_indices:
+                for left2, right2 in new_indices:
+                    is_repeat, _, _, _ = self._check_index_pair_repeat(
+                        left1, right1, left2, right2
+                    )
+                    if is_repeat:
+                        return False, new_indices
+
+        return True, new_indices
     
     def _parse_library_indices(self, lib: EnhancedLibraryInfo) -> List[Tuple[str, Optional[str]]]:
         """

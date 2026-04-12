@@ -1,7 +1,7 @@
 """
 成Lane校验程序
 创建时间：2025-12-02 18:00:00
-更新时间：2026-04-07 15:21:20
+更新时间：2026-04-12 10:00:00
 
 变更记录：
 - 2026-03-06: 移除类内LANE_CAPACITY/LANE_MIN_DATA/LANE_MAX_DATA死代码常量，
@@ -144,6 +144,11 @@ class LaneValidator:
         self.fc_min_data: Dict[str, float] = limits.fc_min_data
         self.base_imbalance_keywords: List[str] = limits.base_imbalance_keywords
         self.special_library_keywords: List[str] = limits.special_library_keywords
+
+        # 复用同一个 IndexConflictValidator 实例，避免每次 _validate_index_conflicts
+        # 调用时都重复初始化（每次初始化会打印 INFO 日志，高频调用时有明显开销）
+        from arrange_library.core.constraints.index_validator_verified import IndexConflictValidator
+        self._index_validator = IndexConflictValidator()
 
         logger.info(
             f"成Lane校验程序初始化完成 (严格模式: {strict_mode}, "
@@ -300,13 +305,9 @@ class LaneValidator:
         )
     
     def _validate_index_conflicts(self, libraries: List[EnhancedLibraryInfo]) -> List[ValidationError]:
-        """校验Index冲突"""
+        """校验Index冲突，复用类内已初始化的 _index_validator 实例"""
         try:
-            from arrange_library.core.constraints.index_validator_verified import IndexConflictValidator
-            
-            validator = IndexConflictValidator()
-            result = validator.validate_lane(libraries)
-            
+            result = self._index_validator.validate_lane(libraries)
             if not result.is_valid:
                 errors = []
                 for conflict in result.conflicts:
@@ -319,7 +320,7 @@ class LaneValidator:
                 return errors
         except Exception as e:
             logger.warning(f"Index校验失败: {e}")
-        
+
         return []
     
     def _validate_customer_ratio(self, libraries: List[EnhancedLibraryInfo]) -> Optional[ValidationError]:

@@ -3937,8 +3937,9 @@ class GreedyLaneScheduler:
                 return False
         
         # 3. Index冲突检查（硬性约束）
+        # 使用增量检查：只验证新文库与已有文库的冲突（O(n)），不重复检查现有文库对（O(n²)）
         if self.config.enable_index_check:
-            if not self.index_validator.validate_lane_quick(test_libraries):
+            if not self.index_validator.validate_new_lib_quick(lane.libraries, lib):
                 return False
         
         # 4. 客户占比检查（按数据量计算，严格遵守规则）
