@@ -30,6 +30,7 @@ from enum import Enum
 from functools import lru_cache
 from pathlib import Path
 from typing import Any, Dict, List, Optional, Set, Tuple, Union
+from uuid import uuid4
 
 import numpy as np
 import pandas as pd
@@ -117,6 +118,8 @@ DEFAULT_OTHER_FAILURE_ATTEMPTS = 20
 DEFAULT_EX_RESCUE_MAX_NEW_LANES = 2
 DEFAULT_RB_RESCUE_MAX_NEW_LANES = 1
 INDEX_RULE_CONFIG_PATH = Path(__file__).resolve().parents[2] / "merge_deal" / "config"
+BALANCE_LIBRARY_CONFIG_PATH = Path(__file__).resolve().parent / "AI排机-平衡文库.csv"
+BALANCE_LIBRARY_MARKER_COLUMN = "_is_ai_balance_library"
 PACKAGE_LANE_TARGET_GB = 1000.0
 PACKAGE_LANE_TOLERANCE_GB = 0.01
 PACKAGE_LANE_MIN_GB = PACKAGE_LANE_TARGET_GB - PACKAGE_LANE_TOLERANCE_GB
@@ -1433,6 +1436,568 @@ def _get_library_source_origrec_key(lib: EnhancedLibraryInfo) -> str:
 def _get_library_detail_output_key(lib: EnhancedLibraryInfo) -> str:
     """获取明细输出按子文库展开时使用的稳定键。"""
     return _get_library_identity_key(lib)
+
+
+def _is_ai_balance_library(lib: Any) -> bool:
+    """判断是否为排机后新增的AI平衡文库。"""
+    return bool(getattr(lib, BALANCE_LIBRARY_MARKER_COLUMN, False))
+
+
+def _parse_balance_library_config_rows() -> List[Dict[str, Any]]:
+    """读取平衡文库配置表并跳过说明行。"""
+    if not BALANCE_LIBRARY_CONFIG_PATH.exists():
+        logger.warning(f"平衡文库配置表不存在: {BALANCE_LIBRARY_CONFIG_PATH}")
+        return []
+
+    df = _read_csv_with_encoding_fallback(BALANCE_LIBRARY_CONFIG_PATH)
+    rows: List[Dict[str, Any]] = []
+    for order, (_, row) in enumerate(df.iterrows()):
+        row_dict = {k: (None if pd.isna(v) else v) for k, v in row.to_dict().items()}
+        sample_id = _safe_str(row_dict.get("wksampleid"), default="")
+        dept = _safe_str(row_dict.get("wkdept"), default="")
+        test_no = _safe_str(row_dict.get("wktestno"), default="") or _safe_str(
+            row_dict.get("wktestno.1"), default=""
+        )
+        index_seq = _safe_str(row_dict.get("wkindexseq"), default="")
+        if sample_id in {"文库ID", ""} and dept in {"实验室名称", ""} and test_no in {"工序名称", ""}:
+            continue
+        if not dept or not test_no or not index_seq:
+            continue
+        row_dict["wktestno"] = test_no
+        row_dict["_template_order"] = order
+        rows.append(row_dict)
+    return rows
+
+
+@lru_cache(maxsize=1)
+def _load_balance_library_templates() -> Dict[Tuple[str, str], List[Dict[str, Any]]]:
+    """按实验室+工序缓存平衡文库模板，保留CSV原始优先级。"""
+    buckets: Dict[Tuple[str, str], List[Dict[str, Any]]] = {}
+    for row in _parse_balance_library_config_rows():
+        dept_key = _normalize_text_for_match(row.get("wkdept"))
+        test_key = _normalize_text_for_match(row.get("wktestno"))
+        if not dept_key or not test_key:
+            continue
+        buckets.setdefault((dept_key, test_key), []).append(row)
+    return buckets
+
+
+def _index_seq_contains_pe(index_seq: Any) -> bool:
+    """判断index字符串中是否存在字面值PE。"""
+    text = _safe_str(index_seq, default="")
+    if not text:
+        return False
+    for raw_item in text.split(","):
+        item = raw_item.strip()
+        if not item:
+            continue
+        parts = [part.strip().upper() for part in item.split(";") if part.strip()]
+        if any(part == "PE" for part in parts):
+            return True
+    return False
+
+
+def _derive_balance_base_type(index_seq: str) -> str:
+    return "单" if ";" not in _safe_str(index_seq, default="") else "双"
+
+
+def _derive_balance_index_bases(index_seq: str) -> int:
+    text = _safe_str(index_seq, default="")
+    for raw_item in text.split(","):
+        item = raw_item.strip()
+        if not item:
+            continue
+        p7 = item.split(";")[0].strip()
+        if p7.upper() in {"PE", "通用接头", "随机INDEX"}:
+            continue
+        return len(p7)
+    return 0
+
+
+def _get_lane_lab_name(lane: LaneAssignment) -> str:
+    """获取lane所属实验室名称。"""
+    for lib in list(getattr(lane, "libraries", []) or []):
+        if _is_ai_balance_library(lib):
+            continue
+        for attr_name in ("wkdept", "_wkdept_raw", "dept"):
+            value = _safe_str(getattr(lib, attr_name, None), default="")
+            if value:
+                return value
+    return ""
+
+
+def _get_lane_process_name(lane: LaneAssignment) -> str:
+    """获取lane所属工序名称。"""
+    for lib in list(getattr(lane, "libraries", []) or []):
+        if _is_ai_balance_library(lib):
+            continue
+        value = _safe_str(getattr(lib, "test_no", None) or getattr(lib, "testno", None), default="")
+        if value:
+            return value
+    return ""
+
+
+def _get_lane_explicit_balance_data(lane: LaneAssignment) -> float:
+    """读取lane已明确给定的平衡文库补量。"""
+    if isinstance(lane.metadata, dict):
+        for key in ("wkbalancedata", "wkadd_balance_data", "required_balance_data_gb"):
+            value = _safe_float(lane.metadata.get(key), default=0.0)
+            if value > 0:
+                return value
+    lane_level_values: List[float] = []
+    for lib in list(getattr(lane, "libraries", []) or []):
+        for attr_name in ("balance_data", "balancedata"):
+            value = _safe_float(getattr(lib, attr_name, None), default=0.0)
+            if value > 0:
+                lane_level_values.append(value)
+    return max(lane_level_values) if lane_level_values else 0.0
+
+
+def _is_explicit_dedicated_imbalance_lane(lane: LaneAssignment) -> bool:
+    """判断lane是否被明确标记为碱基不均衡专用lane。"""
+    lane_id = _safe_str(getattr(lane, "lane_id", None), default="")
+    if lane_id.startswith("DL_"):
+        return True
+    metadata = getattr(lane, "metadata", None)
+    if isinstance(metadata, dict) and metadata.get("is_dedicated_imbalance_lane"):
+        return True
+    return False
+
+
+def _is_replaceable_normal_library(lib: EnhancedLibraryInfo) -> bool:
+    """判断文库是否属于平衡文库腾挪时允许调整的普通文库。"""
+    if _is_ai_balance_library(lib):
+        return False
+    return not _BASE_IMBALANCE_HANDLER.is_imbalance_library(lib)
+
+
+def _resolve_lane_balance_ratio(lane: LaneAssignment) -> float:
+    """按碱基不均衡分组模板解析lane平衡文库占比。"""
+    ratio = 0.0
+    for lib in list(getattr(lane, "libraries", []) or []):
+        if _is_ai_balance_library(lib):
+            continue
+        group_id = _BASE_IMBALANCE_HANDLER.identify_imbalance_type(lib)
+        if not group_id:
+            continue
+        group_info = _BASE_IMBALANCE_HANDLER.get_group_info(group_id)
+        if not group_info:
+            continue
+        ratio = max(ratio, float(getattr(group_info, "phix_ratio", 0.0) or 0.0))
+    return ratio
+
+
+def _resolve_lane_balance_data_gb(lane: LaneAssignment) -> float:
+    """确定lane需要补充的平衡文库量。"""
+    explicit_value = _get_lane_explicit_balance_data(lane)
+    if _is_package_lane_assignment(lane):
+        return round(explicit_value, 3) if explicit_value > 0 else 0.0
+    if not _is_explicit_dedicated_imbalance_lane(lane):
+        return 0.0
+    ratio = _resolve_lane_balance_ratio(lane)
+    if ratio <= 0:
+        return 0.0
+    if explicit_value > 0:
+        return round(explicit_value, 3)
+    lane_capacity = _safe_float(getattr(lane, "lane_capacity_gb", None), default=0.0)
+    if lane_capacity <= 0:
+        lane_capacity = _lane_capacity_for_machine(getattr(lane, "machine_type", MachineType.NOVA_X_25B))
+    return round(lane_capacity * ratio, 3)
+
+
+def _get_lane_balance_templates(lane: LaneAssignment) -> List[Dict[str, Any]]:
+    """按实验室+工序匹配lane可用平衡文库模板，并应用PE/phix优先级规则。"""
+    dept = _get_lane_lab_name(lane)
+    test_no = _get_lane_process_name(lane)
+    if not dept or not test_no:
+        return []
+
+    templates = list(
+        _load_balance_library_templates().get(
+            (_normalize_text_for_match(dept), _normalize_text_for_match(test_no)),
+            [],
+        )
+    )
+    if not templates:
+        return []
+
+    lane_has_pe = any(
+        _index_seq_contains_pe(getattr(lib, "index_seq", ""))
+        for lib in list(getattr(lane, "libraries", []) or [])
+        if not _is_ai_balance_library(lib)
+    )
+    filtered_templates: List[Dict[str, Any]] = []
+    for template in templates:
+        sample_id = _safe_str(template.get("wksampleid"), default="")
+        if lane_has_pe and sample_id.lower() == "phix":
+            continue
+        filtered_templates.append(template)
+
+    if lane_has_pe:
+        return filtered_templates
+
+    return sorted(
+        filtered_templates,
+        key=lambda item: (
+            0 if _safe_str(item.get("wksampleid"), default="").lower() == "phix" else 1,
+            int(item.get("_template_order", 0) or 0),
+        ),
+    )
+
+
+def _build_balance_library_output_payload(
+    template: Dict[str, Any],
+    balance_amount_gb: float,
+    aidbid: str,
+    internal_origrec: str,
+) -> Dict[str, Any]:
+    """构建平衡文库输出行基础字段。"""
+    payload = {
+        "wkaidbid": aidbid,
+        "wkorigrec": template.get("wkorigrec"),
+        "wksid": template.get("wksid"),
+        "wkpid": template.get("wkpid"),
+        "wkproductline": template.get("wkproductline"),
+        "lcontainerstate": template.get("lcontainerstate"),
+        "wktestno": template.get("wktestno"),
+        "wkqpcr": template.get("wkqpcr"),
+        "wksampleid": template.get("wksampleid"),
+        "wkdept": template.get("wkdept"),
+        "lsjfs": template.get("lsjfs"),
+        "wkindexseq": template.get("wkindexseq"),
+        "wkcontractdata": round(balance_amount_gb, 3),
+        "lorderdata": round(balance_amount_gb, 3),
+        "origrec": internal_origrec,
+        "origrec_key": internal_origrec,
+        "detail_row_key": aidbid,
+        BALANCE_LIBRARY_MARKER_COLUMN: True,
+    }
+    if "wktestno.1" in template:
+        payload["wktestno.1"] = template.get("wktestno.1")
+    return payload
+
+
+def _create_balance_library_from_template(
+    lane: LaneAssignment,
+    template: Dict[str, Any],
+    balance_amount_gb: float,
+) -> EnhancedLibraryInfo:
+    """按模板实例化一条真实平衡文库。"""
+    aidbid = uuid4().hex
+    internal_origrec = f"AI_BALANCE_{lane.lane_id}_{aidbid[:12]}"
+    index_seq = _safe_str(template.get("wkindexseq"), default="")
+    lib = EnhancedLibraryInfo(
+        origrec=internal_origrec,
+        sample_id=_safe_str(template.get("wksampleid"), default=""),
+        sample_type_code="平衡文库",
+        data_type="",
+        customer_library="否",
+        base_type=_derive_balance_base_type(index_seq),
+        number_of_bases=_derive_balance_index_bases(index_seq),
+        index_number=1,
+        index_seq=index_seq,
+        add_tests_remark="",
+        product_line=_safe_str(template.get("wkproductline"), default=""),
+        peak_size=0,
+        eq_type=_machine_type_to_text(lane.machine_type, default="Nova X-25B"),
+        contract_data_raw=round(balance_amount_gb, 3),
+        test_code=None,
+        test_no=_safe_str(template.get("wktestno"), default=""),
+        sub_project_name="",
+        create_date="",
+        delivery_date="",
+        lab_type="",
+        data_volume_type="",
+        board_number="",
+    )
+    lib.machine_type = lane.machine_type
+    lib.sid = _safe_str(template.get("wksid"), default="")
+    lib.qpcr_concentration = _safe_float(template.get("wkqpcr"), default=None)
+    lib.balance_data = round(balance_amount_gb, 3)
+    lib.is_add_balance = "是"
+    lib.aidbid = aidbid
+    lib.wkaidbid = aidbid
+    lib._origrec_key = internal_origrec
+    lib._source_origrec_key = internal_origrec
+    lib._detail_output_key = aidbid
+    lib._wkdept_raw = _safe_str(template.get("wkdept"), default="")
+    lib._balance_output_payload = _build_balance_library_output_payload(
+        template=template,
+        balance_amount_gb=balance_amount_gb,
+        aidbid=aidbid,
+        internal_origrec=internal_origrec,
+    )
+    setattr(lib, BALANCE_LIBRARY_MARKER_COLUMN, True)
+    return lib
+
+
+def _find_conflicting_lane_libraries(
+    lane_libraries: List[EnhancedLibraryInfo],
+    candidate: EnhancedLibraryInfo,
+) -> List[EnhancedLibraryInfo]:
+    """返回与候选平衡文库产生最新index冲突的lane内普通文库。"""
+    conflict_ids: Set[str] = set()
+    for conflict in _validate_index_conflicts_latest(list(lane_libraries) + [candidate]):
+        if conflict.record_id_1 == candidate.origrec:
+            conflict_ids.add(conflict.record_id_2)
+        elif conflict.record_id_2 == candidate.origrec:
+            conflict_ids.add(conflict.record_id_1)
+    return [
+        lib
+        for lib in lane_libraries
+        if getattr(lib, "origrec", "") in conflict_ids and _is_replaceable_normal_library(lib)
+    ]
+
+
+def _pick_replacement_from_pool(
+    lane: LaneAssignment,
+    candidate_balance_lib: EnhancedLibraryInfo,
+    working_libs: List[EnhancedLibraryInfo],
+    removed_libs: List[EnhancedLibraryInfo],
+    unassigned_pool: List[EnhancedLibraryInfo],
+    validator: Any,
+) -> Optional[Tuple[List[EnhancedLibraryInfo], List[EnhancedLibraryInfo]]]:
+    """优先从未分配池中选择可补入lane的普通文库。"""
+    if not removed_libs or not unassigned_pool:
+        return None
+
+    removed_total = sum(float(getattr(lib, "contract_data_raw", 0.0) or 0.0) for lib in removed_libs)
+    current_total = sum(float(getattr(lib, "contract_data_raw", 0.0) or 0.0) for lib in working_libs)
+    candidates = sorted(
+        [lib for lib in unassigned_pool if _is_replaceable_normal_library(lib)],
+        key=lambda item: float(getattr(item, "contract_data_raw", 0.0) or 0.0),
+        reverse=True,
+    )
+
+    for lib in candidates:
+        data = float(getattr(lib, "contract_data_raw", 0.0) or 0.0)
+        if data <= 0 or data > removed_total + 1e-6:
+            continue
+        trial_libs = working_libs + [lib, candidate_balance_lib]
+        result = _validate_lane_state(validator, lane, trial_libs)
+        if result.is_valid:
+            return trial_libs, [lib]
+        # 容忍轻微不足，但保留后续lane间交换兜底
+        if abs((current_total + data + float(candidate_balance_lib.contract_data_raw or 0.0)) - current_total) <= removed_total + 1e-6:
+            continue
+    return None
+
+
+def _pick_replacement_from_other_lanes(
+    current_lane: LaneAssignment,
+    candidate_balance_lib: EnhancedLibraryInfo,
+    working_libs: List[EnhancedLibraryInfo],
+    removed_libs: List[EnhancedLibraryInfo],
+    all_lanes: List[LaneAssignment],
+    validator: Any,
+) -> Optional[Tuple[List[EnhancedLibraryInfo], LaneAssignment, EnhancedLibraryInfo]]:
+    """当未分配池无合适文库时，尝试跨lane做单文库交换。"""
+    if not removed_libs:
+        return None
+
+    removed_total = sum(float(getattr(lib, "contract_data_raw", 0.0) or 0.0) for lib in removed_libs)
+    for other_lane in all_lanes:
+        if other_lane is current_lane:
+            continue
+        other_libs = list(getattr(other_lane, "libraries", []) or [])
+        for other_lib in other_libs:
+            if not _is_replaceable_normal_library(other_lib):
+                continue
+            data = float(getattr(other_lib, "contract_data_raw", 0.0) or 0.0)
+            if data <= 0 or data > removed_total + 1e-6:
+                continue
+            current_trial_libs = working_libs + [other_lib, candidate_balance_lib]
+            if not _validate_lane_state(validator, current_lane, current_trial_libs).is_valid:
+                continue
+            other_trial_libs = [lib for lib in other_libs if lib is not other_lib] + removed_libs
+            if _validate_lane_state(validator, other_lane, other_trial_libs).is_valid:
+                return current_trial_libs, other_lane, other_lib
+    return None
+
+
+def _trim_lane_for_balance_capacity(
+    lane: LaneAssignment,
+    working_libs: List[EnhancedLibraryInfo],
+    candidate_balance_lib: EnhancedLibraryInfo,
+    validator: Any,
+) -> Optional[Tuple[List[EnhancedLibraryInfo], List[EnhancedLibraryInfo]]]:
+    """为平衡文库腾挪容量，必要时剔除部分普通文库。"""
+    trial_libs = list(working_libs) + [candidate_balance_lib]
+    result = _validate_lane_state(validator, lane, trial_libs)
+    if result.is_valid:
+        return trial_libs, []
+
+    non_balance_libs = [
+        lib for lib in sorted(
+            working_libs,
+            key=lambda item: float(getattr(item, "contract_data_raw", 0.0) or 0.0),
+            reverse=True,
+        )
+        if _is_replaceable_normal_library(lib)
+    ]
+    trimmed_libs = list(working_libs)
+    removed_libs: List[EnhancedLibraryInfo] = []
+    for lib in non_balance_libs:
+        trimmed_libs = [item for item in trimmed_libs if item is not lib]
+        removed_libs.append(lib)
+        trial_libs = trimmed_libs + [candidate_balance_lib]
+        result = _validate_lane_state(validator, lane, trial_libs)
+        if result.is_valid:
+            return trial_libs, removed_libs
+
+    return None
+
+
+def _materialize_balance_library_for_lane(
+    lane: LaneAssignment,
+    all_lanes: List[LaneAssignment],
+    unassigned_pool: List[EnhancedLibraryInfo],
+    validator: Any,
+) -> bool:
+    """为单条lane补充真实平衡文库，必要时执行未分配补位或跨lane交换。"""
+    if any(_is_ai_balance_library(lib) for lib in list(getattr(lane, "libraries", []) or [])):
+        return False
+
+    balance_amount = _resolve_lane_balance_data_gb(lane)
+    if balance_amount <= 0:
+        return False
+
+    templates = _get_lane_balance_templates(lane)
+    if not templates:
+        logger.warning(
+            "Lane {} 需要补平衡文库 {:.3f}G，但未匹配到实验室={} 工序={} 的配置模板",
+            lane.lane_id,
+            balance_amount,
+            _get_lane_lab_name(lane) or "",
+            _get_lane_process_name(lane) or "",
+        )
+        return False
+
+    original_libs = list(getattr(lane, "libraries", []) or [])
+
+    for template in templates:
+        candidate_balance_lib = _create_balance_library_from_template(lane, template, balance_amount)
+        trimmed_result = _trim_lane_for_balance_capacity(
+            lane=lane,
+            working_libs=original_libs,
+            candidate_balance_lib=candidate_balance_lib,
+            validator=validator,
+        )
+        if trimmed_result is not None:
+            trimmed_libs, removed_libs = trimmed_result
+            unassigned_pool.extend(removed_libs)
+            lane.libraries = trimmed_libs
+            lane.total_data_gb = sum(lib.get_data_amount_gb() for lib in lane.libraries)
+            lane.calculate_metrics()
+            lane.metadata["wkbalancedata"] = round(balance_amount, 3)
+            lane.metadata["materialized_balance_library"] = True
+            logger.info(
+                "Lane {} 平衡文库补充成功: sample_id={}, 数据量={:.3f}G",
+                lane.lane_id,
+                getattr(candidate_balance_lib, "sample_id", ""),
+                balance_amount,
+            )
+            return True
+
+    for template in templates:
+        candidate_balance_lib = _create_balance_library_from_template(lane, template, balance_amount)
+        conflicting_libs = _find_conflicting_lane_libraries(original_libs, candidate_balance_lib)
+        if not conflicting_libs:
+            continue
+        working_libs = [lib for lib in original_libs if lib not in conflicting_libs]
+
+        picked = _pick_replacement_from_pool(
+            lane=lane,
+            candidate_balance_lib=candidate_balance_lib,
+            working_libs=working_libs,
+            removed_libs=conflicting_libs,
+            unassigned_pool=unassigned_pool,
+            validator=validator,
+        )
+        if picked is not None:
+            trial_libs, added_libs = picked
+            for lib in conflicting_libs:
+                unassigned_pool.append(lib)
+            for lib in added_libs:
+                if lib in unassigned_pool:
+                    unassigned_pool.remove(lib)
+            lane.libraries = trial_libs
+            lane.total_data_gb = sum(lib.get_data_amount_gb() for lib in lane.libraries)
+            lane.calculate_metrics()
+            lane.metadata["wkbalancedata"] = round(balance_amount, 3)
+            lane.metadata["materialized_balance_library"] = True
+            logger.info(
+                "Lane {} 平衡文库补充成功(未分配池替换): sample_id={}, 替换普通文库={}个",
+                lane.lane_id,
+                getattr(candidate_balance_lib, "sample_id", ""),
+                len(conflicting_libs),
+            )
+            return True
+
+        swapped = _pick_replacement_from_other_lanes(
+            current_lane=lane,
+            candidate_balance_lib=candidate_balance_lib,
+            working_libs=working_libs,
+            removed_libs=conflicting_libs,
+            all_lanes=all_lanes,
+            validator=validator,
+        )
+        if swapped is not None:
+            trial_libs, other_lane, other_lib = swapped
+            other_lane.libraries = [
+                lib for lib in list(getattr(other_lane, "libraries", []) or []) if lib is not other_lib
+            ] + conflicting_libs
+            other_lane.total_data_gb = sum(lib.get_data_amount_gb() for lib in other_lane.libraries)
+            other_lane.calculate_metrics()
+            lane.libraries = trial_libs
+            lane.total_data_gb = sum(lib.get_data_amount_gb() for lib in lane.libraries)
+            lane.calculate_metrics()
+            lane.metadata["wkbalancedata"] = round(balance_amount, 3)
+            lane.metadata["materialized_balance_library"] = True
+            logger.info(
+                "Lane {} 平衡文库补充成功(跨lane交换): sample_id={}, 对端lane={}",
+                lane.lane_id,
+                getattr(candidate_balance_lib, "sample_id", ""),
+                other_lane.lane_id,
+            )
+            return True
+
+    logger.warning(
+        "Lane {} 平衡文库补充失败: 需补 {:.3f}G，实验室={}，工序={}",
+        lane.lane_id,
+        balance_amount,
+        _get_lane_lab_name(lane) or "",
+        _get_lane_process_name(lane) or "",
+    )
+    return False
+
+
+def _materialize_balance_libraries_for_solution(solution: Any) -> Dict[str, int]:
+    """对最终成lane结果补真实平衡文库。"""
+    from arrange_library.core.constraints.lane_validator import LaneValidator
+
+    validator = LaneValidator(strict_mode=True)
+    unassigned_pool = list(getattr(solution, "unassigned_libraries", []) or [])
+    lanes = list(getattr(solution, "lane_assignments", []) or [])
+
+    success_count = 0
+    required_count = 0
+    for lane in lanes:
+        if _resolve_lane_balance_data_gb(lane) > 0:
+            required_count += 1
+        if _materialize_balance_library_for_lane(
+            lane=lane,
+            all_lanes=lanes,
+            unassigned_pool=unassigned_pool,
+            validator=validator,
+        ):
+            success_count += 1
+
+    solution.unassigned_libraries = unassigned_pool
+    return {
+        "required_lanes": required_count,
+        "success_lanes": success_count,
+    }
 
 
 def _extract_dedicated_10bp_lanes(
@@ -2775,13 +3340,14 @@ def _build_lane_metadata_for_validator(
     if lane_metadata:
         if lane_metadata.get("is_package_lane"):
             metadata["is_package_lane"] = True
-        balance_data = lane_metadata.get("wkbalancedata")
-        if balance_data is None:
-            balance_data = lane_metadata.get("wkadd_balance_data")
-        if balance_data is None:
-            balance_data = lane_metadata.get("required_balance_data_gb")
-        if balance_data is not None:
-            metadata["wkbalancedata"] = float(balance_data)
+        if not lane_metadata.get("materialized_balance_library"):
+            balance_data = lane_metadata.get("wkbalancedata")
+            if balance_data is None:
+                balance_data = lane_metadata.get("wkadd_balance_data")
+            if balance_data is None:
+                balance_data = lane_metadata.get("required_balance_data_gb")
+            if balance_data is not None:
+                metadata["wkbalancedata"] = float(balance_data)
     return metadata
 
 
@@ -2897,16 +3463,17 @@ def _rescue_failed_lanes_by_57_rules(
     if not failed_lanes:
         return {"failed_lanes": 0, "rescued_lanes": 0, "recovered_libraries": 0, "remaining_unassigned": len(solution.unassigned_libraries)}
 
-    recovered_libraries: List[EnhancedLibraryInfo] = []
-    remaining_passed_lanes: List[LaneAssignment] = []
     failed_lane_ids = {lane.lane_id for lane in failed_lanes}
-    for lane in solution.lane_assignments:
-        if lane.lane_id in failed_lane_ids:
-            recovered_libraries.extend(list(lane.libraries or []))
-        else:
-            remaining_passed_lanes.append(lane)
+    # 失败Lane在严格校验阶段可能已经从 solution.lane_assignments 中剔除了，
+    # 此处必须直接以 failed_lanes 参数为准回收文库，否则会导致整条失败Lane的文库漏出结果文件。
+    recovered_libraries: List[EnhancedLibraryInfo] = []
+    for lane in failed_lanes:
+        recovered_libraries.extend(list(lane.libraries or []))
 
-    solution.lane_assignments = remaining_passed_lanes
+    solution.lane_assignments = [
+        lane for lane in solution.lane_assignments
+        if lane.lane_id not in failed_lane_ids
+    ]
     rescue_primary_pool = list(recovered_libraries)
     rescue_secondary_pool = list(solution.unassigned_libraries)
     solution.unassigned_libraries = []
@@ -3480,6 +4047,7 @@ def _collect_prediction_rows(
                 last_output=last_output,
                 last_order=last_order,
             )
+            is_balance_lib = _is_ai_balance_library(lib)
 
             rows.append(
                 {
@@ -3498,7 +4066,7 @@ def _collect_prediction_rows(
                     "resolved_index_check_rule": lane_index_rule or None,
                     "wkcontractdata": contract,
                     "wkbalancedata": lane_balance_data_value,
-                    "predicted_lorderdata": None,
+                    "predicted_lorderdata": contract if is_balance_lib else None,
                     "lai_output": None,
                     "ai_predicted_lorderdata": None,
                     "ai_predicted_loutput": None,
@@ -3512,6 +4080,7 @@ def _collect_prediction_rows(
                     "wklastoutput": last_output,
                     "wklastoutrate": last_outrate,
                     "loutput": loutput,
+                    BALANCE_LIBRARY_MARKER_COLUMN: is_balance_lib,
                 }
             )
 
@@ -3607,12 +4176,15 @@ def _expand_detail_output_rows(
         source_key = _get_library_source_origrec_key(lib)
         bucket = ai_row_buckets.get(source_key)
         if not bucket:
-            logger.warning("明细展开缺少原始模板行，跳过文库 {}", source_key or getattr(lib, "origrec", ""))
-            continue
-
-        bucket_index = used_bucket_indices.get(source_key, 0)
-        template = dict(bucket[min(bucket_index, len(bucket) - 1)])
-        used_bucket_indices[source_key] = bucket_index + 1
+            if _is_ai_balance_library(lib):
+                template = dict(getattr(lib, "_balance_output_payload", {}) or {})
+            else:
+                logger.warning("明细展开缺少原始模板行，跳过文库 {}", source_key or getattr(lib, "origrec", ""))
+                continue
+        else:
+            bucket_index = used_bucket_indices.get(source_key, 0)
+            template = dict(bucket[min(bucket_index, len(bucket) - 1)])
+            used_bucket_indices[source_key] = bucket_index + 1
 
         contract_data = float(getattr(lib, "contract_data_raw", 0.0) or 0.0)
         total_contract_data = getattr(lib, "total_contract_data", None)
@@ -3623,8 +4195,9 @@ def _expand_detail_output_rows(
 
         template["origrec_key"] = source_key
         template["detail_row_key"] = _get_library_detail_output_key(lib)
-        template["wkorigrec"] = source_key or template.get("wkorigrec")
-        template["origrec"] = source_key or template.get("origrec")
+        if not _is_ai_balance_library(lib):
+            template["wkorigrec"] = source_key or template.get("wkorigrec")
+            template["origrec"] = source_key or template.get("origrec")
         template["wkcontractdata"] = contract_data
         if total_contract_data not in (None, ""):
             template["wktotalcontractdata"] = float(total_contract_data)
@@ -3639,6 +4212,9 @@ def _expand_detail_output_rows(
         aidbid = _safe_str(getattr(lib, "wkaidbid", None) or getattr(lib, "aidbid", None), default="")
         if aidbid:
             template["wkaidbid"] = aidbid
+
+        if _is_ai_balance_library(lib):
+            template[BALANCE_LIBRARY_MARKER_COLUMN] = True
 
         if _is_split_library(lib):
             template["wkissplit"] = "yes"
@@ -3701,6 +4277,8 @@ def _build_detail_output(
     merged["lsjnd"] = pd.NA
     if "wkbalancedata" not in merged.columns:
         merged["wkbalancedata"] = pd.NA
+    if BALANCE_LIBRARY_MARKER_COLUMN not in merged.columns:
+        merged[BALANCE_LIBRARY_MARKER_COLUMN] = False
     merged["predicted_lorderdata"] = pd.NA
     merged["lai_output"] = pd.NA
 
@@ -3718,6 +4296,7 @@ def _build_detail_output(
             "resolved_lcxms",
             "resolved_index_check_rule",
             "wkbalancedata",
+            BALANCE_LIBRARY_MARKER_COLUMN,
             "predicted_lorderdata",
             "lai_output",
         ]:
@@ -3734,6 +4313,7 @@ def _build_detail_output(
                 "resolved_lcxms",
                 "resolved_index_check_rule",
                 "wkbalancedata",
+                BALANCE_LIBRARY_MARKER_COLUMN,
                 "predicted_lorderdata",
                 "lai_output",
             ]
@@ -3752,6 +4332,11 @@ def _build_detail_output(
                 merged["wkbalancedata_pred"], errors="coerce"
             ).combine_first(pd.to_numeric(merged["wkbalancedata"], errors="coerce"))
             merged.drop(columns=["wkbalancedata_pred"], inplace=True)
+        if f"{BALANCE_LIBRARY_MARKER_COLUMN}_pred" in merged.columns:
+            pred_marker = merged[f"{BALANCE_LIBRARY_MARKER_COLUMN}_pred"]
+            base_marker = merged[BALANCE_LIBRARY_MARKER_COLUMN]
+            merged[BALANCE_LIBRARY_MARKER_COLUMN] = pred_marker.where(pred_marker.notna(), base_marker)
+            merged.drop(columns=[f"{BALANCE_LIBRARY_MARKER_COLUMN}_pred"], inplace=True)
 
     # 仅对已成Lane的数据填充测序模式，优先使用统一规则结果，未成Lane记录保持原值不改
     if "lcxms" not in merged.columns:
@@ -3996,6 +4581,7 @@ def load_standardized_csv(data_file: str, limit: int | None = None) -> List[Enha
             lib._last_output_raw = _safe_float(row_dict.get("wklastoutput"), default=None)
             lib._last_outrate_raw = _safe_float(row_dict.get("wklastoutrate"), default=None)
             lib._delete_date_raw = row_dict.get("delete_date", row_dict.get("扣减时间"))
+            lib._wkdept_raw = _safe_str(row_dict.get("wkdept"), default="")
             # 保存测序模式相关原始字段，供拆分规则识别1.1/3.6T-NEW模式使用
             lib._lane_sj_mode_raw = _safe_str(row_dict.get("lsjfs"), default="")
             lib._current_seq_mode_raw = _safe_str(row_dict.get("lcxms"), default="")
@@ -4377,10 +4963,22 @@ def _run_prediction_delivery(input_data: Union[Path, pd.DataFrame], output_path:
     logger.info(f"调用 prediction_delivery，模型目录: {MODELS_DIR}")
     predict_pooling(input_data=input_data, output_file=output_path)
     prediction_df = _read_csv_with_encoding_fallback(output_path)
-    return _apply_add_test_output_rate_rule_to_prediction_df(
+    prediction_df = _apply_add_test_output_rate_rule_to_prediction_df(
         prediction_df=prediction_df,
         output_path=output_path,
     )
+    if BALANCE_LIBRARY_MARKER_COLUMN in prediction_df.columns:
+        marker = prediction_df[BALANCE_LIBRARY_MARKER_COLUMN].fillna(False)
+        marker = marker.astype(str).str.lower().isin({"true", "1", "yes"})
+        if marker.any():
+            prediction_df.loc[marker, "lorderdata"] = pd.to_numeric(
+                prediction_df.loc[marker, "wkcontractdata"], errors="coerce"
+            )
+            prediction_df.loc[marker, "lai_output"] = pd.NA
+        prediction_df = prediction_df.drop(columns=[BALANCE_LIBRARY_MARKER_COLUMN], errors="ignore")
+        output_path.parent.mkdir(parents=True, exist_ok=True)
+        prediction_df.to_csv(output_path, index=False)
+    return prediction_df
 
 
 def arrange_library(
@@ -4598,6 +5196,16 @@ def arrange_library(
 
     _validate_final_package_lanes(solution)
     _validate_no_split_for_package_lane_libraries(solution)
+
+    balance_materialize_stats = _materialize_balance_libraries_for_solution(solution)
+    if balance_materialize_stats["required_lanes"] > 0:
+        logger.info(
+            "平衡文库后处理完成: 需补平衡文库Lane={}，成功={}".format(
+                balance_materialize_stats["required_lanes"],
+                balance_materialize_stats["success_lanes"],
+            )
+        )
+    _validate_final_package_lanes(solution)
 
     # 收集预测结果
     pred_df = _collect_prediction_rows(

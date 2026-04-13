@@ -17,10 +17,18 @@ sys.modules.setdefault(
 
 import arrange_library.arrange_library_model6 as arrange_model6
 from arrange_library.arrange_library_model6 import (
+    BALANCE_LIBRARY_MARKER_COLUMN,
     _apply_add_test_output_rate_rule,
     _apply_add_test_output_rate_rule_to_prediction_df,
     _build_detail_output,
+    _find_conflicting_lane_libraries,
+    _get_lane_balance_templates,
+    _materialize_balance_library_for_lane,
+    _resolve_lane_balance_data_gb,
+    _trim_lane_for_balance_capacity,
+    _run_prediction_delivery,
 )
+from arrange_library.core.scheduling.scheduling_types import LaneAssignment
 from arrange_library.models.library_info import EnhancedLibraryInfo
 
 
@@ -357,3 +365,363 @@ def test_extract_mixed_lanes_uses_scattered_mix_priority_and_new_retry_limits(mo
     assert captured["prioritize_scattered_mix"] is True
     assert captured["index_conflict_attempts"] == 10
     assert captured["other_failure_attempts"] == 20
+
+
+def _build_basic_lane_library(origrec: str, index_seq: str = "AACCGGTTAA;TTGGCCAATT", data: float = 950.0):
+    lib = EnhancedLibraryInfo(
+        origrec=origrec,
+        sample_id=f"SID_{origrec}",
+        sample_type_code="普通文库",
+        data_type="其他",
+        customer_library="否",
+        base_type="双",
+        number_of_bases=10,
+        index_number=1,
+        index_seq=index_seq,
+        add_tests_remark="",
+        product_line="S",
+        peak_size=350,
+        eq_type="Nova X-25B",
+        contract_data_raw=data,
+        test_code=1001,
+        test_no="Novaseq X Plus-PE150",
+        sub_project_name="平衡文库测试项目",
+        create_date="2026-04-10 09:00:00",
+        delivery_date="2026-04-12 09:00:00",
+        lab_type="普通文库",
+        data_volume_type="标准",
+        board_number="BOARD001",
+    )
+    lib._wkdept_raw = "天津科技服务实验室"
+    lib._origrec_key = origrec
+    lib._source_origrec_key = origrec
+    lib._detail_output_key = origrec
+    lib.machine_type = arrange_model6.MachineType.NOVA_X_25B
+    return lib
+
+
+def test_get_lane_balance_templates_prefers_phix_without_pe_and_skips_with_pe(monkeypatch):
+    templates = {
+        (
+            arrange_model6._normalize_text_for_match("天津科技服务实验室"),
+            arrange_model6._normalize_text_for_match("Novaseq X Plus-PE150"),
+        ): [
+            {
+                "wksampleid": "other_balance",
+                "wkdept": "天津科技服务实验室",
+                "wktestno": "Novaseq X Plus-PE150",
+                "wkindexseq": "ACGTACGTAC;TGCATGCATG",
+                "_template_order": 1,
+            },
+            {
+                "wksampleid": "phix",
+                "wkdept": "天津科技服务实验室",
+                "wktestno": "Novaseq X Plus-PE150",
+                "wkindexseq": "GGGGGGGGGG;ACCGAGATCT",
+                "_template_order": 2,
+            },
+        ]
+    }
+    monkeypatch.setattr(arrange_model6, "_load_balance_library_templates", lambda: templates)
+
+    lane = LaneAssignment(
+        lane_id="NB_001",
+        machine_id="M_001",
+        machine_type=arrange_model6.MachineType.NOVA_X_25B,
+        libraries=[_build_basic_lane_library("LIB001")],
+    )
+    ordered_templates = _get_lane_balance_templates(lane)
+    assert [item["wksampleid"] for item in ordered_templates] == ["phix", "other_balance"]
+
+    pe_lane = LaneAssignment(
+        lane_id="NB_002",
+        machine_id="M_002",
+        machine_type=arrange_model6.MachineType.NOVA_X_25B,
+        libraries=[_build_basic_lane_library("LIB002", index_seq="PE")],
+    )
+    ordered_templates = _get_lane_balance_templates(pe_lane)
+    assert [item["wksampleid"] for item in ordered_templates] == ["other_balance"]
+
+
+def test_resolve_lane_balance_data_gb_skips_non_dedicated_lane_even_with_imbalance_type():
+    lane = LaneAssignment(
+        lane_id="NB_003",
+        machine_id="M_003",
+        machine_type=arrange_model6.MachineType.NOVA_X_25B,
+        lane_capacity_gb=975.0,
+        libraries=[_build_basic_lane_library("LIB003", data=780.0)],
+    )
+    lane.libraries[0].sample_type_code = "ATAC-seq文库"
+    lane.libraries[0].data_type = "ATAC-seq文库"
+
+    assert _resolve_lane_balance_data_gb(lane) == 0.0
+
+
+def test_resolve_lane_balance_data_gb_uses_lane_capacity_for_dedicated_imbalance_lane():
+    lane = LaneAssignment(
+        lane_id="DL_001",
+        machine_id="M_004",
+        machine_type=arrange_model6.MachineType.NOVA_X_25B,
+        lane_capacity_gb=975.0,
+        libraries=[_build_basic_lane_library("LIB004", data=780.0)],
+        metadata={"is_dedicated_imbalance_lane": True},
+    )
+    lane.libraries[0].sample_type_code = "ATAC-seq文库"
+    lane.libraries[0].data_type = "ATAC-seq文库"
+
+    assert _resolve_lane_balance_data_gb(lane) == 195.0
+
+
+def test_resolve_lane_balance_data_gb_does_not_use_explicit_value_when_ratio_is_zero():
+    lane = LaneAssignment(
+        lane_id="DL_002",
+        machine_id="M_005",
+        machine_type=arrange_model6.MachineType.NOVA_X_25B,
+        lane_capacity_gb=975.0,
+        libraries=[_build_basic_lane_library("LIB007", data=780.0)],
+        metadata={"is_dedicated_imbalance_lane": True, "wkbalancedata": 123.0},
+    )
+    lane.libraries[0].sample_type_code = "10X转录组-3'文库"
+    lane.libraries[0].data_type = "10X转录组-3'文库"
+
+    assert _resolve_lane_balance_data_gb(lane) == 0.0
+
+
+def test_find_conflicting_lane_libraries_only_returns_normal_libraries(monkeypatch):
+    normal_lib = _build_basic_lane_library("LIB008", data=120.0)
+    imbalance_lib = _build_basic_lane_library("LIB009", data=120.0, index_seq="CCAATTGGCC;GGTTAACCAA")
+    imbalance_lib.sample_type_code = "ATAC-seq文库"
+    imbalance_lib.data_type = "ATAC-seq文库"
+    candidate = SimpleNamespace(origrec="AI_BALANCE_LANE_TEST")
+
+    monkeypatch.setattr(
+        arrange_model6,
+        "_validate_index_conflicts_latest",
+        lambda libraries: [
+            SimpleNamespace(record_id_1="AI_BALANCE_LANE_TEST", record_id_2="LIB008"),
+            SimpleNamespace(record_id_1="AI_BALANCE_LANE_TEST", record_id_2="LIB009"),
+        ],
+    )
+
+    conflicts = _find_conflicting_lane_libraries([normal_lib, imbalance_lib], candidate)
+
+    assert [lib.origrec for lib in conflicts] == ["LIB008"]
+
+
+def test_trim_lane_for_balance_capacity_only_removes_normal_libraries(monkeypatch):
+    imbalance_lib = _build_basic_lane_library("LIB010", data=600.0)
+    imbalance_lib.sample_type_code = "ATAC-seq文库"
+    imbalance_lib.data_type = "ATAC-seq文库"
+    normal_lib = _build_basic_lane_library("LIB011", data=300.0, index_seq="GGAATTCCGG;AACCGGTTAA")
+
+    lane = LaneAssignment(
+        lane_id="DL_003",
+        machine_id="M_006",
+        machine_type=arrange_model6.MachineType.NOVA_X_25B,
+        lane_capacity_gb=975.0,
+        libraries=[imbalance_lib, normal_lib],
+        metadata={"is_dedicated_imbalance_lane": True},
+    )
+    candidate_balance_lib = arrange_model6._create_balance_library_from_template(
+        lane=lane,
+        template={
+            "wksampleid": "phix",
+            "wkdept": "天津科技服务实验室",
+            "wktestno": "Novaseq X Plus-PE150",
+            "wkindexseq": "GGGGGGGGGG;ACCGAGATCT",
+        },
+        balance_amount_gb=195.0,
+    )
+
+    monkeypatch.setattr(
+        arrange_model6,
+        "_validate_lane_state",
+        lambda validator, lane, libraries: SimpleNamespace(
+            is_valid=sum(float(getattr(lib, "contract_data_raw", 0.0) or 0.0) for lib in libraries) <= 1000.0
+        ),
+    )
+
+    trimmed_result = _trim_lane_for_balance_capacity(
+        lane=lane,
+        working_libs=[imbalance_lib, normal_lib],
+        candidate_balance_lib=candidate_balance_lib,
+        validator=SimpleNamespace(),
+    )
+
+    assert trimmed_result is not None
+    trimmed_libs, removed_libs = trimmed_result
+    assert [lib.origrec for lib in removed_libs] == ["LIB011"]
+    assert "LIB010" in [lib.origrec for lib in trimmed_libs]
+
+
+def test_materialize_balance_library_for_dedicated_56_57_mix_lane(monkeypatch):
+    templates = {
+        (
+            arrange_model6._normalize_text_for_match("天津科技服务实验室"),
+            arrange_model6._normalize_text_for_match("Novaseq X Plus-PE150"),
+        ): [
+            {
+                "wksampleid": "phix",
+                "wkdept": "天津科技服务实验室",
+                "wktestno": "Novaseq X Plus-PE150",
+                "wkindexseq": "GGGGGGGGGG;ACCGAGATCT",
+                "_template_order": 1,
+            }
+        ]
+    }
+    monkeypatch.setattr(arrange_model6, "_load_balance_library_templates", lambda: templates)
+    monkeypatch.setattr(
+        arrange_model6,
+        "_validate_lane_state",
+        lambda validator, lane, libraries: SimpleNamespace(is_valid=True),
+    )
+    monkeypatch.setattr(arrange_model6, "_validate_index_conflicts_latest", lambda libraries: [])
+
+    imbalance_lib = _build_basic_lane_library("LIB005", data=180.0)
+    imbalance_lib.sample_type_code = "ATAC-seq文库"
+    imbalance_lib.data_type = "ATAC-seq文库"
+    balanced_lib = _build_basic_lane_library("LIB006", data=600.0, index_seq="TTAACCGGTT;CCAATTGGCC")
+    balanced_lib.sample_type_code = "真核普通转录组文库"
+    balanced_lib.data_type = "真核普通转录组文库"
+
+    is_compatible, _ = arrange_model6._BASE_IMBALANCE_HANDLER.check_mix_compatibility(
+        [imbalance_lib, balanced_lib],
+        enforce_total_limit=False,
+    )
+    assert is_compatible is True
+
+    lane = LaneAssignment(
+        lane_id="DL_056_001",
+        machine_id="M_056_001",
+        machine_type=arrange_model6.MachineType.NOVA_X_25B,
+        lane_capacity_gb=975.0,
+        libraries=[imbalance_lib, balanced_lib],
+        metadata={"is_dedicated_imbalance_lane": True},
+    )
+
+    added = _materialize_balance_library_for_lane(
+        lane=lane,
+        all_lanes=[lane],
+        unassigned_pool=[],
+        validator=SimpleNamespace(),
+    )
+
+    assert added is True
+    assert lane.metadata["wkbalancedata"] == 195.0
+    assert lane.metadata["materialized_balance_library"] is True
+
+    balance_libs = [lib for lib in lane.libraries if getattr(lib, BALANCE_LIBRARY_MARKER_COLUMN, False)]
+    assert len(balance_libs) == 1
+    balance_lib = balance_libs[0]
+    assert balance_lib.sample_id == "phix"
+    assert balance_lib.is_add_balance == "是"
+    assert balance_lib.contract_data_raw == 195.0
+    assert balance_lib._balance_output_payload["wkcontractdata"] == 195.0
+    assert balance_lib._balance_output_payload["lorderdata"] == 195.0
+
+
+def test_build_detail_output_generates_balance_library_row_without_raw_template(tmp_path):
+    output_path = tmp_path / "balance_detail_output.csv"
+    df_raw = pd.DataFrame(
+        [{"wkorigrec": "RAW001", "origrec": "RAW001", "aiarrangenumber": 0, "wkuser": "user1"}]
+    )
+    pred_df = pd.DataFrame(
+        [
+            {
+                "origrec": "AI_BALANCE_LANE_001",
+                "origrec_key": "AI_BALANCE_LANE_001",
+                "detail_row_key": "AID_BAL_001",
+                "runid": "RUN_001",
+                "lane_id": "LANE_001",
+                "lsjnd": 1.5,
+                "resolved_lsjfs": "25B",
+                "resolved_lcxms": "3.6T-NEW",
+                "resolved_index_check_rule": "P7P5",
+                "wkbalancedata": 20.0,
+                "predicted_lorderdata": 20.0,
+                "lai_output": None,
+                BALANCE_LIBRARY_MARKER_COLUMN: True,
+            }
+        ]
+    )
+    detail_libraries = [
+        SimpleNamespace(
+            origrec="AI_BALANCE_LANE_001",
+            _origrec_key="AI_BALANCE_LANE_001",
+            _source_origrec_key="AI_BALANCE_LANE_001",
+            _detail_output_key="AID_BAL_001",
+            contract_data_raw=20.0,
+            wkaidbid="AID_BAL_001",
+            aidbid="AID_BAL_001",
+            _is_ai_balance_library=True,
+            _balance_output_payload={
+                "wkaidbid": "AID_BAL_001",
+                "wksampleid": "phix",
+                "wkdept": "天津科技服务实验室",
+                "wktestno": "Novaseq X Plus-PE150",
+                "wkindexseq": "GGGGGGGGGG;ACCGAGATCT",
+                "wkcontractdata": 20.0,
+                "origrec": "AI_BALANCE_LANE_001",
+                "origrec_key": "AI_BALANCE_LANE_001",
+                "detail_row_key": "AID_BAL_001",
+                BALANCE_LIBRARY_MARKER_COLUMN: True,
+            },
+        )
+    ]
+
+    _build_detail_output(
+        df_raw=df_raw,
+        pred_df=pred_df,
+        output_path=output_path,
+        ai_schedulable_keys={"RAW001"},
+        detail_libraries=detail_libraries,
+    )
+
+    result = pd.read_csv(output_path, keep_default_na=False)
+    balance_rows = result.loc[result[BALANCE_LIBRARY_MARKER_COLUMN].astype(str).str.lower() == "true"].copy()
+    assert len(balance_rows) == 1
+    assert balance_rows.iloc[0]["wksampleid"] == "phix"
+    assert float(balance_rows.iloc[0]["wkcontractdata"]) == 20.0
+    assert float(balance_rows.iloc[0]["lorderdata"]) == 20.0
+    assert balance_rows.iloc[0]["llaneid"] == "LANE_001"
+
+
+def test_run_prediction_delivery_restores_balance_library_lorderdata_and_clears_output(tmp_path, monkeypatch):
+    output_path = tmp_path / "prediction.csv"
+
+    def _fake_predict_pooling(input_data, output_file):
+        pd.DataFrame(
+            [
+                {
+                    "wkcontractdata": 20.0,
+                    "lorderdata": 999.0,
+                    "lai_output": 888.0,
+                    BALANCE_LIBRARY_MARKER_COLUMN: True,
+                    "llaneid": "LANE_001",
+                },
+                {
+                    "wkcontractdata": 10.0,
+                    "lorderdata": 11.0,
+                    "lai_output": 9.0,
+                    BALANCE_LIBRARY_MARKER_COLUMN: False,
+                    "llaneid": "LANE_001",
+                },
+            ]
+        ).to_csv(output_file, index=False)
+
+    monkeypatch.setattr(arrange_model6, "predict_pooling", _fake_predict_pooling)
+    monkeypatch.setattr(
+        arrange_model6,
+        "_apply_add_test_output_rate_rule_to_prediction_df",
+        lambda prediction_df, output_path=None: prediction_df,
+    )
+
+    result = _run_prediction_delivery(input_data=pd.DataFrame(), output_path=output_path)
+    assert BALANCE_LIBRARY_MARKER_COLUMN not in result.columns
+    assert float(result.loc[0, "lorderdata"]) == 20.0
+    assert pd.isna(result.loc[0, "lai_output"])
+    assert float(result.loc[1, "lorderdata"]) == 11.0
+
+    persisted = pd.read_csv(output_path)
+    assert BALANCE_LIBRARY_MARKER_COLUMN not in persisted.columns
+    assert float(persisted.loc[0, "lorderdata"]) == 20.0

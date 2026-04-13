@@ -23,6 +23,7 @@ from arrange_library.arrange_library_model6 import (
     _build_detail_output,
     _collect_prediction_rows,
     _filter_valid_lanes,
+    _rescue_failed_lanes_by_57_rules,
     _resolve_lane_loading_concentration,
     try_multi_lib_swap_rebalance,
     _validate_final_package_lanes,
@@ -1209,3 +1210,72 @@ def test_filter_valid_lanes_keeps_1000g_package_lane_in_final_merge() -> None:
 
     assert valid_lanes == [lane]
     assert failed_lanes == []
+
+
+def test_rescue_failed_lanes_recovers_libraries_even_if_failed_lane_already_removed(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    failed_lib = _build_library(
+        origrec="FAILED_LIB",
+        contract_data=120.0,
+        sample_id="FAILED_SAMPLE",
+    )
+    failed_lane = _build_lane_assignment("FAILED_LANE", [failed_lib])
+
+    passed_lib = _build_library(
+        origrec="PASSED_LIB",
+        contract_data=120.0,
+        sample_id="PASSED_SAMPLE",
+    )
+    passed_lane = _build_lane_assignment("PASSED_LANE", [passed_lib])
+
+    existing_unassigned = _build_library(
+        origrec="UNASSIGNED_LIB",
+        contract_data=80.0,
+        sample_id="UNASSIGNED_SAMPLE",
+    )
+    solution = SchedulingSolution(
+        lane_assignments=[passed_lane],
+        unassigned_libraries=[existing_unassigned],
+    )
+
+    def _fake_drain_rescue_lanes_for_match(
+        primary_pool,
+        secondary_pool,
+        validator,
+        machine_type,
+        lane_prefix,
+        serial_start,
+        match_fn=None,
+        extra_metadata=None,
+    ):
+        return [], list(primary_pool), list(secondary_pool), serial_start
+
+    monkeypatch.setattr(
+        arrange_model6,
+        "_drain_rescue_lanes_for_match",
+        _fake_drain_rescue_lanes_for_match,
+    )
+    monkeypatch.setattr(
+        arrange_model6,
+        "_attempt_build_lane_from_prioritized_pool",
+        lambda **kwargs: (None, []),
+    )
+
+    stats = _rescue_failed_lanes_by_57_rules(
+        failed_lanes=[failed_lane],
+        solution=solution,
+        validator=object(),
+    )
+
+    assert solution.lane_assignments == [passed_lane]
+    assert [lib.origrec for lib in solution.unassigned_libraries] == [
+        "FAILED_LIB",
+        "UNASSIGNED_LIB",
+    ]
+    assert stats == {
+        "failed_lanes": 1,
+        "rescued_lanes": 0,
+        "recovered_libraries": 1,
+        "remaining_unassigned": 2,
+    }
