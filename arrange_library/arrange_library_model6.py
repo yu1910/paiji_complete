@@ -2556,6 +2556,222 @@ def try_multi_lib_swap_rebalance(
     return {"new_lanes": new_lanes_count, "remaining_unassigned": len(unassigned)}
 
 
+def _get_residual_regroup_cluster_key(lib: EnhancedLibraryInfo) -> str:
+    """提取剩余文库重组搜索使用的聚簇键。"""
+    sample_type = (
+        getattr(lib, "sample_type_code", "")
+        or getattr(lib, "sampletype", "")
+        or getattr(lib, "data_type", "")
+        or getattr(lib, "lab_type", "")
+        or ""
+    )
+    return _normalize_text_for_match(sample_type)
+
+
+def _rescue_remaining_lanes_by_layered_regroup_search(
+    solution,
+    validator,
+    *,
+    max_priority_cluster_lanes_per_machine: int = 8,
+    max_mixed_rescue_lanes_per_machine: int = 8,
+    max_normal_cluster_lanes_per_machine: int = 12,
+    index_conflict_attempts_per_lane: int = DEFAULT_INDEX_CONFLICT_ATTEMPTS * 4,
+    other_failure_attempts_per_lane: int = DEFAULT_OTHER_FAILURE_ATTEMPTS * 4,
+) -> Dict[str, int]:
+    """对剩余文库执行“专lane -> 混排lane -> 普通lane”分层重组搜索。
+
+    目标：
+    1. 剩余临检/YC/SJ先尝试按同类聚簇专Lane；
+    2. 若仍有高优先级尾货，再允许其主导混排Lane，普通文库仅按门禁补位；
+    3. 最后再对纯普通文库做聚簇补Lane。
+
+    说明：
+    - 为避免重新引入拆分家族半成Lane问题，这里跳过拆分文库，仅处理非拆分尾货。
+    - 所有新增Lane仍走现有严格校验与优先级门禁逻辑。
+    """
+    unassigned = list(getattr(solution, "unassigned_libraries", []) or [])
+    if not unassigned:
+        return {
+            "new_lanes": 0,
+            "priority_cluster_lanes": 0,
+            "mixed_rescue_lanes": 0,
+            "normal_cluster_lanes": 0,
+            "remaining_unassigned": 0,
+            "skipped_split_libraries": 0,
+        }
+
+    serials: Dict[Tuple[str, str], int] = {}
+
+    def _next_lane_serial(prefix: str, machine_type: MachineType) -> int:
+        key = (prefix, machine_type.value)
+        serials[key] = serials.get(key, 0) + 1
+        return serials[key]
+
+    priority_cluster_lanes = 0
+    mixed_rescue_lanes = 0
+    normal_cluster_lanes = 0
+    skipped_split_libraries = 0
+    new_lanes: List[LaneAssignment] = []
+
+    remaining_by_machine: Dict[MachineType, List[EnhancedLibraryInfo]] = {}
+    passthrough: List[EnhancedLibraryInfo] = []
+    for lib in unassigned:
+        if _is_split_library(lib):
+            skipped_split_libraries += 1
+            passthrough.append(lib)
+            continue
+
+        machine_type = getattr(lib, "machine_type", None) or _resolve_machine_type_enum_simple(
+            getattr(lib, "eq_type", "")
+        )
+        if not _is_machine_supported_for_arrangement(machine_type):
+            passthrough.append(lib)
+            continue
+        remaining_by_machine.setdefault(machine_type, []).append(lib)
+
+    for machine_type, machine_pool in list(remaining_by_machine.items()):
+        if not machine_pool:
+            continue
+        machine_priority_cluster_lanes = 0
+        machine_mixed_rescue_lanes = 0
+        machine_normal_cluster_lanes = 0
+
+        # Stage 1: 高优先级尾货优先做专Lane（同机型、同文库类型聚簇）。
+        priority_clusters: Dict[str, List[EnhancedLibraryInfo]] = {}
+        for lib in machine_pool:
+            if _get_scattered_mix_priority_rank(lib) >= 2:
+                continue
+            cluster_key = _get_residual_regroup_cluster_key(lib)
+            if not cluster_key:
+                continue
+            priority_clusters.setdefault(cluster_key, []).append(lib)
+
+        for _, cluster_pool in sorted(
+            priority_clusters.items(),
+            key=lambda item: sum(lib.get_data_amount_gb() for lib in item[1]),
+            reverse=True,
+        ):
+            if machine_priority_cluster_lanes >= max_priority_cluster_lanes_per_machine:
+                break
+            active_cluster = [lib for lib in cluster_pool if lib in machine_pool]
+            if not active_cluster:
+                continue
+            min_allowed, _ = _resolve_lane_capacity_limits(active_cluster, machine_type)
+            if sum(lib.get_data_amount_gb() for lib in active_cluster) + 1e-6 < min_allowed:
+                continue
+
+            while active_cluster and machine_priority_cluster_lanes < max_priority_cluster_lanes_per_machine:
+                lane, used = _attempt_build_rescue_lane_from_pool(
+                    pool=active_cluster,
+                    validator=validator,
+                    machine_type=machine_type,
+                    lane_id_prefix="PG",
+                    lane_serial=_next_lane_serial("PG", machine_type),
+                    index_conflict_attempts=index_conflict_attempts_per_lane,
+                    other_failure_attempts=other_failure_attempts_per_lane,
+                )
+                if not lane:
+                    break
+                new_lanes.append(lane)
+                machine_priority_cluster_lanes += 1
+                priority_cluster_lanes += 1
+                used_ids = {id(lib) for lib in used}
+                machine_pool = [lib for lib in machine_pool if id(lib) not in used_ids]
+                active_cluster = [lib for lib in active_cluster if id(lib) not in used_ids]
+
+        # Stage 2: 仍有剩余高优先级时，允许高优先级主导混排，普通文库按门禁补位。
+        while machine_mixed_rescue_lanes < max_mixed_rescue_lanes_per_machine:
+            if not machine_pool:
+                break
+            current_top_rank = _get_current_hard_priority_rank(machine_pool)
+            if current_top_rank is None:
+                break
+            lane, used = _attempt_build_rescue_lane_from_pool(
+                pool=machine_pool,
+                validator=validator,
+                machine_type=machine_type,
+                lane_id_prefix="RM",
+                lane_serial=_next_lane_serial("RM", machine_type),
+                index_conflict_attempts=index_conflict_attempts_per_lane,
+                other_failure_attempts=other_failure_attempts_per_lane,
+            )
+            if not lane:
+                break
+            lane_top_rank = _get_current_hard_priority_rank(list(lane.libraries or []))
+            if lane_top_rank is None:
+                break
+            if lane_top_rank > current_top_rank:
+                break
+            new_lanes.append(lane)
+            machine_mixed_rescue_lanes += 1
+            mixed_rescue_lanes += 1
+            used_ids = {id(lib) for lib in used}
+            machine_pool = [lib for lib in machine_pool if id(lib) not in used_ids]
+
+        # Stage 3: 对剩余普通尾货做同类聚簇补Lane。
+        normal_clusters: Dict[str, List[EnhancedLibraryInfo]] = {}
+        for lib in machine_pool:
+            if _get_scattered_mix_priority_rank(lib) != 2:
+                continue
+            cluster_key = _get_residual_regroup_cluster_key(lib)
+            if not cluster_key:
+                continue
+            normal_clusters.setdefault(cluster_key, []).append(lib)
+
+        for _, cluster_pool in sorted(
+            normal_clusters.items(),
+            key=lambda item: sum(lib.get_data_amount_gb() for lib in item[1]),
+            reverse=True,
+        ):
+            if machine_normal_cluster_lanes >= max_normal_cluster_lanes_per_machine:
+                break
+            active_cluster = [lib for lib in cluster_pool if lib in machine_pool]
+            if not active_cluster:
+                continue
+            min_allowed, _ = _resolve_lane_capacity_limits(active_cluster, machine_type)
+            if sum(lib.get_data_amount_gb() for lib in active_cluster) + 1e-6 < min_allowed:
+                continue
+
+            while active_cluster and machine_normal_cluster_lanes < max_normal_cluster_lanes_per_machine:
+                lane, used = _attempt_build_rescue_lane_from_pool(
+                    pool=active_cluster,
+                    validator=validator,
+                    machine_type=machine_type,
+                    lane_id_prefix="OG",
+                    lane_serial=_next_lane_serial("OG", machine_type),
+                    index_conflict_attempts=index_conflict_attempts_per_lane,
+                    other_failure_attempts=other_failure_attempts_per_lane,
+                )
+                if not lane:
+                    break
+                new_lanes.append(lane)
+                machine_normal_cluster_lanes += 1
+                normal_cluster_lanes += 1
+                used_ids = {id(lib) for lib in used}
+                machine_pool = [lib for lib in machine_pool if id(lib) not in used_ids]
+                active_cluster = [lib for lib in active_cluster if id(lib) not in used_ids]
+
+        remaining_by_machine[machine_type] = machine_pool
+
+    if new_lanes:
+        solution.lane_assignments.extend(new_lanes)
+
+    remaining_ids = {id(lib) for lib in passthrough}
+    for machine_pool in remaining_by_machine.values():
+        remaining_ids.update(id(lib) for lib in machine_pool)
+    final_unassigned = [lib for lib in unassigned if id(lib) in remaining_ids]
+    solution.unassigned_libraries = final_unassigned
+
+    return {
+        "new_lanes": len(new_lanes),
+        "priority_cluster_lanes": priority_cluster_lanes,
+        "mixed_rescue_lanes": mixed_rescue_lanes,
+        "normal_cluster_lanes": normal_cluster_lanes,
+        "remaining_unassigned": len(final_unassigned),
+        "skipped_split_libraries": skipped_split_libraries,
+    }
+
+
 # ==================== 辅助工具函数 ====================
 
 
@@ -4942,6 +5158,30 @@ def test_with_model(
             "全局优先级硬约束收口后: 最终Lane数={}，未分配文库={}".format(
                 len(solution.lane_assignments),
                 len(solution.unassigned_libraries),
+            )
+        )
+
+    layered_regroup_stats = _rescue_remaining_lanes_by_layered_regroup_search(
+        solution=solution,
+        validator=strict_validator,
+    )
+    if layered_regroup_stats["new_lanes"] > 0:
+        logger.info(
+            "剩余库分层重组搜索完成: 新增Lane={} (专lane={}, 混排lane={}, 普通lane={}), "
+            "跳过拆分文库={}, 剩余未分配={}".format(
+                layered_regroup_stats["new_lanes"],
+                layered_regroup_stats["priority_cluster_lanes"],
+                layered_regroup_stats["mixed_rescue_lanes"],
+                layered_regroup_stats["normal_cluster_lanes"],
+                layered_regroup_stats["skipped_split_libraries"],
+                layered_regroup_stats["remaining_unassigned"],
+            )
+        )
+    else:
+        logger.info(
+            "剩余库分层重组搜索未新增Lane: 跳过拆分文库={}, 剩余未分配={}".format(
+                layered_regroup_stats["skipped_split_libraries"],
+                layered_regroup_stats["remaining_unassigned"],
             )
         )
 

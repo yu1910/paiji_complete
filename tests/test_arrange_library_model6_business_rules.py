@@ -23,6 +23,7 @@ from arrange_library.arrange_library_model6 import (
     _build_detail_output,
     _collect_prediction_rows,
     _filter_valid_lanes,
+    _rescue_remaining_lanes_by_layered_regroup_search,
     _rescue_failed_lanes_by_57_rules,
     _resolve_lane_loading_concentration,
     try_multi_lib_swap_rebalance,
@@ -778,6 +779,135 @@ def test_schedule_machine_group_keeps_same_priority_libraries_in_first_lane(
     )
 
 
+def test_schedule_machine_group_priority_seed_stops_at_min_and_preserves_next_priority_lane(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    scheduler = GreedyLaneScheduler()
+    monkeypatch.setattr(
+        scheduler,
+        "_get_scheduling_lane_capacity_range",
+        lambda libraries, machine_type, metadata=None: _lane_rule(min_gb=100.0, max_gb=200.0),
+    )
+    monkeypatch.setattr(
+        scheduler,
+        "_sample_target_capacity",
+        lambda lane_rule_selection: 160.0,
+    )
+    monkeypatch.setattr(
+        scheduler,
+        "_validate_completed_lane",
+        lambda lane: (True, []),
+    )
+    monkeypatch.setattr(
+        scheduler,
+        "_can_add_to_lane",
+        lambda lane, lib: lane.total_data_gb + lib.get_data_amount_gb() <= 200.0,
+    )
+
+    libraries = [
+        _build_library(
+            origrec="CLINICAL_L1",
+            data_type="临检",
+            contract_data=60.0,
+            board_number="A1",
+        ),
+        _build_library(
+            origrec="SJ_L1",
+            data_type="其他",
+            contract_data=60.0,
+            sub_project_name="SJ urgent project",
+            board_number="A2",
+        ),
+        _build_library(
+            origrec="YC_L2",
+            data_type="YC",
+            contract_data=60.0,
+            board_number="A3",
+        ),
+        _build_library(
+            origrec="OTHER_L2",
+            data_type="其他",
+            contract_data=40.0,
+            delete_date=1.0,
+            board_number="A4",
+        ),
+        _build_library(
+            origrec="OTHER_L3",
+            data_type="其他",
+            contract_data=40.0,
+            delete_date=2.0,
+            board_number="A5",
+        ),
+    ]
+
+    lanes, remaining = scheduler._schedule_machine_group(libraries, "Nova X-25B")
+
+    assert len(lanes) == 2
+    assert {lib.origrec for lib in lanes[0].libraries} == {"CLINICAL_L1", "SJ_L1"}
+    assert {lib.origrec for lib in lanes[1].libraries} == {"YC_L2", "OTHER_L2"}
+    assert [lib.origrec for lib in remaining] == ["OTHER_L3"]
+
+
+def test_schedule_machine_group_continues_with_normal_lanes_when_priority_tail_blocked(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    scheduler = GreedyLaneScheduler()
+    monkeypatch.setattr(
+        scheduler,
+        "_get_scheduling_lane_capacity_range",
+        lambda libraries, machine_type, metadata=None: _lane_rule(min_gb=100.0, max_gb=200.0),
+    )
+    monkeypatch.setattr(
+        scheduler,
+        "_sample_target_capacity",
+        lambda lane_rule_selection: 160.0,
+    )
+    monkeypatch.setattr(
+        scheduler,
+        "_validate_completed_lane",
+        lambda lane: (True, []),
+    )
+
+    def fake_can_add_to_lane(lane, lib):
+        current_ids = {item.origrec for item in lane.libraries}
+        if not current_ids:
+            return True
+        if current_ids == {"CLINICAL_BLOCKED"}:
+            return False
+        return lane.total_data_gb + lib.get_data_amount_gb() <= 200.0
+
+    monkeypatch.setattr(scheduler, "_can_add_to_lane", fake_can_add_to_lane)
+
+    libraries = [
+        _build_library(
+            origrec="CLINICAL_BLOCKED",
+            data_type="临检",
+            contract_data=60.0,
+            board_number="B1",
+        ),
+        _build_library(
+            origrec="OTHER_L1",
+            data_type="其他",
+            contract_data=60.0,
+            delete_date=1.0,
+            board_number="B2",
+        ),
+        _build_library(
+            origrec="OTHER_L2",
+            data_type="其他",
+            contract_data=40.0,
+            delete_date=2.0,
+            board_number="B3",
+        ),
+    ]
+
+    lanes, remaining = scheduler._schedule_machine_group(libraries, "Nova X-25B")
+
+    assert len(lanes) == 1
+    assert {lib.origrec for lib in lanes[0].libraries} == {"OTHER_L1", "OTHER_L2"}
+    assert [lib.origrec for lib in remaining] == ["CLINICAL_BLOCKED"]
+
+
 def test_select_backbone_libraries_prefers_mid_sized_candidates_before_priority_large_library() -> None:
     scheduler = GreedyLaneScheduler()
     scheduler.config.small_library_threshold_gb = 20.0
@@ -1122,6 +1252,120 @@ def test_try_multi_lib_swap_rebalance_falls_back_to_non_clinical_pool_without_sc
     assert captured_calls[1]["prioritize_scattered_mix"] is True
     assert captured_calls[2]["origrecs"] == ["YC_UNASSIGNED", "OTHER_UNASSIGNED"]
     assert captured_calls[2]["prioritize_scattered_mix"] is False
+
+
+def test_rescue_remaining_lanes_by_layered_regroup_search_prefers_priority_then_mixed_then_normal(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    monkeypatch.setattr(
+        arrange_model6,
+        "_resolve_lane_capacity_limits",
+        lambda libraries, machine_type, lane_id=None, lane_metadata=None: (100.0, 120.0),
+    )
+
+    clinical_a = _build_library(
+        origrec="CLIN_A",
+        sample_type="临检转录组",
+        data_type="临检",
+        contract_data=60.0,
+    )
+    clinical_b = _build_library(
+        origrec="CLIN_B",
+        sample_type="临检转录组",
+        data_type="临检",
+        contract_data=60.0,
+    )
+    yc_a = _build_library(
+        origrec="YC_A",
+        sample_type="YC文库",
+        data_type="YC",
+        contract_data=45.0,
+        sample_id="FKDL_YC_A",
+    )
+    yc_b = _build_library(
+        origrec="YC_B",
+        sample_type="YC文库",
+        data_type="YC",
+        contract_data=45.0,
+        sample_id="FKDL_YC_B",
+    )
+    other_a = _build_library(
+        origrec="OTHER_A",
+        sample_type="VIP-真核普通转录组文库",
+        data_type="其他",
+        contract_data=55.0,
+    )
+    other_b = _build_library(
+        origrec="OTHER_B",
+        sample_type="VIP-真核普通转录组文库",
+        data_type="其他",
+        contract_data=55.0,
+    )
+    split_other = _build_library(
+        origrec="SPLIT_OTHER",
+        sample_type="VIP-真核普通转录组文库",
+        data_type="其他",
+        contract_data=80.0,
+    )
+    split_other.is_split = True
+
+    captured_calls: list[tuple[str, list[str]]] = []
+
+    def fake_attempt(pool, validator, machine_type, lane_id_prefix, lane_serial=None, **kwargs):
+        origrecs = [lib.origrec for lib in pool]
+        captured_calls.append((lane_id_prefix, origrecs))
+        if lane_id_prefix == "PG" and set(origrecs) == {"CLIN_A", "CLIN_B"}:
+            lane = _build_lane_assignment("PG_Nova X-25B_001", [clinical_a, clinical_b])
+            return lane, [clinical_a, clinical_b]
+        if lane_id_prefix == "RM" and set(origrecs) == {"YC_A", "YC_B", "OTHER_A", "OTHER_B"}:
+            lane = _build_lane_assignment("RM_Nova X-25B_001", [yc_a, yc_b, other_a])
+            return lane, [yc_a, yc_b, other_a]
+        if lane_id_prefix == "OG" and set(origrecs) == {"OTHER_B"}:
+            return None, []
+        return None, []
+
+    monkeypatch.setattr(
+        arrange_model6,
+        "_attempt_build_rescue_lane_from_pool",
+        fake_attempt,
+    )
+
+    solution = SchedulingSolution(
+        lane_assignments=[],
+        unassigned_libraries=[
+            clinical_a,
+            clinical_b,
+            yc_a,
+            yc_b,
+            other_a,
+            other_b,
+            split_other,
+        ],
+    )
+
+    stats = _rescue_remaining_lanes_by_layered_regroup_search(
+        solution=solution,
+        validator=LaneValidator(strict_mode=True),
+        max_priority_cluster_lanes_per_machine=2,
+        max_mixed_rescue_lanes_per_machine=2,
+        max_normal_cluster_lanes_per_machine=2,
+    )
+
+    assert stats["new_lanes"] == 2
+    assert stats["priority_cluster_lanes"] == 1
+    assert stats["mixed_rescue_lanes"] == 1
+    assert stats["normal_cluster_lanes"] == 0
+    assert stats["skipped_split_libraries"] == 1
+    assert [lane.lane_id for lane in solution.lane_assignments] == [
+        "PG_Nova X-25B_001",
+        "RM_Nova X-25B_001",
+    ]
+    assert [lib.origrec for lib in solution.unassigned_libraries] == [
+        "OTHER_B",
+        "SPLIT_OTHER",
+    ]
+    assert captured_calls[0] == ("PG", ["CLIN_A", "CLIN_B"])
+    assert captured_calls[1] == ("RM", ["YC_A", "YC_B", "OTHER_A", "OTHER_B"])
 
 
 def test_mixed_customer_lane_prefers_high_priority_customer_under_hard_constraints(
