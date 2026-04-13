@@ -681,8 +681,9 @@ class GreedyLaneScheduler:
             still_unassigned: List[EnhancedLibraryInfo] = []
             filled_count = 0
             removed_libs: List[EnhancedLibraryInfo] = []  # 记录被踢出的文库
+            fill_candidates = self._sort_remaining_for_scattered_mix_lane(unassigned)
             
-            for lib in unassigned:
+            for lib in fill_candidates:
                 placed = False
                 for lane in all_lanes:
                     # 检查容量
@@ -1307,6 +1308,23 @@ class GreedyLaneScheduler:
         if data_type == "YC" or lib.is_yc_library():
             return 1
         return 2
+
+    def _is_priority_core_rank(self, rank: int) -> bool:
+        """临检/SJ/YC 先占坑，普通文库只作为补位。"""
+        return rank <= 1
+
+    def _is_priority_core_library(self, lib: EnhancedLibraryInfo) -> bool:
+        """判断文库是否属于优先占坑核心池。"""
+        return self._is_priority_core_rank(self._get_scattered_mix_priority_rank(lib))
+
+    def _split_priority_core_and_fillers(
+        self,
+        libraries: List[EnhancedLibraryInfo],
+    ) -> Tuple[List[EnhancedLibraryInfo], List[EnhancedLibraryInfo]]:
+        """拆分高优先级占坑文库与普通补位文库。"""
+        priority_core = [lib for lib in libraries if self._is_priority_core_library(lib)]
+        fillers = [lib for lib in libraries if not self._is_priority_core_library(lib)]
+        return priority_core, fillers
 
     def _parse_scattered_mix_delete_date(self, lib: EnhancedLibraryInfo) -> Optional[float]:
         """解析散样混排的delete_date天数字段，数值越小表示越临近越优先。"""
@@ -3742,19 +3760,32 @@ class GreedyLaneScheduler:
         while remaining:
             # 散样混排策略优先于一般排序：临检 > YC > delete_date > 其他，尽量集中到连续Lane。
             remaining = self._sort_remaining_for_scattered_mix_lane(remaining)
-            lane_candidate_order = self._sort_remaining_for_lane_seed(remaining, remaining[0])
+            seed_lib = remaining[0]
+            lane_candidate_order = self._sort_remaining_for_lane_seed(remaining, seed_lib)
 
             seed_rule = self._get_scheduling_lane_capacity_range(
-                libraries=[remaining[0]],
+                libraries=[seed_lib],
                 machine_type=machine_type_enum.value,
             )
             lane_candidate_order = self._sort_by_soft_single_lane_preference(
                 lane_candidate_order,
-                remaining[0],
+                seed_lib,
                 seed_rule,
             )
-            # 为当前Lane抽取一个软目标容量（在下限和上限之间随机），硬上限仍由验证控制
-            target_capacity_gb = self._sample_target_capacity(seed_rule)
+            priority_seed_lane = self._is_priority_core_library(seed_lib)
+            if priority_seed_lane:
+                # 高优先级Lane达到有效下限即收口，留更多临检/YC/SJ给后续连续Lane先占坑。
+                target_capacity_gb = float(seed_rule.effective_min_gb)
+                priority_core_candidates, filler_candidates = self._split_priority_core_and_fillers(
+                    lane_candidate_order
+                )
+                candidate_buckets = [priority_core_candidates]
+                if priority_core_candidates:
+                    candidate_buckets.append(filler_candidates)
+            else:
+                # 普通Lane维持原先的软目标容量抽样，继续追求利用率。
+                target_capacity_gb = self._sample_target_capacity(seed_rule)
+                candidate_buckets = [lane_candidate_order]
 
             # 使用全局计数器获取唯一Lane ID
             lane_id = self._get_next_lane_id("GL", machine_type)
@@ -3768,27 +3799,44 @@ class GreedyLaneScheduler:
             current_lane.metadata["seq_mode"] = seed_rule.sequencing_mode
             current_lane.metadata["sequencing_mode"] = seed_rule.sequencing_mode
             current_lane.metadata["loading_method"] = seed_rule.loading_method
-            current_lane.metadata["target_capacity_gb"] = seed_rule.soft_target_gb
+            current_lane.metadata["target_capacity_gb"] = target_capacity_gb
             
             # 遍历剩余文库，尝试放入当前Lane
             next_remaining: List[EnhancedLibraryInfo] = []
             deferred_remaining: List[EnhancedLibraryInfo] = []
             placed_ids: Set[str] = set()
             break_index: Optional[int] = None
-            for lib in lane_candidate_order:
-                # 检查是否能放入
-                if self._can_add_to_lane(current_lane, lib):
-                    current_lane.add_library(lib)
-                    placed_ids.add(str(getattr(lib, "origrec", "") or id(lib)))
-                    
-                    # 检查是否达到软目标容量（非硬上限）
-                    if current_lane.total_data_gb >= target_capacity_gb:
-                        # 达到软目标，剩余文库留给下一条Lane
-                        break_index = lane_candidate_order.index(lib)
-                        break
-                else:
-                    # 放不进去，留给下一条Lane
-                    deferred_remaining.append(lib)
+            stop_building = False
+            for bucket_index, candidates in enumerate(candidate_buckets):
+                # 没有任何高优先级文库进Lane时，不允许普通文库先独立成Lane。
+                if priority_seed_lane and bucket_index > 0 and not current_lane.libraries:
+                    break
+                for lib in candidates:
+                    # 检查是否能放入
+                    if self._can_add_to_lane(current_lane, lib):
+                        current_lane.add_library(lib)
+                        placed_ids.add(str(getattr(lib, "origrec", "") or id(lib)))
+
+                        if priority_seed_lane:
+                            current_rule = self._get_scheduling_lane_capacity_range(
+                                libraries=current_lane.libraries,
+                                machine_type=machine_type_enum.value,
+                                metadata=self._build_lane_validation_metadata(current_lane),
+                            )
+                            if current_lane.total_data_gb >= current_rule.effective_min_gb:
+                                break_index = lane_candidate_order.index(lib)
+                                stop_building = True
+                                break
+                        elif current_lane.total_data_gb >= target_capacity_gb:
+                            # 达到软目标，剩余文库留给下一条Lane
+                            break_index = lane_candidate_order.index(lib)
+                            stop_building = True
+                            break
+                    else:
+                        # 放不进去，留给下一条Lane
+                        deferred_remaining.append(lib)
+                if stop_building:
+                    break
 
             if break_index is not None:
                 trailing_candidates = lane_candidate_order[break_index + 1 :]
@@ -3839,7 +3887,27 @@ class GreedyLaneScheduler:
                     failed_libraries.extend(current_lane.libraries)  # 标记为失败
                     remaining = next_remaining  # 用剩余文库继续排
             else:
-                # Lane利用率不足，无法形成有效Lane，结束
+                # 高优先级优先占坑后，如果这条Lane仍达不到下限，说明这批高优先级尾货当前被硬约束卡住。
+                # 这时不能直接终止整个机型组排机，否则后续普通文库可形成的Lane也会被一并堵死。
+                if priority_seed_lane:
+                    blocked_priority_libs = [
+                        lib for lib in current_lane.libraries
+                        if self._is_priority_core_library(lib)
+                    ]
+                    reusable_fillers = [
+                        lib for lib in current_lane.libraries
+                        if not self._is_priority_core_library(lib)
+                    ]
+                    failed_libraries.extend(blocked_priority_libs)
+                    remaining = reusable_fillers + next_remaining
+                    logger.warning(
+                        f"Lane {current_lane.lane_id} 数据量{current_lane.total_data_gb:.1f}G"
+                        f"低于下限{completed_rule.effective_min_gb:.1f}G，"
+                        f"当前高优先级尾货{len(blocked_priority_libs)}个暂挂未分配，继续尝试后续普通Lane"
+                    )
+                    continue
+
+                # 普通Lane利用率不足，沿用原逻辑直接结束
                 # 当前Lane的文库 + 剩余文库 = 所有未分配文库
                 all_unassigned = current_lane.libraries + next_remaining
                 logger.warning(
