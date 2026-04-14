@@ -2,9 +2,11 @@
 LibLane V2 文库信息数据模型
 基于31字段真实业务数据结构设计
 创建时间：2025-12-08 17:02:11
-更新时间：2026-01-30 15:00:00
+更新时间：2026-04-14 13:00:00
 
 变更记录：
+- 2026-04-14: 新增 last_lane_round/lane_round 字段，支持1.1模式轮次标识
+             新增 lastlaneround/laneround 属性别名，与 lastlaneid/lastcxms 保持一致的访问风格
 - 2026-01-30: 字段映射精简，以表中实际字段名为准
              - 参考表: data/2026-01-30_v1_standardized_lane_output_v5.csv
              - 每个映射只保留表中存在的字段名，避免误映射
@@ -185,6 +187,8 @@ class EnhancedLibraryInfo:
     primers_name: Optional[str] = None               # 测序引物名称（primersname）
     last_laneid: Optional[str] = None                # 上次laneid（lastlaneid）
     last_cxms: Optional[str] = None                  # 上次测序模式（lastcxms）
+    last_lane_round: Optional[str] = None            # 上轮测序轮数（llastlaneround），lims推送，值如"1.1第一轮"
+    lane_round: Optional[str] = None                 # 当前排机轮次（laneround），排机输出，值如"1.1第一轮"/"1.1第二轮"
     add_number: Optional[int] = None                 # 加测次数（addnumber）
     xpd: Optional[float] = None                      # 小片段占比（xpd）
     jtb: Optional[float] = None                      # 接头比值（jtb）
@@ -1138,6 +1142,8 @@ class EnhancedLibraryInfo:
             'primers_name': self.primers_name,
             'last_laneid': self.last_laneid,
             'last_cxms': self.last_cxms,
+            'last_lane_round': self.last_lane_round,
+            'lane_round': self.lane_round,
             'add_number': self.add_number,
             'xpd': self.xpd,
             'jtb': self.jtb,
@@ -1183,6 +1189,8 @@ class EnhancedLibraryInfo:
             'mismatchs_barcodes': self.mismatchs_barcodes,
             'lastlaneid': self.lastlaneid,
             'lastcxms': self.lastcxms,
+            'lastlaneround': self.lastlaneround,
+            'laneround': self.laneround,
             'addnumber': self.addnumber,
             'xpd': self.xpd,
             'jtb': self.jtb,
@@ -1429,6 +1437,22 @@ class EnhancedLibraryInfo:
     @lastcxms.setter
     def lastcxms(self, value: Optional[str]) -> None:
         self.last_cxms = value
+
+    @property
+    def lastlaneround(self) -> Optional[str]:
+        return self.last_lane_round
+
+    @lastlaneround.setter
+    def lastlaneround(self, value: Optional[str]) -> None:
+        self.last_lane_round = value
+
+    @property
+    def laneround(self) -> Optional[str]:
+        return self.lane_round
+
+    @laneround.setter
+    def laneround(self, value: Optional[str]) -> None:
+        self.lane_round = value
 
     @property
     def addnumber(self) -> Optional[int]:
@@ -1696,6 +1720,8 @@ class EnhancedLibraryInfo:
             # 规则文档补充字段
             'last_laneid': pick_str(['LASTLANEID', 'lastlaneid'], None),
             'last_cxms': pick_str(['LASTCXMS', 'lastcxms'], None),
+            'last_lane_round': pick_str(['LASTLANEROUND', 'lastlaneround', 'llastlaneround'], None),
+            'lane_round': pick_str(['LANEROUND', 'laneround'], None),
             'add_number': pick_int(['ADDNUMBER', 'addnumber'], None),
             'xpd': pick_float(['XPD', 'xpd'], None),
             'jtb': pick_float(['JTB', 'jtb'], None),
@@ -1869,6 +1895,8 @@ class EnhancedLibraryInfo:
             # === 历史Lane信息 ===
             last_laneid=pick(['llastlaneid']),
             last_cxms=pick(['llastcxms']),
+            last_lane_round=pick(['llastlaneround', 'lastlaneround']),
+            lane_round=pick(['laneround']),
             
             # === 适配器与杂项 ===
             xpd=pick_float(['wkxpd'], None),

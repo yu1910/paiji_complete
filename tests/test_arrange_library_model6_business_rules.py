@@ -20,9 +20,13 @@ import arrange_library.arrange_library_model6 as arrange_model6
 from arrange_library.arrange_library_model6 import (
     _collect_donations_for_pool,
     _apply_add_test_output_rate_rule_to_prediction_df,
+    _attempt_build_lane_from_pool,
     _build_detail_output,
     _collect_prediction_rows,
+    _ensure_unique_lane_ids,
     _filter_valid_lanes,
+    _reset_auto_lane_serial_counters,
+    _reserve_auto_lane_serial,
     _rescue_remaining_lanes_by_layered_regroup_search,
     _rescue_failed_lanes_by_57_rules,
     _resolve_lane_loading_concentration,
@@ -272,6 +276,267 @@ def test_build_detail_output_increments_aiarrangenumber_for_schedulable_assigned
     assert int(result.loc[0, "aiarrangenumber"]) == 1
     assert result.loc[0, "llaneid"] == "LANE_001"
     assert result.loc[0, "lrunid"] == "RUN_001"
+
+
+def test_reserve_auto_lane_serial_increments_per_prefix_and_machine() -> None:
+    _reset_auto_lane_serial_counters()
+
+    first = _reserve_auto_lane_serial("EX", MachineType.NOVA_X_25B)
+    second = _reserve_auto_lane_serial("EX", MachineType.NOVA_X_25B)
+    third = _reserve_auto_lane_serial("RB", MachineType.NOVA_X_25B)
+
+    assert first == 1
+    assert second == 2
+    assert third == 1
+
+
+def test_attempt_build_lane_from_pool_uses_unique_auto_serials(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    _reset_auto_lane_serial_counters()
+    libs_a = [_build_library(origrec="AUTO_1", contract_data=60.0)]
+    libs_b = [_build_library(origrec="AUTO_2", contract_data=60.0)]
+
+    monkeypatch.setattr(
+        arrange_model6,
+        "_filter_libraries_by_hard_priority",
+        lambda libraries, **kwargs: list(libraries),
+    )
+    monkeypatch.setattr(
+        arrange_model6,
+        "_validate_lane_special_split_rule",
+        lambda libraries: (True, set(), ""),
+    )
+    monkeypatch.setattr(
+        arrange_model6,
+        "_validate_lane_57_mix_rules",
+        lambda libraries, enforce_total_limit=False: (True, ""),
+    )
+    monkeypatch.setattr(
+        arrange_model6,
+        "_resolve_lane_capacity_limits",
+        lambda libraries, machine_type, lane_id="", lane_metadata=None: (50.0, 200.0),
+    )
+    monkeypatch.setattr(
+        arrange_model6._MODULE_IDX_VALIDATOR,
+        "validate_new_lib_quick_with_cache",
+        lambda selected_idx_cache, lib: (True, []),
+    )
+    monkeypatch.setattr(
+        arrange_model6,
+        "_validate_lane_with_latest_index",
+        lambda **kwargs: types.SimpleNamespace(is_valid=True, errors=[], warnings=[]),
+    )
+
+    lane_one, used_one = _attempt_build_lane_from_pool(
+        pool=list(libs_a),
+        validator=object(),
+        machine_type=MachineType.NOVA_X_25B,
+        lane_id_prefix="EX",
+        lane_serial=None,
+        index_conflict_attempts=1,
+        other_failure_attempts=1,
+    )
+    lane_two, used_two = _attempt_build_lane_from_pool(
+        pool=list(libs_b),
+        validator=object(),
+        machine_type=MachineType.NOVA_X_25B,
+        lane_id_prefix="EX",
+        lane_serial=None,
+        index_conflict_attempts=1,
+        other_failure_attempts=1,
+    )
+
+    assert lane_one is not None and used_one
+    assert lane_two is not None and used_two
+    assert lane_one.lane_id == "EX_Nova X-25B_001"
+    assert lane_two.lane_id == "EX_Nova X-25B_002"
+
+
+def test_ensure_unique_lane_ids_renames_duplicate_lane_assignments() -> None:
+    lane_a = _build_lane_assignment(
+        "EX_Nova X-25B_001",
+        [_build_library(origrec="DUP_A", contract_data=60.0)],
+    )
+    lane_b = _build_lane_assignment(
+        "EX_Nova X-25B_001",
+        [_build_library(origrec="DUP_B", contract_data=60.0)],
+    )
+
+    renamed = _ensure_unique_lane_ids([lane_a, lane_b])
+
+    assert renamed == 1
+    assert lane_a.lane_id == "EX_Nova X-25B_001"
+    assert lane_b.lane_id == "EX_Nova X-25B_002"
+    assert lane_b.machine_id == "M_EX_Nova X-25B_002"
+
+
+def test_collect_prediction_rows_keeps_wkbalancedata_empty_for_non_package_lane() -> None:
+    lane = _build_lane_assignment(
+        "RS_Nova X-25B_001",
+        [
+            _build_library(origrec="LIB_NORMAL", contract_data=950.0),
+            _build_library(origrec="LIB_BALANCE", sample_type="平衡文库", sample_id="phix", contract_data=195.0),
+        ],
+    )
+    lane.metadata["wkbalancedata"] = 195.0
+    setattr(lane.libraries[1], arrange_model6.BALANCE_LIBRARY_MARKER_COLUMN, True)
+
+    result = _collect_prediction_rows([lane], {}, "unit_test")
+
+    normal_row = result.loc[result["origrec"] == "LIB_NORMAL"].iloc[0]
+    balance_row = result.loc[result["origrec"] == "LIB_BALANCE"].iloc[0]
+    assert pd.isna(normal_row["wkbalancedata"])
+    assert pd.isna(balance_row["wkbalancedata"])
+
+
+def test_collect_prediction_rows_sets_wkbalancedata_on_package_lane_balance_library() -> None:
+    lane = _build_lane_assignment(
+        "PKG_Nova X-25B_001",
+        [
+            _build_library(
+                origrec="PKG_BALANCE",
+                sample_type="平衡文库",
+                sample_id="phix",
+                contract_data=100.0,
+                package_lane_number="PKG_001",
+            ),
+        ],
+        package_id="PKG_001",
+    )
+    lane.metadata["wkbalancedata"] = 100.0
+    setattr(lane.libraries[0], arrange_model6.BALANCE_LIBRARY_MARKER_COLUMN, True)
+
+    result = _collect_prediction_rows([lane], {}, "unit_test")
+
+    balance_row = result.loc[result["origrec"] == "PKG_BALANCE"].iloc[0]
+    assert balance_row["wkbalancedata"] == 100.0
+
+
+def test_build_detail_output_drops_internal_origrec_columns_when_raw_file_has_none(
+    tmp_path: Path,
+) -> None:
+    df_raw = pd.DataFrame(
+        [
+            {
+                "wkaidbid": "AID_001",
+                "wkorigrec": "LIB_001",
+                "aiarrangenumber": 0,
+                "llaneid": "",
+                "lrunid": "",
+            }
+        ]
+    )
+
+    output_path = tmp_path / "detail_no_internal_keys.csv"
+    _build_detail_output(
+        df_raw=df_raw,
+        pred_df=_empty_prediction_df(),
+        output_path=output_path,
+        ai_schedulable_keys={"LIB_001"},
+    )
+
+    result = pd.read_csv(output_path)
+    assert "origrec" not in result.columns
+    assert "origrec_key" not in result.columns
+
+
+def test_build_detail_output_copies_lane_level_fields_to_balance_library_row(
+    tmp_path: Path,
+) -> None:
+    normal_lib = _build_library(origrec="LIB_001", contract_data=950.0, sample_id="NORMAL_001")
+    normal_lib._origrec_key = "LIB_001"
+    normal_lib._source_origrec_key = "LIB_001"
+
+    lane = _build_lane_assignment("RS_Nova X-25B_001", [normal_lib])
+    lane.metadata["selected_round_label"] = "ROUND_02"
+    balance_lib = arrange_model6._create_balance_library_from_template(
+        lane,
+        {
+            "wksampleid": "phix",
+            "wkindexseq": "GGGGGGGGGG;ACCGAGATCT",
+            "wkproductline": "S",
+            "wktestno": "Novaseq X Plus-PE150",
+            "wkdept": "天津科技服务实验室",
+        },
+        195.0,
+    )
+    pred_df = pd.DataFrame(
+        [
+            {
+                "origrec": normal_lib.origrec,
+                "origrec_key": arrange_model6._get_library_source_origrec_key(normal_lib),
+                "detail_row_key": arrange_model6._get_library_detail_output_key(normal_lib),
+                "runid": "RUN_001",
+                "lane_id": lane.lane_id,
+                "lsjnd": 2.345,
+                "resolved_lsjfs": "25B",
+                "resolved_lcxms": "3.6T-NEW",
+                "resolved_seq_mode": "3.6T-NEW",
+                "resolved_round_label": "ROUND_02",
+                "resolved_index_check_rule": "P7P5",
+                "wkbalancedata": None,
+                "predicted_lorderdata": None,
+                "lai_output": None,
+                arrange_model6.BALANCE_LIBRARY_MARKER_COLUMN: False,
+            },
+            {
+                "origrec": balance_lib.origrec,
+                "origrec_key": arrange_model6._get_library_source_origrec_key(balance_lib),
+                "detail_row_key": arrange_model6._get_library_detail_output_key(balance_lib),
+                "runid": "RUN_001",
+                "lane_id": lane.lane_id,
+                "lsjnd": 2.345,
+                "resolved_lsjfs": "25B",
+                "resolved_lcxms": "3.6T-NEW",
+                "resolved_seq_mode": "3.6T-NEW",
+                "resolved_round_label": "ROUND_02",
+                "resolved_index_check_rule": "P7P5",
+                "wkbalancedata": None,
+                "predicted_lorderdata": 195.0,
+                "lai_output": None,
+                arrange_model6.BALANCE_LIBRARY_MARKER_COLUMN: True,
+            },
+        ]
+    )
+    df_raw = pd.DataFrame(
+        [
+            {
+                "wkaidbid": "AID_001",
+                "wkorigrec": "LIB_001",
+                "wksampleid": "NORMAL_001",
+                "wkdataunit": "G",
+                "wkuser": "USER_A",
+                "wkdatadealbatch": "BATCH_01",
+                "laneround": "",
+                "lastlaneround": "ROUND_01",
+                "task": "TASK_X",
+                "lsjnd": "",
+                "aiarrangenumber": 0,
+                "llaneid": "",
+                "lrunid": "",
+            }
+        ]
+    )
+
+    output_path = tmp_path / "detail_balance_lane_fields.csv"
+    _build_detail_output(
+        df_raw=df_raw,
+        pred_df=pred_df,
+        output_path=output_path,
+        ai_schedulable_keys={"LIB_001"},
+        detail_libraries=[normal_lib, balance_lib],
+    )
+
+    result = pd.read_csv(output_path)
+    balance_row = result.loc[result["wksampleid"] == "phix"].iloc[0]
+    assert balance_row["wkdataunit"] == "G"
+    assert balance_row["wkuser"] == "USER_A"
+    assert balance_row["wkdatadealbatch"] == "BATCH_01"
+    assert balance_row["laneround"] == "ROUND_02"
+    assert balance_row["lastlaneround"] == "ROUND_01"
+    assert balance_row["task"] == "TASK_X"
+    assert balance_row["lsjnd"] == pytest.approx(2.345, rel=0, abs=1e-6)
 
 
 def test_validate_package_lane_rules_rejects_total_index_pairs_below_five() -> None:

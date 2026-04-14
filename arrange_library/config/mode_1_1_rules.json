@@ -1,0 +1,83 @@
+{
+  "_meta": {
+    "description": "1.1模式专属业务规则配置",
+    "created": "2026-04-14 13:15:00",
+    "updated": "2026-04-14 13:15:00",
+    "note": "排机程序中1.1模式的文库级筛选、首轮分流、第二轮组织和pooling特例参数。lane容量由scheduling_rule_matrix.json负责。"
+  },
+  "single_library_contract_limit_gb": 500,
+  "first_round_label": "1.1第一轮",
+  "second_round_label": "1.1第二轮",
+  "priority_36t_lane_limit_rules": [
+    {
+      "max_data_gb": 1050,
+      "max_lanes": 1
+    },
+    {
+      "max_data_gb": 1600,
+      "max_lanes": 2
+    },
+    {
+      "max_data_gb": 2000,
+      "max_lanes": 3
+    },
+    {
+      "max_data_gb": 3000,
+      "max_lanes": 4
+    }
+  ],
+  "priority_data_types_for_36t": [
+    "临检",
+    "YC",
+    "SJ"
+  ],
+  "eligible_data_types_for_1_1": [
+    "临检",
+    "YC",
+    "SJ"
+  ],
+  "eligible_sample_prefixes_for_1_1": [
+    "FDHE"
+  ],
+  "eligible_add_test_keywords_for_1_1": [
+    "加测",
+    "混合"
+  ],
+  "first_round_order_halving": {
+    "enabled": true,
+    "excluded_data_types": [
+      "临检",
+      "YC",
+      "SJ"
+    ],
+    "excluded_sample_prefixes": [
+      "FDHE"
+    ],
+    "excluded_add_test_keywords": [
+      "加测",
+      "混合"
+    ],
+    "divisor": 2
+  },
+  "quality_grouping": {
+    "normal_group": {
+      "complex_results": [
+        "合格"
+      ],
+      "risk_build_flags": [
+        "正常建库"
+      ]
+    },
+    "risk_group": {
+      "complex_results": [
+        "风险",
+        "不合格"
+      ],
+      "risk_build_flags": [
+        "风险建库"
+      ]
+    }
+  },
+  "second_round_output_rate_threshold": 40.0,
+  "second_round_default_pooling_factor": 2.5
+}
