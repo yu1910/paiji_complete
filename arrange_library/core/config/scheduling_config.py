@@ -1,7 +1,7 @@
 """
 排机系统统一配置管理模块
 创建时间：2025-12-03 14:00:00
-更新时间：2026-04-09 10:06:45
+更新时间：2026-04-14 13:20:00
 
 集中管理所有排机相关的配置常量，避免硬编码分散在各个模块中。
 配置来源：docs/排机规则文档.md、config/business_rules.yaml
@@ -407,9 +407,13 @@ class SchedulingConfigManager:
         self.index_validation = IndexValidationConfig()
         self.constraint_solver = ConstraintSolverConfig()
         
+        # 1.1模式专属规则配置
+        self._mode_1_1_rules: Dict[str, Any] = {}
+        
         # 从统一配置文件加载
         self._load_unified_config()
         self._load_rule_matrix_config()
+        self._load_mode_1_1_rules()
         
         # 尝试从旧配置文件加载
         self._load_from_yaml()
@@ -1318,6 +1322,30 @@ class SchedulingConfigManager:
         except (KeyError, TypeError):
             return default
     
+    def _load_mode_1_1_rules(self) -> None:
+        """加载1.1模式专属业务规则配置。"""
+        config_dir = Path(__file__).parent.parent.parent / 'config'
+        rules_path = config_dir / 'mode_1_1_rules.json'
+        if not rules_path.exists():
+            logger.debug(f"1.1模式规则配置不存在，跳过加载: {rules_path}")
+            return
+
+        try:
+            with open(rules_path, 'r', encoding='utf-8') as f:
+                self._mode_1_1_rules = json.load(f)
+            logger.info("1.1模式规则配置加载完成: {}", rules_path)
+        except Exception as exc:
+            logger.warning("加载1.1模式规则配置失败: {}", exc)
+            self._mode_1_1_rules = {}
+
+    def get_mode_1_1_config(self) -> Dict[str, Any]:
+        """获取1.1模式专属规则配置（只读副本）。"""
+        return dict(self._mode_1_1_rules)
+
+    def get_mode_1_1_value(self, key: str, default: Any = None) -> Any:
+        """获取1.1模式配置中的单个参数值。"""
+        return self._mode_1_1_rules.get(key, default)
+
     def _load_from_yaml(self):
         """从YAML配置文件加载配置"""
         config_dir = Path(__file__).parent.parent.parent / 'config'

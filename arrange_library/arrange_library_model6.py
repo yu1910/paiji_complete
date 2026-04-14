@@ -1,7 +1,7 @@
 """
 端到端排机流程测试 - 排机与 Pooling 预测
 创建时间：2026-04-10 16:06:41
-更新时间：2026-04-12 10:00:00
+更新时间：2026-04-14 13:10:00
 
 功能：
 - 支持完整排机流程（GreedyLaneScheduler）
@@ -57,6 +57,8 @@ from loguru import logger
 
 from arrange_library.models.library_info import EnhancedLibraryInfo, MachineType
 from arrange_library.core.config.scheduling_config import get_scheduling_config
+from arrange_library.core.scheduling.mode_allocator import ModeAllocator, ModeDispatchResult
+from arrange_library.core.scheduling.mode_1_1_round2 import Mode11Round2Handler
 from arrange_library.core.constraints.lane_validator import (
     LaneValidationResult,
     ValidationRuleType,
@@ -67,6 +69,7 @@ from arrange_library.core.constraints.index_validator_verified import IndexConfl
 
 # 模块级单例，避免在 _attempt_build_lane_from_pool 等高频函数中反复初始化
 _MODULE_IDX_VALIDATOR = _IndexConflictValidator()
+_AUTO_LANE_SERIAL_COUNTERS: Dict[Tuple[str, str], int] = {}
 from arrange_library.core.data import load_libraries_from_csv
 from arrange_library.core.preprocessing.base_imbalance_handler import BaseImbalanceHandler
 from arrange_library.core.preprocessing.library_splitter import LibrarySplitter
@@ -152,6 +155,66 @@ def _machine_type_to_text(machine_type: Any, default: str = "") -> str:
     value = getattr(machine_type, "value", machine_type)
     text = str(value).strip()
     return text or default
+
+
+def _reset_auto_lane_serial_counters() -> None:
+    """重置自动Lane编号计数器。"""
+    _AUTO_LANE_SERIAL_COUNTERS.clear()
+
+
+def _reserve_auto_lane_serial(
+    lane_id_prefix: str,
+    machine_type: MachineType | str,
+) -> int:
+    """为未显式指定 serial 的Lane分配全局唯一编号。"""
+    key = (str(lane_id_prefix).strip(), _machine_type_to_text(machine_type, default="Nova X-25B"))
+    _AUTO_LANE_SERIAL_COUNTERS[key] = _AUTO_LANE_SERIAL_COUNTERS.get(key, 0) + 1
+    return _AUTO_LANE_SERIAL_COUNTERS[key]
+
+
+def _ensure_unique_lane_ids(lanes: List[Any]) -> int:
+    """确保最终Lane ID全局唯一，避免导出时不同Lane被同一个llaneid合并。"""
+    seen_ids: Set[str] = set()
+    renamed = 0
+
+    for lane in lanes:
+        original_lane_id = str(getattr(lane, "lane_id", "") or "").strip()
+        if not original_lane_id:
+            continue
+        if original_lane_id not in seen_ids:
+            seen_ids.add(original_lane_id)
+            continue
+
+        parts = original_lane_id.rsplit("_", 2)
+        candidate_lane_id = ""
+        if len(parts) == 3 and parts[2].isdigit():
+            prefix, machine_text, _ = parts
+            next_serial = 1
+            while True:
+                candidate_lane_id = f"{prefix}_{machine_text}_{next_serial:03d}"
+                if candidate_lane_id not in seen_ids:
+                    break
+                next_serial += 1
+        else:
+            suffix = 2
+            while True:
+                candidate_lane_id = f"{original_lane_id}__dup{suffix}"
+                if candidate_lane_id not in seen_ids:
+                    break
+                suffix += 1
+
+        logger.warning(
+            "检测到重复Lane ID，已自动重命名: {} -> {}",
+            original_lane_id,
+            candidate_lane_id,
+        )
+        lane.lane_id = candidate_lane_id
+        if getattr(lane, "machine_id", None):
+            lane.machine_id = f"M_{candidate_lane_id}"
+        seen_ids.add(candidate_lane_id)
+        renamed += 1
+
+    return renamed
 
 
 def _normalize_seq_strategy_keyword(value: Any) -> str:
@@ -474,6 +537,13 @@ def _resolve_lane_capacity_selection(
     if getattr(selection, "rule_code", "") in SCHEDULING_CAP_RULE_CODES:
         selection.max_target_gb = min(float(selection.max_target_gb), SCHEDULING_MAX_TARGET_CAP_GB)
         selection.effective_max_gb = min(float(selection.effective_max_gb), SCHEDULING_MAX_EFFECTIVE_CAP_GB)
+    selection = _apply_balance_reservation_to_capacity_selection(
+        selection=selection,
+        libraries=libraries,
+        machine_type=machine_type,
+        lane_id=lane_id,
+        lane_metadata=lane_metadata,
+    )
     return selection
 
 
@@ -544,13 +614,16 @@ def _is_package_lane_assignment(lane: LaneAssignment) -> bool:
     return bool(_get_package_lane_number_from_lane(lane))
 
 
-def _validate_package_lane_rules(lane: LaneAssignment) -> List[str]:
+def _validate_package_lane_rules(
+    lane: LaneAssignment,
+    libraries: Optional[List[EnhancedLibraryInfo]] = None,
+) -> List[str]:
     """仅对带包Lane编号的Lane执行专项规则校验。"""
     package_lane_number = _get_package_lane_number_from_lane(lane)
     if not package_lane_number:
         return []
 
-    libraries = getattr(lane, "libraries", []) or []
+    libraries = libraries if libraries is not None else (getattr(lane, "libraries", []) or [])
     total_contract_data = sum(float(getattr(lib, "contract_data_raw", 0.0) or 0.0) for lib in libraries)
     total_index_pairs = _count_lane_index_pairs(libraries)
     conflicts = _validate_index_conflicts_latest(libraries)
@@ -1019,6 +1092,11 @@ def _attempt_build_lane_from_pool(
 
     # 复用模块级单例，不重复初始化（每次 new 会打印 INFO 日志，高频调用有明显开销）
     _idx_validator = _MODULE_IDX_VALIDATOR
+    allocated_lane_serial = (
+        int(lane_serial)
+        if lane_serial is not None
+        else _reserve_auto_lane_serial(lane_id_prefix, machine_type)
+    )
 
     index_conflict_retry_count = 0
     other_failure_retry_count = 0
@@ -1109,8 +1187,7 @@ def _attempt_build_lane_from_pool(
             ):
                 break
             continue
-        lane_id_value = attempt_idx if lane_serial is None else lane_serial
-        lane_id = f"{lane_id_prefix}_{machine_type.value}_{lane_id_value:03d}"
+        lane_id = f"{lane_id_prefix}_{machine_type.value}_{allocated_lane_serial:03d}"
         lane = LaneAssignment(
             lane_id=lane_id,
             machine_id=f"M_{lane_id}",
@@ -1571,10 +1648,49 @@ def _is_replaceable_normal_library(lib: EnhancedLibraryInfo) -> bool:
     return not _BASE_IMBALANCE_HANDLER.is_imbalance_library(lib)
 
 
-def _resolve_lane_balance_ratio(lane: LaneAssignment) -> float:
-    """按碱基不均衡分组模板解析lane平衡文库占比。"""
+def _get_explicit_balance_data_from_context(
+    libraries: List[EnhancedLibraryInfo],
+    lane_metadata: Optional[Dict[str, Any]] = None,
+) -> float:
+    """从 lane metadata 或 lane 内文库属性提取显式平衡补量。"""
+    if isinstance(lane_metadata, dict):
+        for key in ("wkbalancedata", "wkadd_balance_data", "required_balance_data_gb"):
+            value = _safe_float(lane_metadata.get(key), default=0.0)
+            if value > 0:
+                return value
+
+    lane_level_values: List[float] = []
+    for lib in libraries:
+        if _is_ai_balance_library(lib):
+            continue
+        for attr_name in ("balance_data", "balancedata"):
+            value = _safe_float(getattr(lib, attr_name, None), default=0.0)
+            if value > 0:
+                lane_level_values.append(value)
+    return max(lane_level_values) if lane_level_values else 0.0
+
+
+def _is_package_lane_context(
+    libraries: List[EnhancedLibraryInfo],
+    lane_metadata: Optional[Dict[str, Any]] = None,
+) -> bool:
+    """在无 LaneAssignment 上下文时判断是否属于包 lane。"""
+    if isinstance(lane_metadata, dict) and bool(lane_metadata.get("is_package_lane")):
+        return True
+    for lib in libraries:
+        package_lane_number = _safe_str(
+            getattr(lib, "package_lane_number", None) or getattr(lib, "baleno", None),
+            default="",
+        )
+        if package_lane_number:
+            return True
+    return False
+
+
+def _resolve_lane_balance_ratio_from_libraries(libraries: List[EnhancedLibraryInfo]) -> float:
+    """按 lane 内普通文库解析平衡文库比例。"""
     ratio = 0.0
-    for lib in list(getattr(lane, "libraries", []) or []):
+    for lib in libraries:
         if _is_ai_balance_library(lib):
             continue
         group_id = _BASE_IMBALANCE_HANDLER.identify_imbalance_type(lib)
@@ -1585,6 +1701,113 @@ def _resolve_lane_balance_ratio(lane: LaneAssignment) -> float:
             continue
         ratio = max(ratio, float(getattr(group_info, "phix_ratio", 0.0) or 0.0))
     return ratio
+
+
+def _resolve_balance_reservation_context(
+    libraries: List[EnhancedLibraryInfo],
+    machine_type: MachineType | str,
+    lane_id: str = "",
+    lane_metadata: Optional[Dict[str, Any]] = None,
+    selection: Any = None,
+) -> Dict[str, Any]:
+    """解析当前 lane 是否需要为平衡文库预留容量，以及预留方式。"""
+    metadata = lane_metadata or {}
+    if metadata.get("materialized_balance_library"):
+        return {"applied": False}
+    if any(_is_ai_balance_library(lib) for lib in libraries):
+        return {"applied": False}
+
+    explicit_balance_gb = _get_explicit_balance_data_from_context(libraries, metadata)
+    if _is_package_lane_context(libraries, lane_metadata=metadata):
+        if explicit_balance_gb <= 0:
+            return {"applied": False}
+        return {
+            "applied": True,
+            "mode": "absolute",
+            "reserve_gb": round(explicit_balance_gb, 3),
+            "reserve_ratio": 0.0,
+        }
+
+    is_dedicated = lane_id.startswith("DL_") or bool(metadata.get("is_dedicated_imbalance_lane"))
+    if not is_dedicated:
+        return {"applied": False}
+
+    reserve_ratio = _resolve_lane_balance_ratio_from_libraries(libraries)
+    if reserve_ratio <= 0 and explicit_balance_gb > 0:
+        reference_gb = 0.0
+        if selection is not None:
+            reference_gb = float(
+                getattr(selection, "max_target_gb", 0.0)
+                or getattr(selection, "soft_target_gb", 0.0)
+                or getattr(selection, "effective_max_gb", 0.0)
+                or 0.0
+            )
+        if reference_gb <= 0:
+            machine_enum = _resolve_machine_type_enum_simple(_machine_type_to_text(machine_type))
+            reference_gb = _lane_capacity_for_machine(machine_enum)
+        if reference_gb > 0:
+            reserve_ratio = explicit_balance_gb / reference_gb
+
+    if reserve_ratio <= 0:
+        return {"applied": False}
+
+    return {
+        "applied": True,
+        "mode": "ratio",
+        "reserve_gb": round(explicit_balance_gb, 3) if explicit_balance_gb > 0 else 0.0,
+        "reserve_ratio": min(max(float(reserve_ratio), 0.0), 0.999999),
+    }
+
+
+def _apply_balance_reservation_to_capacity_selection(
+    selection: Any,
+    libraries: List[EnhancedLibraryInfo],
+    machine_type: MachineType | str,
+    lane_id: str = "",
+    lane_metadata: Optional[Dict[str, Any]] = None,
+) -> Any:
+    """按平衡文库补量/比例动态扣减 lane 容量上下限。"""
+    reserve = _resolve_balance_reservation_context(
+        libraries=libraries,
+        machine_type=machine_type,
+        lane_id=lane_id,
+        lane_metadata=lane_metadata,
+        selection=selection,
+    )
+    if not reserve.get("applied"):
+        return selection
+
+    profile = dict(getattr(selection, "profile", {}) or {})
+    mode = reserve.get("mode")
+
+    if mode == "absolute":
+        reserve_gb = float(reserve.get("reserve_gb", 0.0) or 0.0)
+        selection.soft_target_gb = max(PACKAGE_LANE_TARGET_GB - reserve_gb, 0.0)
+        selection.min_target_gb = max(PACKAGE_LANE_TARGET_GB - reserve_gb, 0.0)
+        selection.max_target_gb = max(PACKAGE_LANE_TARGET_GB - reserve_gb, 0.0)
+        selection.effective_min_gb = max(PACKAGE_LANE_MIN - reserve_gb, 0.0)
+        selection.effective_max_gb = max(PACKAGE_LANE_MAX - reserve_gb, 0.0)
+    elif mode == "ratio":
+        factor = max(0.0, 1.0 - float(reserve.get("reserve_ratio", 0.0) or 0.0))
+        selection.soft_target_gb = max(float(selection.soft_target_gb) * factor, 0.0)
+        selection.min_target_gb = max(float(selection.min_target_gb) * factor, 0.0)
+        selection.max_target_gb = max(float(selection.max_target_gb) * factor, 0.0)
+        selection.effective_min_gb = max(float(selection.effective_min_gb) * factor, 0.0)
+        selection.effective_max_gb = max(float(selection.effective_max_gb) * factor, 0.0)
+    else:
+        return selection
+
+    profile["balance_reserve_applied"] = True
+    profile["balance_reserve_mode"] = mode
+    profile["balance_reserve_gb"] = float(reserve.get("reserve_gb", 0.0) or 0.0)
+    profile["balance_reserve_ratio"] = float(reserve.get("reserve_ratio", 0.0) or 0.0)
+    selection.profile = profile
+    return selection
+
+
+def _resolve_lane_balance_ratio(lane: LaneAssignment) -> float:
+    """按碱基不均衡分组模板解析lane平衡文库占比。"""
+    return _resolve_lane_balance_ratio_from_libraries(list(getattr(lane, "libraries", []) or []))
 
 
 def _resolve_lane_balance_data_gb(lane: LaneAssignment) -> float:
@@ -1683,7 +1906,7 @@ def _create_balance_library_from_template(
     balance_amount_gb: float,
 ) -> EnhancedLibraryInfo:
     """按模板实例化一条真实平衡文库。"""
-    aidbid = uuid4().hex
+    aidbid = str(uuid4())
     internal_origrec = f"AI_BALANCE_{lane.lane_id}_{aidbid[:12]}"
     index_seq = _safe_str(template.get("wkindexseq"), default="")
     lib = EnhancedLibraryInfo(
@@ -1774,7 +1997,11 @@ def _pick_replacement_from_pool(
         if data <= 0 or data > removed_total + 1e-6:
             continue
         trial_libs = working_libs + [lib, candidate_balance_lib]
-        result = _validate_lane_state(validator, lane, trial_libs)
+        result = _validate_lane_state(
+            validator, lane, trial_libs,
+            balance_already_in_libs=True,
+            skip_peak_size=_is_explicit_dedicated_imbalance_lane(lane),
+        )
         if result.is_valid:
             return trial_libs, [lib]
         # 容忍轻微不足，但保留后续lane间交换兜底
@@ -1807,7 +2034,11 @@ def _pick_replacement_from_other_lanes(
             if data <= 0 or data > removed_total + 1e-6:
                 continue
             current_trial_libs = working_libs + [other_lib, candidate_balance_lib]
-            if not _validate_lane_state(validator, current_lane, current_trial_libs).is_valid:
+            if not _validate_lane_state(
+                validator, current_lane, current_trial_libs,
+                balance_already_in_libs=True,
+                skip_peak_size=_is_explicit_dedicated_imbalance_lane(current_lane),
+            ).is_valid:
                 continue
             other_trial_libs = [lib for lib in other_libs if lib is not other_lib] + removed_libs
             if _validate_lane_state(validator, other_lane, other_trial_libs).is_valid:
@@ -1821,10 +2052,24 @@ def _trim_lane_for_balance_capacity(
     candidate_balance_lib: EnhancedLibraryInfo,
     validator: Any,
 ) -> Optional[Tuple[List[EnhancedLibraryInfo], List[EnhancedLibraryInfo]]]:
-    """为平衡文库腾挪容量，必要时剔除部分普通文库。"""
+    """为平衡文库腾挪容量，必要时剔除部分普通文库。
+
+    trial_libs 里已包含 candidate_balance_lib，校验时：
+    - balance_already_in_libs=True：防止容量校验器二次叠加平衡文库数据量
+    - skip_peak_size=True（专用不均衡 lane）：peak_size 分布是排机时既成事实，
+      不应成为平衡文库注入的阻碍
+    """
+    is_dedicated = _is_explicit_dedicated_imbalance_lane(lane)
+
+    def _check(libs: List[EnhancedLibraryInfo]) -> Any:
+        return _validate_lane_state(
+            validator, lane, libs,
+            balance_already_in_libs=True,
+            skip_peak_size=is_dedicated,
+        )
+
     trial_libs = list(working_libs) + [candidate_balance_lib]
-    result = _validate_lane_state(validator, lane, trial_libs)
-    if result.is_valid:
+    if _check(trial_libs).is_valid:
         return trial_libs, []
 
     non_balance_libs = [
@@ -1841,8 +2086,7 @@ def _trim_lane_for_balance_capacity(
         trimmed_libs = [item for item in trimmed_libs if item is not lib]
         removed_libs.append(lib)
         trial_libs = trimmed_libs + [candidate_balance_lib]
-        result = _validate_lane_state(validator, lane, trial_libs)
-        if result.is_valid:
+        if _check(trial_libs).is_valid:
             return trial_libs, removed_libs
 
     return None
@@ -3619,10 +3863,20 @@ def _validate_lane_state(
     validator: Any,
     lane: LaneAssignment,
     libraries: List[EnhancedLibraryInfo],
+    balance_already_in_libs: bool = False,
+    skip_peak_size: bool = False,
 ) -> Any:
-    """校验给定文库列表在当前Lane上下文中的合法性。"""
-    if _is_package_lane_assignment(lane):
-        package_errors = _validate_package_lane_rules(lane)
+    """校验给定文库列表在当前Lane上下文中的合法性。
+
+    balance_already_in_libs=True：libraries 已含平衡文库本体，去掉 metadata 里的
+    wkbalancedata 避免容量校验器二次叠加。
+
+    skip_peak_size=True：跳过 peak_size 错误/警告的判断。专用不均衡 lane 注入平衡文库
+    时使用——该 lane 的 peak_size 分布是排机时就已形成的既成事实，平衡文库不应因此被阻止。
+    """
+    has_balance_library = any(_is_ai_balance_library(lib) for lib in libraries)
+    if _is_package_lane_assignment(lane) and not (balance_already_in_libs or has_balance_library):
+        package_errors = _validate_package_lane_rules(lane, libraries=libraries)
         return LaneValidationResult(
             lane_id=lane.lane_id,
             is_valid=not package_errors,
@@ -3637,14 +3891,43 @@ def _validate_lane_state(
         )
 
     metadata = _build_lane_metadata_for_validator(lane.lane_id, lane.metadata)
+    if balance_already_in_libs:
+        metadata.pop("wkbalancedata", None)
+        metadata.pop("wkadd_balance_data", None)
+        metadata.pop("required_balance_data_gb", None)
     machine_type = lane.machine_type.value if lane.machine_type else "Nova X-25B"
-    return _validate_lane_with_latest_index(
+    result = _validate_lane_with_latest_index(
         validator=validator,
         libraries=libraries,
         lane_id=lane.lane_id,
         machine_type=machine_type,
         metadata=metadata,
     )
+    if skip_peak_size and not result.is_valid:
+        # 过滤掉 peak_size 相关的 errors/warnings，重新判断是否通过
+        filtered_errors = [e for e in result.errors if e.rule_type != ValidationRuleType.PEAK_SIZE]
+        filtered_warnings = [w for w in result.warnings if w.rule_type != ValidationRuleType.PEAK_SIZE]
+        is_valid = len(filtered_errors) == 0 and (not validator.strict_mode or len(filtered_warnings) == 0)
+        result = LaneValidationResult(
+            lane_id=result.lane_id,
+            is_valid=is_valid,
+            errors=filtered_errors,
+            warnings=filtered_warnings,
+        )
+
+    if _is_package_lane_assignment(lane) and (balance_already_in_libs or has_balance_library):
+        package_errors = _validate_package_lane_rules(lane, libraries=libraries)
+        if package_errors:
+            result.errors.extend(
+                ValidationError(
+                    rule_type=ValidationRuleType.CAPACITY,
+                    severity=ValidationSeverity.ERROR,
+                    message=message,
+                )
+                for message in package_errors
+            )
+            result.is_valid = False
+    return result
 
 
 def _filter_valid_lanes(
@@ -4241,15 +4524,19 @@ def _collect_prediction_rows(
         )
         runid = runid_by_lane.get(lane.lane_id)
         lane_balance_data = None
-        if isinstance(lane.metadata, dict):
-            lane_balance_data = lane.metadata.get("wkbalancedata")
+        lane_meta = lane.metadata if isinstance(lane.metadata, dict) else {}
+        if lane_meta:
+            lane_balance_data = lane_meta.get("wkbalancedata")
             if lane_balance_data is None:
-                lane_balance_data = lane.metadata.get("wkadd_balance_data")
+                lane_balance_data = lane_meta.get("wkadd_balance_data")
             if lane_balance_data is None:
-                lane_balance_data = lane.metadata.get("required_balance_data_gb")
+                lane_balance_data = lane_meta.get("required_balance_data_gb")
         lane_balance_data_value = None
         if lane_balance_data is not None:
             lane_balance_data_value = round(float(lane_balance_data), 3)
+        # 从 lane metadata 中读取模式与轮次标记（编排器注入）
+        lane_selected_seq_mode = str(lane_meta.get("selected_seq_mode", "") or "").strip()
+        lane_selected_round_label = str(lane_meta.get("selected_round_label", "") or "").strip()
 
         # 排机阶段不做下单/产出预测，统一在 prediction_delivery 阶段落地。
         for lib in libs:
@@ -4281,7 +4568,11 @@ def _collect_prediction_rows(
                     "resolved_lcxms": lane_sequencing_mode or None,
                     "resolved_index_check_rule": lane_index_rule or None,
                     "wkcontractdata": contract,
-                    "wkbalancedata": lane_balance_data_value,
+                    "wkbalancedata": (
+                        lane_balance_data_value
+                        if _is_package_lane_assignment(lane) and is_balance_lib
+                        else None
+                    ),
                     "predicted_lorderdata": contract if is_balance_lib else None,
                     "lai_output": None,
                     "ai_predicted_lorderdata": None,
@@ -4296,6 +4587,8 @@ def _collect_prediction_rows(
                     "wklastoutput": last_output,
                     "wklastoutrate": last_outrate,
                     "loutput": loutput,
+                    "resolved_seq_mode": lane_selected_seq_mode or lane_sequencing_mode or None,
+                    "resolved_round_label": lane_selected_round_label or None,
                     BALANCE_LIBRARY_MARKER_COLUMN: is_balance_lib,
                 }
             )
@@ -4474,6 +4767,56 @@ def _build_detail_output(
         if column_name in df.columns:
             df[column_name] = df[column_name].astype(object)
 
+    def _fill_balance_rows_from_lane_context(df: pd.DataFrame) -> None:
+        """让平衡文库行继承同Lane其他文库的Lane级输出字段。"""
+        if (
+            df.empty
+            or BALANCE_LIBRARY_MARKER_COLUMN not in df.columns
+            or "llaneid" not in df.columns
+        ):
+            return
+
+        balance_mask = df[BALANCE_LIBRARY_MARKER_COLUMN].fillna(False).astype(bool)
+        lane_mask = df["llaneid"].map(_is_non_empty_value)
+        reference_mask = (~balance_mask) & lane_mask
+        if not reference_mask.any():
+            return
+
+        text_columns = [
+            "wkdataunit",
+            "wkuser",
+            "wkdatadealbatch",
+            "laneround",
+            "lastlaneround",
+            "task",
+        ]
+        for column_name in text_columns:
+            if column_name not in df.columns:
+                continue
+            valid_reference_mask = reference_mask & df[column_name].map(_is_non_empty_value)
+            if not valid_reference_mask.any():
+                continue
+            lane_values = (
+                df.loc[valid_reference_mask, ["llaneid", column_name]]
+                .drop_duplicates(subset=["llaneid"], keep="first")
+                .set_index("llaneid")[column_name]
+            )
+            target_mask = balance_mask & lane_mask & (~df[column_name].map(_is_non_empty_value))
+            if target_mask.any():
+                df.loc[target_mask, column_name] = df.loc[target_mask, "llaneid"].map(lane_values)
+
+        if "lsjnd" in df.columns:
+            valid_reference_mask = reference_mask & df["lsjnd"].notna()
+            if valid_reference_mask.any():
+                lane_values = (
+                    df.loc[valid_reference_mask, ["llaneid", "lsjnd"]]
+                    .drop_duplicates(subset=["llaneid"], keep="first")
+                    .set_index("llaneid")["lsjnd"]
+                )
+                target_mask = balance_mask & lane_mask & df["lsjnd"].isna()
+                if target_mask.any():
+                    df.loc[target_mask, "lsjnd"] = df.loc[target_mask, "llaneid"].map(lane_values)
+
     if detail_libraries is not None:
         merged = _expand_detail_output_rows(
             df_raw=df_raw,
@@ -4510,6 +4853,8 @@ def _build_detail_output(
             "lsjnd",
             "resolved_lsjfs",
             "resolved_lcxms",
+            "resolved_seq_mode",
+            "resolved_round_label",
             "resolved_index_check_rule",
             "wkbalancedata",
             BALANCE_LIBRARY_MARKER_COLUMN,
@@ -4527,6 +4872,8 @@ def _build_detail_output(
                 "lsjnd",
                 "resolved_lsjfs",
                 "resolved_lcxms",
+                "resolved_seq_mode",
+                "resolved_round_label",
                 "resolved_index_check_rule",
                 "wkbalancedata",
                 BALANCE_LIBRARY_MARKER_COLUMN,
@@ -4572,11 +4919,41 @@ def _build_detail_output(
         merged.loc[lane_assigned_mask & resolved_lcxms_mask, "lcxms"] = merged.loc[
             lane_assigned_mask & resolved_lcxms_mask, "resolved_lcxms"
         ]
+    # lcxms 二级回填：resolved_lcxms 缺失时，尝试从 resolved_seq_mode（lane metadata 注入）读取
     missing_lcxms_mask = (
         merged["lcxms"].isna()
         | merged["lcxms"].astype(str).str.strip().isin({"", "nan", "None", "NONE", "null", "NULL"})
     )
-    merged.loc[lane_assigned_mask & missing_lcxms_mask, "lcxms"] = "3.6T-NEW"
+    resolved_seq_mode_mask = (
+        "resolved_seq_mode" in merged.columns
+        and merged["resolved_seq_mode"].notna()
+        & ~merged["resolved_seq_mode"].astype(str).str.strip().isin({"", "nan", "None", "NONE", "null", "NULL"})
+    )
+    if isinstance(resolved_seq_mode_mask, pd.Series):
+        fill_from_mode = lane_assigned_mask & missing_lcxms_mask & resolved_seq_mode_mask
+        merged.loc[fill_from_mode, "lcxms"] = merged.loc[fill_from_mode, "resolved_seq_mode"]
+    # 最终兜底：仅当 resolved_lcxms 和 resolved_seq_mode 都无法确定时，才回退到 3.6T-NEW
+    still_missing_mask = (
+        merged["lcxms"].isna()
+        | merged["lcxms"].astype(str).str.strip().isin({"", "nan", "None", "NONE", "null", "NULL"})
+    )
+    merged.loc[lane_assigned_mask & still_missing_mask, "lcxms"] = "3.6T-NEW"
+
+    # 1.1排机轮数：从 resolved_round_label（编排器注入）回填到 laneround 输出列
+    if "laneround" not in merged.columns:
+        merged["laneround"] = pd.NA
+    _ensure_object_column(merged, "laneround")
+    merged["laneround"] = ""
+    if "resolved_round_label" in merged.columns:
+        resolved_round_mask = (
+            merged["resolved_round_label"].notna()
+            & ~merged["resolved_round_label"].astype(str).str.strip().isin(
+                {"", "nan", "None", "NONE", "null", "NULL"}
+            )
+        )
+        merged.loc[lane_assigned_mask & resolved_round_mask, "laneround"] = merged.loc[
+            lane_assigned_mask & resolved_round_mask, "resolved_round_label"
+        ]
 
     # 成Lane(有laneid)的文库，标记lanecreatetype为AI
     if "lanecreatetype" not in merged.columns:
@@ -4692,6 +5069,8 @@ def _build_detail_output(
         merged["wkuser"] = pd.NA
     _ensure_object_column(merged, "wkuser")
 
+    _fill_balance_rows_from_lane_context(merged)
+
     # 输出字段改名：预测结果按业务字段名输出
     # 注意：这里使用预测值覆盖输出中的 lorderdata / lai_output
     merged["lorderdata"] = pd.to_numeric(merged.get("predicted_lorderdata"), errors="coerce")
@@ -4701,9 +5080,14 @@ def _build_detail_output(
     merged = merged.drop(columns=["runid", "laneid"], errors="ignore")
     merged = merged.drop(columns=["predicted_lorderdata"], errors="ignore")
     merged = merged.drop(
-        columns=["resolved_lsjfs", "resolved_lcxms", "resolved_index_check_rule", "detail_row_key"],
+        columns=["resolved_lsjfs", "resolved_lcxms", "resolved_index_check_rule",
+                 "resolved_seq_mode", "resolved_round_label", "detail_row_key"],
         errors="ignore",
     )
+    if "origrec_key" not in df_raw.columns:
+        merged = merged.drop(columns=["origrec_key"], errors="ignore")
+    if "origrec" not in df_raw.columns:
+        merged = merged.drop(columns=["origrec"], errors="ignore")
 
     if output_path.exists():
         logger.info(f"明细文件已存在，将覆盖: {output_path}")
@@ -4802,6 +5186,11 @@ def load_standardized_csv(data_file: str, limit: int | None = None) -> List[Enha
             lib._lane_sj_mode_raw = _safe_str(row_dict.get("lsjfs"), default="")
             lib._current_seq_mode_raw = _safe_str(row_dict.get("lcxms"), default="")
             lib._last_cxms_raw = _safe_str(row_dict.get("llastcxms"), default="")
+            # 1.1模式轮次字段：上轮测序轮数（lims推送），供第二轮候选识别使用
+            lib._last_lane_round_raw = _safe_str(
+                row_dict.get("llastlaneround") or row_dict.get("lastlaneround"),
+                default="",
+            )
             libraries.append(lib)
         except Exception as e:
             logger.warning(f"行 {idx} 创建文库对象失败: {e}")
@@ -5185,6 +5574,10 @@ def test_with_model(
             )
         )
 
+    renamed_lane_ids = _ensure_unique_lane_ids(solution.lane_assignments)
+    if renamed_lane_ids > 0:
+        logger.warning("最终收口发现重复Lane ID并已重命名: {}条", renamed_lane_ids)
+
     logger.info("脚本内置 Pooling 预测已停用，后续统一调用 prediction_delivery")
     stats = analyze_solution(solution)
     return stats, solution
@@ -5248,6 +5641,7 @@ def arrange_library(
     logger.info(f"调用时间: {datetime.now().strftime('%Y-%m-%d %H:%M:%S')}")
     logger.info(f"随机种子: 42 (固定，确保可复现)")
     logger.info(f"运行模式: {mode}")
+    _reset_auto_lane_serial_counters()
 
     data_path = Path(data_file)
     if not data_path.exists():
@@ -5386,6 +5780,72 @@ def arrange_library(
         logger.info(f"\n包Lane处理完成，形成{len(package_lanes)}条包Lane")
         logger.info(f"剩余{len(normal_libs)}个文库进入普通排机流程")
     
+    # ===== 步骤1.5: 1.1模式分流编排 =====
+    mode_1_1_config = get_scheduling_config().get_mode_1_1_config()
+    mode_1_1_lanes: List[LaneAssignment] = []
+    if mode_1_1_config:
+        logger.info("\n" + "=" * 80)
+        logger.info("步骤1.5: 1.1模式分流编排")
+        logger.info("=" * 80)
+
+        allocator = ModeAllocator(mode_1_1_config)
+        dispatch_result = allocator.allocate(normal_libs)
+
+        # 3.6T-NEW 优先池 + 1.1 禁排回退池 合并为普通排机池
+        normal_libs_for_36t = dispatch_result.pool_36t_priority + dispatch_result.pool_1_1_forbidden
+        # 1.1 可排文库按质量分组依次排机
+        pool_1_1_all = (
+            dispatch_result.pool_1_1_normal
+            + dispatch_result.pool_1_1_quality_risk
+            + dispatch_result.pool_1_1_quality_other
+        )
+
+        if pool_1_1_all:
+            logger.info("1.1首轮池共{}个文库，进入1.1模式排机", len(pool_1_1_all))
+            # 为1.1池文库注入模式标记，供后续规则矩阵命中1.1 profile
+            for lib in pool_1_1_all:
+                lib._current_seq_mode_raw = "1.1"
+            try:
+                _1_1_stats, _1_1_solution = test_with_model(
+                    deepcopy(pool_1_1_all), existing_lanes=[]
+                )
+                # 给1.1产出的lane注入模式和轮次元数据
+                first_round_label = mode_1_1_config.get("first_round_label", "1.1第一轮")
+                for lane in _1_1_solution.lane_assignments:
+                    if not isinstance(lane.metadata, dict):
+                        lane.metadata = {}
+                    lane.metadata["dispatch_stage"] = "first_round_1_1"
+                    lane.metadata["selected_seq_mode"] = "1.1"
+                    lane.metadata["selected_round_label"] = first_round_label
+                mode_1_1_lanes = list(_1_1_solution.lane_assignments)
+                # 1.1排不走的文库回流到3.6T-NEW，优先级不变
+                fallback_libs = list(_1_1_solution.unassigned_libraries or [])
+                if fallback_libs:
+                    logger.info("1.1首轮未排走{}个文库，回流到3.6T-NEW候选池", len(fallback_libs))
+                    # 清除1.1模式标记，恢复原始模式供3.6T-NEW规则矩阵使用
+                    for lib in fallback_libs:
+                        lib._current_seq_mode_raw = ""
+                    normal_libs_for_36t.extend(fallback_libs)
+                logger.info("1.1首轮排机完成: 生成{}条Lane", len(mode_1_1_lanes))
+            except Exception as exc:
+                logger.error("1.1首轮排机异常，全部回退到3.6T-NEW: {}", exc)
+                for lib in pool_1_1_all:
+                    lib._current_seq_mode_raw = ""
+                normal_libs_for_36t.extend(pool_1_1_all)
+
+        # 第二轮候选识别（首版仅做识别和日志，不执行真实排机）
+        round2_handler = Mode11Round2Handler(mode_1_1_config)
+        round2_result = round2_handler.identify_round2_candidates(normal_libs_for_36t)
+        if round2_result.total_candidates > 0:
+            round2_handler.schedule_round2(round2_result.candidate_groups)
+            # 第二轮候选暂不从普通池移除，首版仍走3.6T-NEW排机
+
+        normal_libs = normal_libs_for_36t
+        logger.info("模式分流编排完成: 3.6T-NEW候选池={}个文库, 1.1 Lane={}条",
+                     len(normal_libs), len(mode_1_1_lanes))
+    else:
+        logger.info("未加载1.1模式配置，跳过模式分流，全部走3.6T-NEW排机")
+
     # ===== 步骤2: 处理普通文库（包括包Lane处理失败的文库） =====
     logger.info("\n" + "=" * 80)
     logger.info("步骤2: 处理普通文库（使用GreedyLaneScheduler）")
@@ -5404,8 +5864,10 @@ def arrange_library(
             logger.info(f"排机超时保护已启动，最大允许时间: {SCHEDULING_TIMEOUT_SECONDS // 60} 分钟")
 
         try:
+            # 将包Lane和1.1模式Lane一起作为existing_lanes传入，在最终合并阶段统一纳入
+            all_existing_lanes = list(package_lanes) + list(mode_1_1_lanes)
             stats, solution = test_with_model(
-                deepcopy(normal_libs), existing_lanes=package_lanes
+                deepcopy(normal_libs), existing_lanes=all_existing_lanes
             )
         except SchedulingTimeoutError as exc:
             # 超时后取消闹钟、恢复旧信号处理器，再将异常继续向上抛出
