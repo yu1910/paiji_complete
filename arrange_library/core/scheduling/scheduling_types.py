@@ -68,10 +68,15 @@ class LaneAssignment:
     
     def remove_library(self, library: EnhancedLibraryInfo):
         """从Lane中移除文库"""
-        if library in self.libraries:
-            self.libraries.remove(library)
+        target_id = id(library)
+        for index, current in enumerate(self.libraries):
+            if id(current) != target_id:
+                continue
+            self.libraries.pop(index)
             self.total_data_gb -= library.get_data_amount_gb()
             self.calculate_metrics()
+            return True
+        return False
     
     def calculate_metrics(self):
         """计算Lane指标"""

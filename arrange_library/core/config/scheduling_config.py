@@ -1100,6 +1100,8 @@ class SchedulingConfigManager:
     ) -> bool:
         """判断当前Lane是否为包Lane上下文。"""
         metadata = metadata or {}
+        if bool(metadata.get('is_dedicated_imbalance_lane')):
+            return False
         if bool(metadata.get('is_package_lane')):
             return True
 

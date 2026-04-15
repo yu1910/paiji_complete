@@ -95,13 +95,13 @@ class BaseImbalanceHandler:
         )
         self.group57_extra_types = set(self.methylation_types)
         self.group55_candidate_types = {
-            rule_type
-            for rule_type, gid in self.type_to_group_map.items()
-            if gid in {
-                "G16", "G17", "G18", "G22", "G23", "G24", "G25", "G26",
-                "G28", "G29", "G31", "G32", "G33", "G36", "G40", "G41",
-                "G42", "G43", "G44", "G45", "G46", "G47", "G48", "G50",
-            }
+            self._normalize_type_name(lib_type)
+            for gid, group in self.groups.items()
+            if gid.startswith("G")
+            and gid[1:].isdigit()
+            and 1 <= int(gid[1:]) <= 52
+            and float(getattr(group, "phix_ratio", 0.0) or 0.0) >= 0.20
+            for lib_type in group.library_types
         }
 
     @staticmethod
@@ -414,6 +414,10 @@ class BaseImbalanceHandler:
             return 1.0
         return float(group_info.max_data_ratio or 1.0)
 
+    def get_group_balance_ratio(self, group_id: str) -> float:
+        """获取分组平衡文库占比，未知分组默认0。"""
+        return max(0.0, 1.0 - self.get_group_data_ratio(group_id))
+
     def check_group_data_ratio(self, libs: List[EnhancedLibraryInfo]) -> Tuple[bool, str]:
         """严格检查各分组数据量占比约束（以240G为基准）。"""
         if not libs:
@@ -489,7 +493,7 @@ class BaseImbalanceHandler:
     def check_mix_compatibility(
         self,
         libs: List[EnhancedLibraryInfo],
-        enforce_total_limit: bool = True,
+        enforce_total_limit: bool = False,
     ) -> Tuple[bool, str]:
         """
         检查一组文库是否符合碱基不均衡混排规则
@@ -580,13 +584,6 @@ class BaseImbalanceHandler:
                 return False, "混排未满足分组56/57约束（30%+15%）"
             if imbalance_total_data / total_lane_data > 0.95:
                 return False, f"混排场景碱基不均衡占比{imbalance_total_data / total_lane_data:.1%}超过95%"
-
-        if enforce_total_limit:
-            # 统一保留25B/NovaSeq X Plus碱基不均衡总量240G约束
-            total_imbalance_data = sum(float(l.contract_data_raw or 0) for l in imbalance_libs)
-            limit = DEFAULT_MAX_DATA_GB
-            if total_imbalance_data > limit:
-                 return False, f"碱基不均衡总量({total_imbalance_data:.1f}G)超过限制({limit:.0f}G)"
 
         return True, "Compatible"
 

@@ -120,6 +120,9 @@ DEFAULT_INDEX_CONFLICT_ATTEMPTS = 10
 DEFAULT_OTHER_FAILURE_ATTEMPTS = 20
 DEFAULT_EX_RESCUE_MAX_NEW_LANES = 2
 DEFAULT_RB_RESCUE_MAX_NEW_LANES = 1
+ZERO_LANE_RESCUE_SKIP_LIB_THRESHOLD = 200
+LARGE_POOL_RESCUE_SKIP_LIB_THRESHOLD = 1500
+LARGE_POOL_RESCUE_SKIP_DATA_GB = 15000.0
 SCATTERED_MIX_IMBALANCE_TARGET_RATIO = 0.35
 SCATTERED_MIX_IMBALANCE_TARGET_EPSILON = 1e-6
 SPECIAL_LIBRARY_LIMIT_EPSILON = 1e-6
@@ -568,6 +571,8 @@ def _validate_lane_with_latest_index(
         imbalance_mix_valid, imbalance_mix_reason = _validate_lane_57_mix_rules(
             libraries,
             enforce_total_limit=False,
+            lane_id=lane_id,
+            lane_metadata=metadata,
         )
     except Exception as exc:
         logger.exception(f"Lane {lane_id} 57组合规则校验失败，沿用原校验结果: {exc}")
@@ -698,15 +703,100 @@ def _total_lane_data(libraries: List[EnhancedLibraryInfo]) -> float:
     return sum(lib.get_data_amount_gb() for lib in libraries)
 
 
+def _should_skip_expensive_rescue_stage(
+    solution: Any,
+    *,
+    stage_name: str,
+    zero_lane_lib_threshold: int = ZERO_LANE_RESCUE_SKIP_LIB_THRESHOLD,
+    pool_lib_threshold: int = LARGE_POOL_RESCUE_SKIP_LIB_THRESHOLD,
+    pool_data_threshold_gb: float = LARGE_POOL_RESCUE_SKIP_DATA_GB,
+) -> bool:
+    """在低收益的大池场景下跳过高成本救援流程。"""
+    unassigned = list(getattr(solution, "unassigned_libraries", []) or [])
+    if not unassigned:
+        return False
+
+    unassigned_count = len(unassigned)
+    unassigned_data = _total_lane_data(unassigned)
+    lane_count = len(getattr(solution, "lane_assignments", []) or [])
+
+    if lane_count == 0 and unassigned_count >= zero_lane_lib_threshold:
+        logger.info(
+            "{}跳过: 当前0条Lane通过验证，未分配池={}个/{:.1f}G，继续做高成本救援收益过低".format(
+                stage_name,
+                unassigned_count,
+                unassigned_data,
+            )
+        )
+        return True
+
+    if (
+        unassigned_count >= pool_lib_threshold
+        or unassigned_data >= pool_data_threshold_gb
+    ):
+        logger.info(
+            "{}跳过: 未分配池过大={}个/{:.1f}G，优先保证主排机时效".format(
+                stage_name,
+                unassigned_count,
+                unassigned_data,
+            )
+        )
+        return True
+
+    return False
+
+
 def _validate_lane_57_mix_rules(
     libraries: List[EnhancedLibraryInfo],
     enforce_total_limit: bool = False,
+    lane_id: str = "",
+    lane_metadata: Optional[Dict[str, Any]] = None,
 ) -> Tuple[bool, str]:
-    """按 BaseImbalanceHandler 校验 57 组合混排规则。"""
-    return _BASE_IMBALANCE_HANDLER.check_mix_compatibility(
-        libraries,
-        enforce_total_limit=enforce_total_limit,
+    """按 lane 上下文校验碱基不均衡组合规则。
+
+    规则边界：
+    - `1-55` 仅用于碱基不均衡专 lane
+    - `56-57` 仅用于碱基均衡 + 不均衡混排 lane
+    - 包 lane 走自身规则，不在这里叠加通用组合校验
+    """
+    if not libraries:
+        return True, ""
+
+    if _is_package_lane_context(libraries, lane_metadata=lane_metadata):
+        return True, "package lane skips generic imbalance mix rules"
+
+    imbalance_flags = [
+        bool(_BASE_IMBALANCE_HANDLER.is_imbalance_library(lib))
+        for lib in libraries
+    ]
+    has_imbalance = any(imbalance_flags)
+    if not has_imbalance:
+        return True, "no imbalance libraries"
+
+    has_balanced = any(not flag for flag in imbalance_flags)
+    is_dedicated = lane_id.startswith("DL_") or bool(
+        (lane_metadata or {}).get("is_dedicated_imbalance_lane")
     )
+
+    if is_dedicated:
+        # 专用碱基不均衡 lane 在形成后允许按配置表补平衡文库，但这不应把它重新解释成
+        # 56/57“碱基均衡+不均衡混排”场景。这里仅对 lane 内原始碱基不均衡文库继续执行
+        # 1-55 的专 lane 组合校验，忽略后补平衡文库对分组判断的干扰。
+        dedicated_imbalance_libs = [
+            lib for lib, is_imbalance in zip(libraries, imbalance_flags) if is_imbalance
+        ]
+        return _BASE_IMBALANCE_HANDLER.check_mix_compatibility(
+            dedicated_imbalance_libs,
+            enforce_total_limit=enforce_total_limit,
+        )
+
+    if has_balanced:
+        return _BASE_IMBALANCE_HANDLER.check_mix_compatibility(
+            libraries,
+            enforce_total_limit=enforce_total_limit,
+        )
+
+    return True, "ordinary pure-imbalance lane does not apply 1-55 compatibility"
 
 
 def _count_library_index_pairs(lib: EnhancedLibraryInfo) -> int:
@@ -755,6 +845,15 @@ def _validate_package_lane_rules(
 
     libraries = libraries if libraries is not None else (getattr(lane, "libraries", []) or [])
     total_contract_data = sum(float(getattr(lib, "contract_data_raw", 0.0) or 0.0) for lib in libraries)
+    explicit_balance_data = 0.0
+    if any(_is_ai_balance_library(lib) for lib in libraries):
+        explicit_balance_data = 0.0
+    else:
+        explicit_balance_data = _get_explicit_balance_data_from_context(
+            libraries,
+            lane_metadata=getattr(lane, "metadata", None),
+        )
+    effective_total_data = total_contract_data + explicit_balance_data
     total_index_pairs = _count_lane_index_pairs(libraries)
     conflicts = _validate_index_conflicts_latest(libraries)
 
@@ -771,9 +870,14 @@ def _validate_package_lane_rules(
         errors.append(
             f"包Lane {package_lane_number} 存在Index重复: {', '.join(preview)}"
         )
-    if total_contract_data < PACKAGE_LANE_MIN_GB or total_contract_data > PACKAGE_LANE_MAX_GB:
+    if effective_total_data < PACKAGE_LANE_MIN_GB or effective_total_data > PACKAGE_LANE_MAX_GB:
         errors.append(
-            f"包Lane {package_lane_number} 合同数据量不满足1000G±0.01G: 当前{total_contract_data:.3f}G"
+            "包Lane {} 有效数据量不满足1000G±0.01G: 当前{:.3f}G(合同{:.3f}G+平衡{:.3f}G)".format(
+                package_lane_number,
+                effective_total_data,
+                total_contract_data,
+                explicit_balance_data,
+            )
         )
     return errors
 
@@ -1271,6 +1375,7 @@ def _attempt_build_lane_from_pool(
         if prioritize_scattered_mix and attempt_idx > max_scattered_mix_attempts:
             break
         selected: List[EnhancedLibraryInfo] = []
+        selected_ids: Set[int] = set()
         # 与 selected 平行维护的预解析索引缓存，避免在 validate_new_lib_quick_with_cache
         # 内部对同一文库反复调用 _parse_library_indices（逐个候选检查时累计百万次调用）
         selected_idx_cache: List = []
@@ -1285,7 +1390,10 @@ def _attempt_build_lane_from_pool(
                         machine_type=machine_type,
                         lane_metadata=extra_metadata,
                     )
-                remaining_candidates = [lib for lib in active_pool if lib not in selected]
+                remaining_candidates = _filter_libraries_excluding_object_ids(
+                    active_pool,
+                    selected_ids,
+                )
                 if not remaining_candidates:
                     break
                 lane_context_for_sort = selected if selected else None
@@ -1327,6 +1435,7 @@ def _attempt_build_lane_from_pool(
                     imbalance_mix_valid, _ = _validate_lane_57_mix_rules(
                         trial_libs,
                         enforce_total_limit=False,
+                        lane_metadata=extra_metadata,
                     )
                     if not imbalance_mix_valid:
                         continue
@@ -1336,6 +1445,7 @@ def _attempt_build_lane_from_pool(
                     if not idx_valid:
                         continue
                     selected.append(lib)
+                    selected_ids.add(id(lib))
                     selected_idx_cache.append(lib_indices)
                     total += data
                     added_candidate = True
@@ -1361,6 +1471,7 @@ def _attempt_build_lane_from_pool(
                 imbalance_mix_valid, _ = _validate_lane_57_mix_rules(
                     trial_libs,
                     enforce_total_limit=False,
+                    lane_metadata=extra_metadata,
                 )
                 if not imbalance_mix_valid:
                     continue
@@ -1588,6 +1699,7 @@ def _attempt_build_lane_from_prioritized_pool(
         and other_failure_retry_count < other_failure_attempts
     ):
         selected: List[EnhancedLibraryInfo] = []
+        selected_ids: Set[int] = set()
         # 与 selected 平行维护的预解析索引缓存，同 _attempt_build_lane_from_pool 的优化逻辑
         selected_idx_cache: List = []
         total = 0.0
@@ -1624,12 +1736,18 @@ def _attempt_build_lane_from_prioritized_pool(
             lane_context_for_sort = selected if selected else None
             candidate_buckets = [
                 _ordered_candidates(
-                    [lib for lib in active_primary_pool if lib not in selected],
+                    _filter_libraries_excluding_object_ids(
+                        active_primary_pool,
+                        selected_ids,
+                    ),
                     prefer_balanced=False,
                     current_lane_libs=lane_context_for_sort,
                 ),
                 _ordered_candidates(
-                    [lib for lib in active_secondary_pool if lib not in selected],
+                    _filter_libraries_excluding_object_ids(
+                        active_secondary_pool,
+                        selected_ids,
+                    ),
                     prefer_balanced=True,
                     current_lane_libs=lane_context_for_sort,
                 ),
@@ -1666,6 +1784,7 @@ def _attempt_build_lane_from_prioritized_pool(
                     imbalance_mix_valid, _ = _validate_lane_57_mix_rules(
                         trial_libs,
                         enforce_total_limit=False,
+                        lane_metadata=extra_metadata,
                     )
                     if not imbalance_mix_valid:
                         continue
@@ -1676,6 +1795,7 @@ def _attempt_build_lane_from_prioritized_pool(
                     if not idx_valid:
                         continue
                     selected.append(lib)
+                    selected_ids.add(id(lib))
                     selected_idx_cache.append(lib_indices)
                     total += data
                     added_candidate = True
@@ -1824,6 +1944,47 @@ def _get_library_identity_key(lib: EnhancedLibraryInfo) -> str:
     if origrec_key:
         return origrec_key
     return str(id(lib))
+
+
+def _build_library_object_id_set(libraries: List[EnhancedLibraryInfo]) -> Set[int]:
+    """按对象身份构建文库集合，避免 dataclass 深度相等比较。"""
+    return {id(lib) for lib in libraries}
+
+
+def _filter_libraries_excluding_object_ids(
+    libraries: List[EnhancedLibraryInfo],
+    excluded_ids: Set[int],
+) -> List[EnhancedLibraryInfo]:
+    """按对象身份过滤文库列表。"""
+    if not excluded_ids:
+        return list(libraries)
+    return [lib for lib in libraries if id(lib) not in excluded_ids]
+
+
+def _remove_library_by_identity_in_place(
+    libraries: List[EnhancedLibraryInfo],
+    target: EnhancedLibraryInfo,
+) -> bool:
+    """按对象身份删除单个文库。"""
+    target_id = id(target)
+    for index, lib in enumerate(libraries):
+        if id(lib) == target_id:
+            libraries.pop(index)
+            return True
+    return False
+
+
+def _remove_libraries_by_identity_in_place(
+    libraries: List[EnhancedLibraryInfo],
+    targets: List[EnhancedLibraryInfo],
+) -> int:
+    """按对象身份批量删除文库。"""
+    target_ids = _build_library_object_id_set(targets)
+    if not target_ids:
+        return 0
+    original_len = len(libraries)
+    libraries[:] = [lib for lib in libraries if id(lib) not in target_ids]
+    return original_len - len(libraries)
 
 
 def _get_library_source_origrec_key(lib: EnhancedLibraryInfo) -> str:
@@ -2475,7 +2636,8 @@ def _materialize_balance_library_for_lane(
         conflicting_libs = _find_conflicting_lane_libraries(original_libs, candidate_balance_lib)
         if not conflicting_libs:
             continue
-        working_libs = [lib for lib in original_libs if lib not in conflicting_libs]
+        conflicting_ids = _build_library_object_id_set(conflicting_libs)
+        working_libs = [lib for lib in original_libs if id(lib) not in conflicting_ids]
 
         picked = _pick_replacement_from_pool(
             lane=lane,
@@ -2489,9 +2651,7 @@ def _materialize_balance_library_for_lane(
             trial_libs, added_libs = picked
             for lib in conflicting_libs:
                 unassigned_pool.append(lib)
-            for lib in added_libs:
-                if lib in unassigned_pool:
-                    unassigned_pool.remove(lib)
+            _remove_libraries_by_identity_in_place(unassigned_pool, added_libs)
             lane.libraries = trial_libs
             lane.total_data_gb = sum(lib.get_data_amount_gb() for lib in lane.libraries)
             lane.calculate_metrics()
@@ -2869,9 +3029,7 @@ def _try_increase_lane_count(
                 other_failure_attempts=other_failure_attempts_per_lane,
             )
             if new_lane:
-                for lib in used:
-                    if lib in unassigned:
-                        unassigned.remove(lib)
+                _remove_libraries_by_identity_in_place(unassigned, used)
                 lanes.append(new_lane)
                 added += 1
     return added
@@ -3118,9 +3276,7 @@ def try_multi_lib_swap_rebalance(
                 other_failure_attempts=other_failure_max_trials,
             )
             if new_lane:
-                for lib in used:
-                    if lib in unassigned:
-                        unassigned.remove(lib)
+                _remove_libraries_by_identity_in_place(unassigned, used)
                 lanes.append(new_lane)
                 new_lanes_count += 1
 
@@ -3362,7 +3518,8 @@ def _rescue_remaining_lanes_by_layered_regroup_search(
         ):
             if machine_priority_cluster_lanes >= max_priority_cluster_lanes_per_machine:
                 break
-            active_cluster = [lib for lib in cluster_pool if lib in machine_pool]
+            machine_pool_ids = _build_library_object_id_set(machine_pool)
+            active_cluster = [lib for lib in cluster_pool if id(lib) in machine_pool_ids]
             if not active_cluster:
                 continue
             min_allowed, _ = _resolve_lane_capacity_limits(active_cluster, machine_type)
@@ -3434,7 +3591,8 @@ def _rescue_remaining_lanes_by_layered_regroup_search(
         ):
             if machine_normal_cluster_lanes >= max_normal_cluster_lanes_per_machine:
                 break
-            active_cluster = [lib for lib in cluster_pool if lib in machine_pool]
+            machine_pool_ids = _build_library_object_id_set(machine_pool)
+            active_cluster = [lib for lib in cluster_pool if id(lib) in machine_pool_ids]
             if not active_cluster:
                 continue
             min_allowed, _ = _resolve_lane_capacity_limits(active_cluster, machine_type)
@@ -4463,8 +4621,7 @@ def _validate_lane_state(
     skip_peak_size=True：跳过 peak_size 错误/警告的判断。专用不均衡 lane 注入平衡文库
     时使用——该 lane 的 peak_size 分布是排机时就已形成的既成事实，平衡文库不应因此被阻止。
     """
-    has_balance_library = any(_is_ai_balance_library(lib) for lib in libraries)
-    if _is_package_lane_assignment(lane) and not (balance_already_in_libs or has_balance_library):
+    if _is_package_lane_assignment(lane):
         package_errors = _validate_package_lane_rules(lane, libraries=libraries)
         return LaneValidationResult(
             lane_id=lane.lane_id,
@@ -4479,6 +4636,7 @@ def _validate_lane_state(
             ],
         )
 
+    has_balance_library = any(_is_ai_balance_library(lib) for lib in libraries)
     metadata = _build_lane_metadata_for_validator(lane.lane_id, lane.metadata)
     if balance_already_in_libs:
         metadata.pop("wkbalancedata", None)
@@ -4504,18 +4662,6 @@ def _validate_lane_state(
             warnings=filtered_warnings,
         )
 
-    if _is_package_lane_assignment(lane) and (balance_already_in_libs or has_balance_library):
-        package_errors = _validate_package_lane_rules(lane, libraries=libraries)
-        if package_errors:
-            result.errors.extend(
-                ValidationError(
-                    rule_type=ValidationRuleType.CAPACITY,
-                    severity=ValidationSeverity.ERROR,
-                    message=message,
-                )
-                for message in package_errors
-            )
-            result.is_valid = False
     return result
 
 
@@ -4664,7 +4810,8 @@ def _pick_special_split_removals(
         data_by_mode[mode] += float(getattr(lib, "contract_data_raw", 0.0) or 0.0)
 
     to_remove: List[EnhancedLibraryInfo] = [lib for lib, mode in mode_records if mode == "OTHER"]
-    remaining = [lib for lib in libraries if lib not in to_remove]
+    removal_ids = _build_library_object_id_set(to_remove)
+    remaining = [lib for lib in libraries if id(lib) not in removal_ids]
     remaining_modes = {_classify_library_special_split_mode(lib) for lib in remaining}
 
     has_a = "A" in remaining_modes
@@ -4712,8 +4859,7 @@ def _auto_fix_lane_for_special_splits(
         return stats
 
     for lib in removals:
-        if lib in lane.libraries:
-            lane.remove_library(lib)
+        if lane.remove_library(lib):
             unassigned_pool.append(lib)
             stats["removed"] += 1
 
@@ -4738,6 +4884,8 @@ def _auto_fix_lane_for_special_splits(
         imbalance_mix_valid, _ = _validate_lane_57_mix_rules(
             trial_libs,
             enforce_total_limit=False,
+            lane_id=lane.lane_id,
+            lane_metadata=lane.metadata,
         )
         if not imbalance_mix_valid:
             return False
@@ -4751,8 +4899,7 @@ def _auto_fix_lane_for_special_splits(
         if not can_add(lib):
             continue
         lane.add_library(lib)
-        if lib in unassigned_pool:
-            unassigned_pool.remove(lib)
+        _remove_library_by_identity_in_place(unassigned_pool, lib)
         stats["swapped_in"] += 1
 
     # 再做局部交换：从其他Lane借可兼容文库
@@ -4903,11 +5050,8 @@ def _auto_fix_lane_for_customer_and_10bp(
                     removed_cust.append(lib)
                     freed += lib_data
                 if removed_cust:
-                    for lib in removed_cust:
-                        if lib in working_libs:
-                            working_libs.remove(lib)
-                        if lib in customers:
-                            customers.remove(lib)
+                    _remove_libraries_by_identity_in_place(working_libs, removed_cust)
+                    _remove_libraries_by_identity_in_place(customers, removed_cust)
                     removed_libs.extend(removed_cust)
                     data_customers -= freed
                     data_total -= freed
@@ -4926,9 +5070,7 @@ def _auto_fix_lane_for_customer_and_10bp(
             )
             if re_res.is_valid:
                 added_libs.extend(picked)
-                for lib in picked:
-                    if lib in unassigned_pool:
-                        unassigned_pool.remove(lib)
+                _remove_libraries_by_identity_in_place(unassigned_pool, picked)
                 working_libs = cand_libs
                 logger.info(f"Lane {lane.lane_id} 客户占比矫正：补充{len(picked)}个非客户文库后通过校验")
             else:
@@ -4955,10 +5097,9 @@ def _auto_fix_lane_for_customer_and_10bp(
                 )
                 if re_res.is_valid:
                     removed_libs.extend(non_customers)
-                    added_libs.extend([lib for lib in cand_libs if lib not in working_libs])
-                    for lib in picked_cust:
-                        if lib in unassigned_pool:
-                            unassigned_pool.remove(lib)
+                    working_lib_ids = _build_library_object_id_set(working_libs)
+                    added_libs.extend([lib for lib in cand_libs if id(lib) not in working_lib_ids])
+                    _remove_libraries_by_identity_in_place(unassigned_pool, picked_cust)
                     working_libs = cand_libs
                     logger.info(
                         f"Lane {lane.lane_id} 客户占比矫正：转纯客户（补{len(picked_cust)}个客户文库）后通过校验，移出{len(non_customers)}个非客户文库"
@@ -4982,12 +5123,11 @@ def _auto_fix_lane_for_customer_and_10bp(
                 machine_type=machine_type, metadata=metadata_after,
             )
             if re_res.is_valid and _total_data(cand_libs) >= min_allowed:
-                dropped = [lib for lib in working_libs if lib not in libs_10bp]
+                libs_10bp_ids = _build_library_object_id_set(libs_10bp)
+                dropped = [lib for lib in working_libs if id(lib) not in libs_10bp_ids]
                 removed_libs.extend(dropped)
                 added_libs.extend(picked)
-                for lib in picked:
-                    if lib in unassigned_pool:
-                        unassigned_pool.remove(lib)
+                _remove_libraries_by_identity_in_place(unassigned_pool, picked)
                 working_libs = cand_libs
                 logger.info(
                     f"Lane {lane.lane_id} 10bp占比矫正：转纯10bp（补{len(picked)}个10bp文库）后通过校验，移出{len(dropped)}个非10bp文库"
@@ -5006,12 +5146,11 @@ def _auto_fix_lane_for_customer_and_10bp(
                 machine_type=machine_type, metadata=meta_non10,
             )
             if re_res.is_valid and _total_data(cand_libs) >= min_allowed:
-                dropped = [lib for lib in working_libs if lib not in libs_non_10bp]
+                libs_non_10bp_ids = _build_library_object_id_set(libs_non_10bp)
+                dropped = [lib for lib in working_libs if id(lib) not in libs_non_10bp_ids]
                 removed_libs.extend(dropped)
                 added_libs.extend(picked)
-                for lib in picked:
-                    if lib in unassigned_pool:
-                        unassigned_pool.remove(lib)
+                _remove_libraries_by_identity_in_place(unassigned_pool, picked)
                 working_libs = cand_libs
                 metadata_after = meta_non10
                 logger.info(
@@ -5032,9 +5171,7 @@ def _auto_fix_lane_for_customer_and_10bp(
                     )
                     if re_res.is_valid and _total_data(cand_libs) >= min_allowed:
                         added_libs.extend(picked)
-                        for lib in picked:
-                            if lib in unassigned_pool:
-                                unassigned_pool.remove(lib)
+                        _remove_libraries_by_identity_in_place(unassigned_pool, picked)
                         working_libs = cand_libs
                         logger.info(
                             f"Lane {lane.lane_id} 10bp占比矫正：补充{len(picked)}个10bp文库后通过校验"
@@ -5229,6 +5366,13 @@ def _find_output_57_failed_lane_ids(df: pd.DataFrame) -> Set[str]:
 
     failed_lane_ids: Set[str] = set()
     for lane_id, sub in scheduled_df.groupby("llaneid", sort=False):
+        # 包Lane/包FC走专项规则，不应在导出阶段再叠加普通混样的56/57复核，
+        # 否则会把已经通过包lane校验的lane误清空输出字段。
+        has_package_lane_marker = "wkbaleno" in sub.columns and sub["wkbaleno"].map(_is_non_empty_value).any()
+        has_package_fc_marker = "wkbagfcno" in sub.columns and sub["wkbagfcno"].map(_is_non_empty_value).any()
+        if has_package_lane_marker or has_package_fc_marker:
+            continue
+
         libs: List[Any] = []
         for row in sub.to_dict(orient="records"):
             sample_type = str(row.get("wksampletype") or row.get("wkdatatype") or "")
@@ -5254,7 +5398,11 @@ def _find_output_57_failed_lane_ids(df: pd.DataFrame) -> Set[str]:
                 )()
             )
 
-        ok, reason = _validate_lane_57_mix_rules(libs, enforce_total_limit=False)
+        ok, reason = _validate_lane_57_mix_rules(
+            libs,
+            enforce_total_limit=False,
+            lane_id=str(lane_id),
+        )
         if not ok:
             failed_lane_ids.add(str(lane_id))
             logger.warning(f"输出前57规则复核失败: lane={lane_id}, reason={reason}")
@@ -5919,7 +6067,7 @@ def test_with_model(
         enable_rule_checker=False,
         max_imbalance_types_per_lane=0,
         max_imbalance_ratio=0.35,
-        enable_dedicated_imbalance_lane=False,
+        enable_dedicated_imbalance_lane=True,
         enable_small_library_clustering=False,
         clustering_min_count=30,
         enable_non_10bp_dedicated_lane=False,
@@ -5938,7 +6086,7 @@ def test_with_model(
     logger.info("严格校验容量区间改为按统一配置表动态解析")
 
     disabled_plan = StrategyExecutionPlan()
-    disabled_plan.enable_dedicated_imbalance_lane = False
+    disabled_plan.enable_dedicated_imbalance_lane = True
     disabled_plan.enable_non_10bp_dedicated_lane = False
     disabled_plan.enable_backbone_reservation = False
     scheduler._strategy_plan = disabled_plan
@@ -6046,67 +6194,71 @@ def test_with_model(
             )
         )
 
-    # 尝试增加Lane数量
-    extra_lanes = _try_increase_lane_count(
+    if not _should_skip_expensive_rescue_stage(
         solution,
-        strict_validator,
-        max_new_lanes=DEFAULT_EX_RESCUE_MAX_NEW_LANES,
-        index_conflict_attempts_per_lane=DEFAULT_INDEX_CONFLICT_ATTEMPTS,
-        other_failure_attempts_per_lane=DEFAULT_OTHER_FAILURE_ATTEMPTS,
-    )
-    if extra_lanes:
-        logger.info(f"Lane数量提升新增Lane数: {extra_lanes}")
-    else:
-        logger.info("Lane数量提升未新增Lane")
-    extra_stage_split_stats = _enforce_special_split_constraints_with_local_swap(
-        solution=solution,
-        strict_validator=strict_validator,
-        max_passes=1,
-    )
-    if extra_stage_split_stats["changed_lanes"] > 0:
-        logger.info(
-            "Lane提升后wkspecialsplits复检: 调整Lane={}，剔除文库={}，局部交换补入={}".format(
-                extra_stage_split_stats["changed_lanes"],
-                extra_stage_split_stats["removed_libraries"],
-                extra_stage_split_stats["swapped_in_libraries"],
-            )
+        stage_name="高成本救援(EX/RB)",
+    ):
+        # 尝试增加Lane数量
+        extra_lanes = _try_increase_lane_count(
+            solution,
+            strict_validator,
+            max_new_lanes=DEFAULT_EX_RESCUE_MAX_NEW_LANES,
+            index_conflict_attempts_per_lane=DEFAULT_INDEX_CONFLICT_ATTEMPTS,
+            other_failure_attempts_per_lane=DEFAULT_OTHER_FAILURE_ATTEMPTS,
         )
+        if extra_lanes:
+            logger.info(f"Lane数量提升新增Lane数: {extra_lanes}")
+        else:
+            logger.info("Lane数量提升未新增Lane")
+        extra_stage_split_stats = _enforce_special_split_constraints_with_local_swap(
+            solution=solution,
+            strict_validator=strict_validator,
+            max_passes=1,
+        )
+        if extra_stage_split_stats["changed_lanes"] > 0:
+            logger.info(
+                "Lane提升后wkspecialsplits复检: 调整Lane={}，剔除文库={}，局部交换补入={}".format(
+                    extra_stage_split_stats["changed_lanes"],
+                    extra_stage_split_stats["removed_libraries"],
+                    extra_stage_split_stats["swapped_in_libraries"],
+                )
+            )
 
-    # 跨Lane多文库交换再平衡
-    rebalance_result = try_multi_lib_swap_rebalance(
-        solution,
-        strict_validator,
-        max_new_lanes=DEFAULT_RB_RESCUE_MAX_NEW_LANES,
-        max_donations=80,
-        index_conflict_max_trials=DEFAULT_INDEX_CONFLICT_ATTEMPTS,
-        other_failure_max_trials=DEFAULT_OTHER_FAILURE_ATTEMPTS,
-        max_per_lane=8,
-    )
-    if rebalance_result["new_lanes"] > 0:
-        logger.info(
-            "跨Lane多文库交换完成：新增{new_lanes}条，剩余未分配{remaining_unassigned}个".format(
-                **rebalance_result
-            )
+        # 跨Lane多文库交换再平衡
+        rebalance_result = try_multi_lib_swap_rebalance(
+            solution,
+            strict_validator,
+            max_new_lanes=DEFAULT_RB_RESCUE_MAX_NEW_LANES,
+            max_donations=80,
+            index_conflict_max_trials=DEFAULT_INDEX_CONFLICT_ATTEMPTS,
+            other_failure_max_trials=DEFAULT_OTHER_FAILURE_ATTEMPTS,
+            max_per_lane=8,
         )
-    else:
-        logger.info(
-            "跨Lane多文库交换未新增Lane，剩余未分配{remaining_unassigned}个".format(
-                **rebalance_result
+        if rebalance_result["new_lanes"] > 0:
+            logger.info(
+                "跨Lane多文库交换完成：新增{new_lanes}条，剩余未分配{remaining_unassigned}个".format(
+                    **rebalance_result
+                )
             )
-        )
-    rebalance_stage_split_stats = _enforce_special_split_constraints_with_local_swap(
-        solution=solution,
-        strict_validator=strict_validator,
-        max_passes=1,
-    )
-    if rebalance_stage_split_stats["changed_lanes"] > 0:
-        logger.info(
-            "再平衡后wkspecialsplits复检: 调整Lane={}，剔除文库={}，局部交换补入={}".format(
-                rebalance_stage_split_stats["changed_lanes"],
-                rebalance_stage_split_stats["removed_libraries"],
-                rebalance_stage_split_stats["swapped_in_libraries"],
+        else:
+            logger.info(
+                "跨Lane多文库交换未新增Lane，剩余未分配{remaining_unassigned}个".format(
+                    **rebalance_result
+                )
             )
+        rebalance_stage_split_stats = _enforce_special_split_constraints_with_local_swap(
+            solution=solution,
+            strict_validator=strict_validator,
+            max_passes=1,
         )
+        if rebalance_stage_split_stats["changed_lanes"] > 0:
+            logger.info(
+                "再平衡后wkspecialsplits复检: 调整Lane={}，剔除文库={}，局部交换补入={}".format(
+                    rebalance_stage_split_stats["changed_lanes"],
+                    rebalance_stage_split_stats["removed_libraries"],
+                    rebalance_stage_split_stats["swapped_in_libraries"],
+                )
+            )
     passed_lanes = solution.lane_assignments
 
     # ===== 合并包Lane/10bp专Lane/混排Lane到最终结果 =====
@@ -6166,10 +6318,26 @@ def test_with_model(
             )
         )
 
-    layered_regroup_stats = _rescue_remaining_lanes_by_layered_regroup_search(
-        solution=solution,
-        validator=strict_validator,
-    )
+    if _should_skip_expensive_rescue_stage(
+        solution,
+        stage_name="分层重组救援",
+        zero_lane_lib_threshold=ZERO_LANE_RESCUE_SKIP_LIB_THRESHOLD,
+        pool_lib_threshold=1200,
+        pool_data_threshold_gb=12000.0,
+    ):
+        layered_regroup_stats = {
+            "new_lanes": 0,
+            "priority_cluster_lanes": 0,
+            "mixed_rescue_lanes": 0,
+            "normal_cluster_lanes": 0,
+            "remaining_unassigned": len(getattr(solution, "unassigned_libraries", []) or []),
+            "skipped_split_libraries": 0,
+        }
+    else:
+        layered_regroup_stats = _rescue_remaining_lanes_by_layered_regroup_search(
+            solution=solution,
+            validator=strict_validator,
+        )
     if layered_regroup_stats["new_lanes"] > 0:
         logger.info(
             "剩余库分层重组搜索完成: 新增Lane={} (专lane={}, 混排lane={}, 普通lane={}), "
@@ -6379,6 +6547,12 @@ def arrange_library(
         
         for run in package_result.runs:
             for lane_result in run.lanes:
+                lane_metadata = {'is_package_lane': True, 'package_id': lane_result.package_id}
+                if float(getattr(lane_result, "planned_balance_data_gb", 0.0) or 0.0) > 0:
+                    lane_metadata["wkbalancedata"] = round(
+                        float(getattr(lane_result, "planned_balance_data_gb", 0.0) or 0.0),
+                        3,
+                    )
                 lane_assignment = LaneAssignment(
                     lane_id=lane_result.lane_id,
                     machine_id=f"M_{lane_result.lane_id}",
@@ -6386,7 +6560,7 @@ def arrange_library(
                     libraries=lane_result.libraries,
                     total_data_gb=lane_result.total_data_gb,
                     pooling_coefficients=lane_result.pooling_coefficients,
-                    metadata={'is_package_lane': True, 'package_id': lane_result.package_id}
+                    metadata=lane_metadata,
                 )
                 package_lanes.append(lane_assignment)
 
