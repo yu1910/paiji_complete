@@ -20,7 +20,10 @@ import arrange_library.arrange_library_model6 as arrange_model6
 from arrange_library.arrange_library_model6 import (
     _collect_donations_for_pool,
     _apply_add_test_output_rate_rule_to_prediction_df,
+    _apply_balance_reservation_to_capacity_selection,
     _attempt_build_lane_from_pool,
+    _attempt_build_lane_from_prioritized_pool,
+    _attempt_build_rescue_lane_from_pool,
     _build_detail_output,
     _collect_prediction_rows,
     _ensure_unique_lane_ids,
@@ -30,6 +33,7 @@ from arrange_library.arrange_library_model6 import (
     _rescue_remaining_lanes_by_layered_regroup_search,
     _rescue_failed_lanes_by_57_rules,
     _resolve_lane_loading_concentration,
+    try_targeted_imbalance_upgrade,
     try_multi_lib_swap_rebalance,
     _validate_final_package_lanes,
     _validate_no_split_for_package_lane_libraries,
@@ -351,6 +355,505 @@ def test_attempt_build_lane_from_pool_uses_unique_auto_serials(
     assert lane_two is not None and used_two
     assert lane_one.lane_id == "EX_Nova X-25B_001"
     assert lane_two.lane_id == "EX_Nova X-25B_002"
+
+
+def test_attempt_build_lane_from_pool_continues_post_min_to_improve_imbalance_ratio(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    libs = [
+        _build_library(origrec="BAL_60", contract_data=60.0, jjbj="否"),
+        _build_library(origrec="BAL_40", contract_data=40.0, jjbj="否"),
+        _build_library(origrec="IMB_35", contract_data=35.0, jjbj="是"),
+        _build_library(origrec="BAL_5", contract_data=5.0, jjbj="否"),
+    ]
+
+    monkeypatch.setattr(
+        arrange_model6,
+        "_filter_libraries_by_hard_priority",
+        lambda libraries, **kwargs: list(libraries),
+    )
+    monkeypatch.setattr(
+        arrange_model6,
+        "_validate_lane_special_split_rule",
+        lambda libraries: (True, set(), ""),
+    )
+    monkeypatch.setattr(
+        arrange_model6,
+        "_validate_lane_57_mix_rules",
+        lambda libraries, enforce_total_limit=False: (True, ""),
+    )
+    monkeypatch.setattr(
+        arrange_model6,
+        "_resolve_lane_capacity_limits",
+        lambda libraries, machine_type, lane_id="", lane_metadata=None: (100.0, 140.0),
+    )
+    monkeypatch.setattr(
+        arrange_model6._MODULE_IDX_VALIDATOR,
+        "validate_new_lib_quick_with_cache",
+        lambda selected_idx_cache, lib: (True, []),
+    )
+    monkeypatch.setattr(
+        arrange_model6,
+        "_validate_lane_with_latest_index",
+        lambda **kwargs: types.SimpleNamespace(is_valid=True, errors=[], warnings=[]),
+    )
+    monkeypatch.setattr(
+        arrange_model6._BASE_IMBALANCE_HANDLER,
+        "is_imbalance_library",
+        lambda lib: getattr(lib, "jjbj", "否") == "是",
+    )
+
+    lane, used = _attempt_build_lane_from_pool(
+        pool=list(libs),
+        validator=object(),
+        machine_type=MachineType.NOVA_X_25B,
+        lane_id_prefix="RM",
+        lane_serial=1,
+        index_conflict_attempts=1,
+        other_failure_attempts=1,
+        prioritize_scattered_mix=True,
+    )
+
+    assert lane is not None and used
+    assert {lib.origrec for lib in used} == {"BAL_60", "IMB_35", "BAL_5"}
+
+
+def test_attempt_build_lane_from_prioritized_pool_continues_post_min_to_improve_imbalance_ratio(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    primary_pool = [_build_library(origrec="BAL_60", contract_data=60.0, jjbj="否")]
+    secondary_pool = [
+        _build_library(origrec="BAL_40", contract_data=40.0, jjbj="否"),
+        _build_library(origrec="IMB_35", contract_data=35.0, jjbj="是"),
+        _build_library(origrec="BAL_5", contract_data=5.0, jjbj="否"),
+    ]
+
+    monkeypatch.setattr(
+        arrange_model6,
+        "_filter_priority_across_pools",
+        lambda primary_pool, secondary_pool, **kwargs: (list(primary_pool), list(secondary_pool), 2),
+    )
+    monkeypatch.setattr(
+        arrange_model6,
+        "_validate_lane_special_split_rule",
+        lambda libraries: (True, set(), ""),
+    )
+    monkeypatch.setattr(
+        arrange_model6,
+        "_validate_lane_57_mix_rules",
+        lambda libraries, enforce_total_limit=False: (True, ""),
+    )
+    monkeypatch.setattr(
+        arrange_model6,
+        "_resolve_lane_capacity_limits",
+        lambda libraries, machine_type, lane_id="", lane_metadata=None: (100.0, 140.0),
+    )
+    monkeypatch.setattr(
+        arrange_model6._MODULE_IDX_VALIDATOR,
+        "validate_new_lib_quick_with_cache",
+        lambda selected_idx_cache, lib: (True, []),
+    )
+    monkeypatch.setattr(
+        arrange_model6,
+        "_validate_lane_state",
+        lambda validator, lane, libraries: types.SimpleNamespace(is_valid=True, errors=[], warnings=[]),
+    )
+    monkeypatch.setattr(
+        arrange_model6._BASE_IMBALANCE_HANDLER,
+        "is_imbalance_library",
+        lambda lib: getattr(lib, "jjbj", "否") == "是",
+    )
+
+    lane, used = _attempt_build_lane_from_prioritized_pool(
+        primary_pool=list(primary_pool),
+        secondary_pool=list(secondary_pool),
+        validator=object(),
+        machine_type=MachineType.NOVA_X_25B,
+        lane_id_prefix="RS",
+        lane_serial=1,
+    )
+
+    assert lane is not None and used
+    assert [lib.origrec for lib in used] == ["BAL_60", "BAL_40", "IMB_35"]
+
+
+def test_attempt_build_lane_from_pool_does_not_repeat_same_scattered_mix_failure(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    libs = [
+        _build_library(origrec="BAL_60", contract_data=60.0, jjbj="否"),
+        _build_library(origrec="BAL_40", contract_data=40.0, jjbj="否"),
+        _build_library(origrec="IMB_35", contract_data=35.0, jjbj="是"),
+    ]
+    validate_calls = {"count": 0}
+
+    monkeypatch.setattr(
+        arrange_model6,
+        "_filter_libraries_by_hard_priority",
+        lambda libraries, **kwargs: list(libraries),
+    )
+    monkeypatch.setattr(
+        arrange_model6,
+        "_validate_lane_special_split_rule",
+        lambda libraries: (True, set(), ""),
+    )
+    monkeypatch.setattr(
+        arrange_model6,
+        "_validate_lane_57_mix_rules",
+        lambda libraries, enforce_total_limit=False: (True, ""),
+    )
+    monkeypatch.setattr(
+        arrange_model6,
+        "_resolve_lane_capacity_limits",
+        lambda libraries, machine_type, lane_id="", lane_metadata=None: (100.0, 140.0),
+    )
+    monkeypatch.setattr(
+        arrange_model6._MODULE_IDX_VALIDATOR,
+        "validate_new_lib_quick_with_cache",
+        lambda selected_idx_cache, lib: (True, []),
+    )
+    monkeypatch.setattr(
+        arrange_model6._BASE_IMBALANCE_HANDLER,
+        "is_imbalance_library",
+        lambda lib: getattr(lib, "jjbj", "否") == "是",
+    )
+
+    def _invalid_once(**kwargs):
+        validate_calls["count"] += 1
+        return types.SimpleNamespace(
+            is_valid=False,
+            errors=[types.SimpleNamespace(rule_type=arrange_model6.ValidationRuleType.BASE_IMBALANCE_RATIO)],
+            warnings=[],
+        )
+
+    monkeypatch.setattr(arrange_model6, "_validate_lane_with_latest_index", _invalid_once)
+
+    lane, used = _attempt_build_lane_from_pool(
+        pool=list(libs),
+        validator=object(),
+        machine_type=MachineType.NOVA_X_25B,
+        lane_id_prefix="EX",
+        lane_serial=1,
+        index_conflict_attempts=5,
+        other_failure_attempts=5,
+        prioritize_scattered_mix=True,
+    )
+
+    assert lane is None
+    assert used == []
+    assert validate_calls["count"] == 1
+
+
+def test_attempt_build_lane_from_pool_allows_bounded_rm_scattered_mix_variants(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    libs = [
+        _build_library(origrec="ALT_A", contract_data=60.0, jjbj="否"),
+        _build_library(origrec="ALT_B", contract_data=40.0, jjbj="否"),
+        _build_library(origrec="ALT_C", contract_data=60.0, jjbj="是"),
+    ]
+    validate_calls = {"count": 0}
+
+    monkeypatch.setattr(
+        arrange_model6,
+        "_filter_libraries_by_hard_priority",
+        lambda libraries, **kwargs: list(libraries),
+    )
+    monkeypatch.setattr(
+        arrange_model6,
+        "_validate_lane_special_split_rule",
+        lambda libraries: (True, set(), ""),
+    )
+    monkeypatch.setattr(
+        arrange_model6,
+        "_validate_lane_57_mix_rules",
+        lambda libraries, enforce_total_limit=False: (True, ""),
+    )
+    monkeypatch.setattr(
+        arrange_model6,
+        "_resolve_lane_capacity_limits",
+        lambda libraries, machine_type, lane_id="", lane_metadata=None: (100.0, 120.0),
+    )
+    monkeypatch.setattr(
+        arrange_model6._MODULE_IDX_VALIDATOR,
+        "validate_new_lib_quick_with_cache",
+        lambda selected_idx_cache, lib: (True, []),
+    )
+
+    def _fake_scattered_mix_order(
+        libraries,
+        current_lane_libs=None,
+        seed_offset=0,
+        machine_type=None,
+        special_data_limit=None,
+    ):
+        remaining = tuple(lib.origrec for lib in libraries)
+        if current_lane_libs:
+            return list(libraries)
+        if remaining == ("ALT_A", "ALT_B", "ALT_C") and seed_offset == 0:
+            return [libs[0], libs[1], libs[2]]
+        if remaining == ("ALT_A", "ALT_B", "ALT_C") and seed_offset == 1:
+            return [libs[2], libs[0], libs[1]]
+        if remaining == ("ALT_A", "ALT_B") and seed_offset == 1:
+            return [libs[0], libs[1]]
+        return list(libraries)
+
+    def _fake_validate(**kwargs):
+        validate_calls["count"] += 1
+        selected = [lib.origrec for lib in kwargs["libraries"]]
+        if selected == ["ALT_C", "ALT_A"]:
+            return types.SimpleNamespace(is_valid=True, errors=[], warnings=[])
+        return types.SimpleNamespace(
+            is_valid=False,
+            errors=[types.SimpleNamespace(rule_type=arrange_model6.ValidationRuleType.BASE_IMBALANCE_RATIO)],
+            warnings=[],
+        )
+
+    monkeypatch.setattr(arrange_model6, "_build_scattered_mix_candidate_order", _fake_scattered_mix_order)
+    monkeypatch.setattr(arrange_model6, "_validate_lane_with_latest_index", _fake_validate)
+
+    lane, used = _attempt_build_lane_from_pool(
+        pool=list(libs),
+        validator=object(),
+        machine_type=MachineType.NOVA_X_25B,
+        lane_id_prefix="RM",
+        lane_serial=1,
+        index_conflict_attempts=5,
+        other_failure_attempts=5,
+        prioritize_scattered_mix=True,
+    )
+
+    assert lane is not None and used
+    assert [lib.origrec for lib in used] == ["ALT_C", "ALT_A"]
+    assert validate_calls["count"] == 2
+
+
+def test_attempt_build_lane_from_pool_respects_special_library_cap_when_filling_imbalance(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    libs = [
+        _build_library(origrec="BAL_60", contract_data=60.0, jjbj="否"),
+        _build_library(origrec="BAL_40", contract_data=40.0, jjbj="否"),
+        _build_library(origrec="IMB_35", contract_data=35.0, jjbj="是"),
+        _build_library(origrec="IMB_20", contract_data=20.0, jjbj="是"),
+    ]
+
+    monkeypatch.setattr(
+        arrange_model6,
+        "_filter_libraries_by_hard_priority",
+        lambda libraries, **kwargs: list(libraries),
+    )
+    monkeypatch.setattr(
+        arrange_model6,
+        "_validate_lane_special_split_rule",
+        lambda libraries: (True, set(), ""),
+    )
+    monkeypatch.setattr(
+        arrange_model6,
+        "_validate_lane_57_mix_rules",
+        lambda libraries, enforce_total_limit=False: (True, ""),
+    )
+    monkeypatch.setattr(
+        arrange_model6,
+        "_resolve_lane_capacity_limits",
+        lambda libraries, machine_type, lane_id="", lane_metadata=None: (100.0, 140.0),
+    )
+    monkeypatch.setattr(
+        arrange_model6,
+        "_resolve_special_library_data_limit",
+        lambda machine_type: 20.0,
+    )
+    monkeypatch.setattr(
+        arrange_model6._MODULE_IDX_VALIDATOR,
+        "validate_new_lib_quick_with_cache",
+        lambda selected_idx_cache, lib: (True, []),
+    )
+    monkeypatch.setattr(
+        arrange_model6,
+        "_validate_lane_with_latest_index",
+        lambda **kwargs: types.SimpleNamespace(is_valid=True, errors=[], warnings=[]),
+    )
+    monkeypatch.setattr(
+        arrange_model6._BASE_IMBALANCE_HANDLER,
+        "is_imbalance_library",
+        lambda lib: getattr(lib, "jjbj", "否") == "是",
+    )
+
+    lane, used = _attempt_build_lane_from_pool(
+        pool=list(libs),
+        validator=object(),
+        machine_type=MachineType.NOVA_X_25B,
+        lane_id_prefix="RM",
+        lane_serial=1,
+        index_conflict_attempts=1,
+        other_failure_attempts=1,
+        prioritize_scattered_mix=True,
+    )
+
+    assert lane is not None and used
+    assert {lib.origrec for lib in used} == {"BAL_60", "BAL_40", "IMB_20"}
+
+
+def test_attempt_build_lane_from_prioritized_pool_does_not_repeat_same_failure(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    validate_calls = {"count": 0}
+    primary_pool = [_build_library(origrec="BAL_60", contract_data=60.0, jjbj="否")]
+    secondary_pool = [
+        _build_library(origrec="BAL_40", contract_data=40.0, jjbj="否"),
+        _build_library(origrec="IMB_35", contract_data=35.0, jjbj="是"),
+    ]
+
+    monkeypatch.setattr(
+        arrange_model6,
+        "_filter_priority_across_pools",
+        lambda primary_pool, secondary_pool, **kwargs: (list(primary_pool), list(secondary_pool), 2),
+    )
+    monkeypatch.setattr(
+        arrange_model6,
+        "_validate_lane_special_split_rule",
+        lambda libraries: (True, set(), ""),
+    )
+    monkeypatch.setattr(
+        arrange_model6,
+        "_validate_lane_57_mix_rules",
+        lambda libraries, enforce_total_limit=False: (True, ""),
+    )
+    monkeypatch.setattr(
+        arrange_model6,
+        "_resolve_lane_capacity_limits",
+        lambda libraries, machine_type, lane_id="", lane_metadata=None: (100.0, 140.0),
+    )
+    monkeypatch.setattr(
+        arrange_model6._MODULE_IDX_VALIDATOR,
+        "validate_new_lib_quick_with_cache",
+        lambda selected_idx_cache, lib: (True, []),
+    )
+    monkeypatch.setattr(
+        arrange_model6._BASE_IMBALANCE_HANDLER,
+        "is_imbalance_library",
+        lambda lib: getattr(lib, "jjbj", "否") == "是",
+    )
+
+    def _invalid_state(validator, lane, libraries):
+        validate_calls["count"] += 1
+        return types.SimpleNamespace(
+            is_valid=False,
+            errors=[types.SimpleNamespace(rule_type=arrange_model6.ValidationRuleType.BASE_IMBALANCE_RATIO)],
+            warnings=[],
+        )
+
+    monkeypatch.setattr(arrange_model6, "_validate_lane_state", _invalid_state)
+
+    lane, used = _attempt_build_lane_from_prioritized_pool(
+        primary_pool=list(primary_pool),
+        secondary_pool=list(secondary_pool),
+        validator=object(),
+        machine_type=MachineType.NOVA_X_25B,
+        lane_id_prefix="RS",
+        lane_serial=1,
+        index_conflict_attempts=5,
+        other_failure_attempts=5,
+    )
+
+    assert lane is None
+    assert used == []
+    assert validate_calls["count"] == 1
+
+
+def test_try_targeted_imbalance_upgrade_swaps_in_unassigned_imbalance_library(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    lane = _build_lane_assignment(
+        "RM_Nova X-25B_001",
+        [
+            _build_library(origrec="BAL_900", contract_data=900.0, jjbj="否", data_type="其他"),
+            _build_library(origrec="BAL_100", contract_data=100.0, jjbj="否", data_type="其他"),
+        ],
+    )
+    incoming = _build_library(origrec="IMB_100", contract_data=100.0, jjbj="是", data_type="其他")
+    solution = types.SimpleNamespace(
+        lane_assignments=[lane],
+        unassigned_libraries=[incoming],
+    )
+
+    monkeypatch.setattr(
+        arrange_model6,
+        "_validate_lane_state",
+        lambda validator, lane, libraries, **kwargs: types.SimpleNamespace(is_valid=True, errors=[], warnings=[]),
+    )
+    monkeypatch.setattr(
+        arrange_model6,
+        "_resolve_special_library_data_limit",
+        lambda machine_type: 350.0,
+    )
+
+    result = try_targeted_imbalance_upgrade(
+        solution=solution,
+        validator=object(),
+        max_successful_swaps=2,
+        max_candidate_libraries=4,
+        max_lanes_per_candidate=2,
+        max_donors_per_lane=4,
+    )
+
+    assert result["successful_swaps"] == 1
+    assert result["changed_lanes"] == 1
+    assert result["consumed_imbalance_gb"] == 100.0
+    assert {lib.origrec for lib in lane.libraries} == {"BAL_900", "IMB_100"}
+    assert {lib.origrec for lib in solution.unassigned_libraries} == {"BAL_100"}
+
+
+def test_attempt_build_rescue_lane_from_pool_uses_fast_path_for_og(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    calls = []
+
+    def _fake_attempt(**kwargs):
+        calls.append(kwargs)
+        return None, []
+
+    monkeypatch.setattr(arrange_model6, "_attempt_build_lane_from_pool", _fake_attempt)
+
+    _attempt_build_rescue_lane_from_pool(
+        pool=[_build_library(origrec="OG_1", contract_data=100.0)],
+        validator=object(),
+        machine_type=MachineType.NOVA_X_25B,
+        lane_id_prefix="OG",
+        lane_serial=1,
+        index_conflict_attempts=3,
+        other_failure_attempts=4,
+    )
+
+    assert len(calls) == 1
+    assert calls[0]["prioritize_scattered_mix"] is False
+    assert calls[0]["lane_id_prefix"] == "OG"
+
+
+def test_apply_balance_reservation_to_capacity_selection_uses_package_lane_bound_constants(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    selection = _lane_rule(min_gb=995.0, max_gb=1105.0)
+
+    monkeypatch.setattr(
+        arrange_model6,
+        "_resolve_balance_reservation_context",
+        lambda **kwargs: {
+            "applied": True,
+            "mode": "absolute",
+            "reserve_gb": 50.0,
+            "reserve_ratio": 0.0,
+        },
+    )
+
+    result = _apply_balance_reservation_to_capacity_selection(
+        selection,
+        libraries=[],
+        machine_type=MachineType.NOVA_X_25B,
+    )
+
+    assert result.effective_min_gb == arrange_model6.PACKAGE_LANE_MIN_GB - 50.0
+    assert result.effective_max_gb == arrange_model6.PACKAGE_LANE_MAX_GB - 50.0
 
 
 def test_ensure_unique_lane_ids_renames_duplicate_lane_assignments() -> None:

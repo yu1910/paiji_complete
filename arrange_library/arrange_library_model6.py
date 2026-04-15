@@ -120,6 +120,11 @@ DEFAULT_INDEX_CONFLICT_ATTEMPTS = 10
 DEFAULT_OTHER_FAILURE_ATTEMPTS = 20
 DEFAULT_EX_RESCUE_MAX_NEW_LANES = 2
 DEFAULT_RB_RESCUE_MAX_NEW_LANES = 1
+SCATTERED_MIX_IMBALANCE_TARGET_RATIO = 0.35
+SCATTERED_MIX_IMBALANCE_TARGET_EPSILON = 1e-6
+SPECIAL_LIBRARY_LIMIT_EPSILON = 1e-6
+SCATTERED_MIX_VARIANT_ATTEMPTS = 1
+RM_SCATTERED_MIX_VARIANT_ATTEMPTS = 4
 INDEX_RULE_CONFIG_PATH = Path(__file__).resolve().parents[2] / "merge_deal" / "config"
 BALANCE_LIBRARY_CONFIG_PATH = Path(__file__).resolve().parent / "AI排机-平衡文库.csv"
 BALANCE_LIBRARY_MARKER_COLUMN = "_is_ai_balance_library"
@@ -220,6 +225,131 @@ def _ensure_unique_lane_ids(lanes: List[Any]) -> int:
 def _normalize_seq_strategy_keyword(value: Any) -> str:
     """统一测序策略匹配口径。"""
     return _normalize_text_for_match(value).replace("BP", "").replace(" ", "")
+
+
+def _is_imbalance_library_candidate(lib: EnhancedLibraryInfo) -> bool:
+    """统一判断碱基不均衡文库，避免多处直接访问处理器细节。"""
+    try:
+        return bool(_BASE_IMBALANCE_HANDLER.is_imbalance_library(lib))
+    except Exception:
+        return False
+
+
+def _summarize_lane_imbalance(
+    libraries: List[EnhancedLibraryInfo],
+) -> Tuple[float, float, float]:
+    """统计当前Lane总量、不均衡总量及占比。"""
+    total_data = 0.0
+    imbalance_data = 0.0
+    for lib in libraries:
+        data = float(getattr(lib, "contract_data_raw", 0.0) or 0.0)
+        total_data += data
+        if _is_imbalance_library_candidate(lib):
+            imbalance_data += data
+    ratio = imbalance_data / total_data if total_data > 0 else 0.0
+    return total_data, imbalance_data, ratio
+
+
+def _resolve_special_library_data_limit(machine_type: MachineType | str) -> float:
+    """获取当前机型的特殊文库总量上限。"""
+    machine_key = machine_type.value if isinstance(machine_type, MachineType) else str(machine_type)
+    return float(get_scheduling_config().get_special_library_limit(machine_key))
+
+
+def _project_lane_special_data(
+    current_libraries: List[EnhancedLibraryInfo],
+    candidate: EnhancedLibraryInfo,
+) -> float:
+    """计算加入候选文库后的特殊文库总量。"""
+    _, imbalance_data, _ = _summarize_lane_imbalance(current_libraries)
+    if _is_imbalance_library_candidate(candidate):
+        imbalance_data += float(getattr(candidate, "contract_data_raw", 0.0) or 0.0)
+    return imbalance_data
+
+
+def _project_lane_imbalance_ratio(
+    current_libraries: List[EnhancedLibraryInfo],
+    candidate: EnhancedLibraryInfo,
+) -> float:
+    """计算加入候选文库后的碱基不均衡占比。"""
+    total_data, imbalance_data, _ = _summarize_lane_imbalance(current_libraries)
+    candidate_data = float(getattr(candidate, "contract_data_raw", 0.0) or 0.0)
+    projected_total = total_data + candidate_data
+    if projected_total <= 0:
+        return 0.0
+    if _is_imbalance_library_candidate(candidate):
+        imbalance_data += candidate_data
+    return imbalance_data / projected_total
+
+
+def _imbalance_target_distance(
+    ratio: float,
+    target_ratio: float = SCATTERED_MIX_IMBALANCE_TARGET_RATIO,
+) -> float:
+    """返回当前占比距离目标占比的绝对偏差。"""
+    return abs(float(ratio) - float(target_ratio))
+
+
+def _candidate_improves_imbalance_target(
+    current_libraries: List[EnhancedLibraryInfo],
+    candidate: EnhancedLibraryInfo,
+    *,
+    target_ratio: float = SCATTERED_MIX_IMBALANCE_TARGET_RATIO,
+    machine_type: Optional[MachineType | str] = None,
+    special_data_limit: Optional[float] = None,
+) -> bool:
+    """判断候选文库是否会让Lane的不均衡占比更接近目标值。"""
+    effective_special_limit = (
+        float(special_data_limit)
+        if special_data_limit is not None
+        else (
+            _resolve_special_library_data_limit(machine_type)
+            if machine_type is not None
+            else None
+        )
+    )
+    projected_special_data = _project_lane_special_data(current_libraries, candidate)
+    if (
+        effective_special_limit is not None
+        and projected_special_data > effective_special_limit + SPECIAL_LIBRARY_LIMIT_EPSILON
+    ):
+        return False
+    _, _, current_ratio = _summarize_lane_imbalance(current_libraries)
+    projected_ratio = _project_lane_imbalance_ratio(current_libraries, candidate)
+    return (
+        _imbalance_target_distance(projected_ratio, target_ratio)
+        + SCATTERED_MIX_IMBALANCE_TARGET_EPSILON
+        < _imbalance_target_distance(current_ratio, target_ratio)
+    )
+
+
+def _build_imbalance_fill_sort_key(
+    current_libraries: List[EnhancedLibraryInfo],
+    lib: EnhancedLibraryInfo,
+    *,
+    target_ratio: float = SCATTERED_MIX_IMBALANCE_TARGET_RATIO,
+    machine_type: Optional[MachineType | str] = None,
+    special_data_limit: Optional[float] = None,
+) -> Tuple[int, int, float, float, float]:
+    """构建“尽量逼近不均衡目标占比”的排序键。"""
+    data = float(getattr(lib, "contract_data_raw", 0.0) or 0.0)
+    if not current_libraries:
+        return (0, 1, 0.0, 0.0, -data)
+    _, _, current_ratio = _summarize_lane_imbalance(current_libraries)
+    projected_ratio = _project_lane_imbalance_ratio(current_libraries, lib)
+    return (
+        0 if _candidate_improves_imbalance_target(
+            current_libraries,
+            lib,
+            target_ratio=target_ratio,
+            machine_type=machine_type,
+            special_data_limit=special_data_limit,
+        ) else 1,
+        0 if (_is_imbalance_library_candidate(lib) and current_ratio < target_ratio) else 1,
+        _imbalance_target_distance(projected_ratio, target_ratio),
+        max(projected_ratio - target_ratio, 0.0),
+        -data,
+    )
 
 
 LANE_LOADING_COMBO_GROUP_A = {
@@ -1016,6 +1146,9 @@ def _sort_remaining_for_scattered_mix_lane(
 def _sort_remaining_for_lane_seed(
     libraries: List[EnhancedLibraryInfo],
     seed_lib: EnhancedLibraryInfo,
+    current_lane_libs: Optional[List[EnhancedLibraryInfo]] = None,
+    machine_type: Optional[MachineType | str] = None,
+    special_data_limit: Optional[float] = None,
 ) -> List[EnhancedLibraryInfo]:
     """单条Lane内优先吞同级高优先级文库，降低临检/SJ/YC被打散概率。"""
     if not libraries:
@@ -1024,11 +1157,18 @@ def _sort_remaining_for_lane_seed(
     seed_rank = _get_scattered_mix_priority_rank(seed_lib)
     base_sorted = _sort_remaining_for_scattered_mix_lane(libraries)
     base_order = {id(lib): idx for idx, lib in enumerate(base_sorted)}
+    lane_context = list(current_lane_libs or [])
     return sorted(
         libraries,
         key=lambda lib: (
             0 if _get_scattered_mix_priority_rank(lib) == seed_rank else 1,
             _get_scattered_mix_priority_rank(lib),
+            *_build_imbalance_fill_sort_key(
+                lane_context,
+                lib,
+                machine_type=machine_type,
+                special_data_limit=special_data_limit,
+            ),
             _get_scattered_mix_delete_date_sort_value(lib),
             base_order.get(id(lib), len(base_order)),
             -lib.get_data_amount_gb(),
@@ -1038,16 +1178,31 @@ def _sort_remaining_for_lane_seed(
 
 def _build_scattered_mix_candidate_order(
     libraries: List[EnhancedLibraryInfo],
+    current_lane_libs: Optional[List[EnhancedLibraryInfo]] = None,
+    seed_offset: int = 0,
+    machine_type: Optional[MachineType | str] = None,
+    special_data_limit: Optional[float] = None,
 ) -> List[EnhancedLibraryInfo]:
     """为散样混排构建稳定候选顺序。"""
     if not libraries:
         return libraries
 
     ordered = _sort_remaining_for_scattered_mix_lane(libraries)
-    seed_lib = ordered[0]
+    lane_context = list(current_lane_libs or [])
+    if lane_context:
+        seed_lib = lane_context[0]
+    else:
+        seed_index = min(max(int(seed_offset), 0), len(ordered) - 1)
+        seed_lib = ordered[seed_index]
     seen: Set[int] = set()
     prioritized: List[EnhancedLibraryInfo] = []
-    for lib in _sort_remaining_for_lane_seed(ordered, seed_lib):
+    for lib in _sort_remaining_for_lane_seed(
+        ordered,
+        seed_lib,
+        current_lane_libs=lane_context,
+        machine_type=machine_type,
+        special_data_limit=special_data_limit,
+    ):
         object_id = id(lib)
         if object_id in seen:
             continue
@@ -1101,63 +1256,132 @@ def _attempt_build_lane_from_pool(
     index_conflict_retry_count = 0
     other_failure_retry_count = 0
     attempt_idx = 0
+    seen_selected_signatures: Set[Tuple[str, ...]] = set()
+    special_data_limit = _resolve_special_library_data_limit(machine_type)
+    max_scattered_mix_attempts = (
+        RM_SCATTERED_MIX_VARIANT_ATTEMPTS
+        if prioritize_scattered_mix and lane_id_prefix == "RM"
+        else SCATTERED_MIX_VARIANT_ATTEMPTS
+    )
     while (
         index_conflict_retry_count < index_conflict_attempts
         and other_failure_retry_count < other_failure_attempts
     ):
         attempt_idx += 1
-        if prioritize_scattered_mix:
-            candidates = _build_scattered_mix_candidate_order(active_pool)
-        else:
-            candidates = list(active_pool)
-            random.shuffle(candidates)
+        if prioritize_scattered_mix and attempt_idx > max_scattered_mix_attempts:
+            break
         selected: List[EnhancedLibraryInfo] = []
         # 与 selected 平行维护的预解析索引缓存，避免在 validate_new_lib_quick_with_cache
         # 内部对同一文库反复调用 _parse_library_indices（逐个候选检查时累计百万次调用）
         selected_idx_cache: List = []
         total = 0.0
         random_target: Optional[float] = None
-        for lib in candidates:
-            data = lib.get_data_amount_gb()
-            trial_libs = selected + [lib]
-            trial_min_allowed, trial_max_allowed = _resolve_lane_capacity_limits(
-                libraries=trial_libs,
-                machine_type=machine_type,
-                lane_metadata=extra_metadata,
-            )
-            if total + data > trial_max_allowed:
-                continue
-            ss_valid, _, _ = _validate_lane_special_split_rule(trial_libs)
-            if not ss_valid:
-                continue
-            imbalance_mix_valid, _ = _validate_lane_57_mix_rules(
-                trial_libs,
-                enforce_total_limit=False,
-            )
-            if not imbalance_mix_valid:
-                continue
-            # 带缓存增量检查：new_lib 的 index 解析结果同步写入 selected_idx_cache，
-            # 后续再判断其他候选时不再重复解析 selected 中已有文库的索引
-            idx_valid, lib_indices = _idx_validator.validate_new_lib_quick_with_cache(
-                selected_idx_cache, lib
-            )
-            if not idx_valid:
-                continue
-            selected.append(lib)
-            selected_idx_cache.append(lib_indices)
-            total += data
-            if random_target is None and total >= trial_min_allowed:
-                if prioritize_scattered_mix:
-                    # 散样混排优先聚拢高优先级文库，达到成Lane下限后不再继续吞入更低优先级文库。
-                    random_target = float(trial_min_allowed)
-                else:
-                    random_target = random.uniform(trial_min_allowed, trial_max_allowed)
-                logger.debug(
-                    f"Lane打包随机目标: {random_target:.1f}G "
-                    f"(范围={trial_min_allowed:.0f}~{trial_max_allowed:.0f}G, 当前={total:.1f}G)"
+        if prioritize_scattered_mix:
+            while True:
+                selected_min_allowed = 0.0
+                if selected:
+                    selected_min_allowed, _ = _resolve_lane_capacity_limits(
+                        libraries=selected,
+                        machine_type=machine_type,
+                        lane_metadata=extra_metadata,
+                    )
+                remaining_candidates = [lib for lib in active_pool if lib not in selected]
+                if not remaining_candidates:
+                    break
+                lane_context_for_sort = selected if selected else None
+                candidates = _build_scattered_mix_candidate_order(
+                    remaining_candidates,
+                    current_lane_libs=lane_context_for_sort,
+                    seed_offset=attempt_idx - 1,
+                    machine_type=machine_type,
+                    special_data_limit=special_data_limit,
                 )
-            if random_target is not None and total >= random_target:
-                break
+                added_candidate = False
+                for lib in candidates:
+                    projected_special_data = _project_lane_special_data(selected, lib)
+                    if projected_special_data > special_data_limit + SPECIAL_LIBRARY_LIMIT_EPSILON:
+                        continue
+                    if (
+                        selected
+                        and total >= selected_min_allowed
+                        and not _candidate_improves_imbalance_target(
+                            selected,
+                            lib,
+                            machine_type=machine_type,
+                            special_data_limit=special_data_limit,
+                        )
+                    ):
+                        continue
+                    data = lib.get_data_amount_gb()
+                    trial_libs = selected + [lib]
+                    trial_min_allowed, trial_max_allowed = _resolve_lane_capacity_limits(
+                        libraries=trial_libs,
+                        machine_type=machine_type,
+                        lane_metadata=extra_metadata,
+                    )
+                    if total + data > trial_max_allowed:
+                        continue
+                    ss_valid, _, _ = _validate_lane_special_split_rule(trial_libs)
+                    if not ss_valid:
+                        continue
+                    imbalance_mix_valid, _ = _validate_lane_57_mix_rules(
+                        trial_libs,
+                        enforce_total_limit=False,
+                    )
+                    if not imbalance_mix_valid:
+                        continue
+                    idx_valid, lib_indices = _idx_validator.validate_new_lib_quick_with_cache(
+                        selected_idx_cache, lib
+                    )
+                    if not idx_valid:
+                        continue
+                    selected.append(lib)
+                    selected_idx_cache.append(lib_indices)
+                    total += data
+                    added_candidate = True
+                    break
+                if not added_candidate:
+                    break
+        else:
+            candidates = list(active_pool)
+            random.shuffle(candidates)
+            for lib in candidates:
+                data = lib.get_data_amount_gb()
+                trial_libs = selected + [lib]
+                trial_min_allowed, trial_max_allowed = _resolve_lane_capacity_limits(
+                    libraries=trial_libs,
+                    machine_type=machine_type,
+                    lane_metadata=extra_metadata,
+                )
+                if total + data > trial_max_allowed:
+                    continue
+                ss_valid, _, _ = _validate_lane_special_split_rule(trial_libs)
+                if not ss_valid:
+                    continue
+                imbalance_mix_valid, _ = _validate_lane_57_mix_rules(
+                    trial_libs,
+                    enforce_total_limit=False,
+                )
+                if not imbalance_mix_valid:
+                    continue
+                # 带缓存增量检查：new_lib 的 index 解析结果同步写入 selected_idx_cache，
+                # 后续再判断其他候选时不再重复解析 selected 中已有文库的索引
+                idx_valid, lib_indices = _idx_validator.validate_new_lib_quick_with_cache(
+                    selected_idx_cache, lib
+                )
+                if not idx_valid:
+                    continue
+                selected.append(lib)
+                selected_idx_cache.append(lib_indices)
+                total += data
+                if random_target is None and total >= trial_min_allowed:
+                    random_target = random.uniform(trial_min_allowed, trial_max_allowed)
+                    logger.debug(
+                        f"Lane打包随机目标: {random_target:.1f}G "
+                        f"(范围={trial_min_allowed:.0f}~{trial_max_allowed:.0f}G, 当前={total:.1f}G)"
+                    )
+                if random_target is not None and total >= random_target:
+                    break
         if not selected:
             other_failure_retry_count += 1
             # 大池结构性快速失败：若大量随机尝试均无法选出任何文库，说明约束将整个候选
@@ -1187,6 +1411,17 @@ def _attempt_build_lane_from_pool(
             ):
                 break
             continue
+        selected_signature = tuple(_get_library_identity_key(lib) for lib in selected)
+        if prioritize_scattered_mix and selected_signature in seen_selected_signatures:
+            logger.debug(
+                "散样混排补Lane命中重复候选组合: prefix={}, machine={}, size={}, attempt={}",
+                lane_id_prefix,
+                machine_type.value,
+                len(selected_signature),
+                attempt_idx,
+            )
+            continue
+        seen_selected_signatures.add(selected_signature)
         lane_id = f"{lane_id_prefix}_{machine_type.value}_{allocated_lane_serial:03d}"
         lane = LaneAssignment(
             lane_id=lane_id,
@@ -1212,6 +1447,18 @@ def _attempt_build_lane_from_pool(
             index_conflict_retry_count += 1
         else:
             other_failure_retry_count += 1
+        if prioritize_scattered_mix:
+            logger.debug(
+                "散样混排补Lane候选组合验证失败: prefix={}, machine={}, lane_id={}, attempt={}/{}",
+                lane_id_prefix,
+                machine_type.value,
+                lane_id,
+                attempt_idx,
+                max_scattered_mix_attempts,
+            )
+            if attempt_idx >= max_scattered_mix_attempts:
+                break
+            continue
     return None, []
 
 
@@ -1232,6 +1479,28 @@ def _attempt_build_rescue_lane_from_pool(
     """
     if not pool:
         return None, []
+
+    # Stage 3 的 OG 普通尾货聚簇补Lane本身已经是同类、低优先级、窄池候选，
+    # 再走散样混排优先路径收益很低，却会显著放大排序与重试成本。
+    if lane_id_prefix == "OG":
+        logger.info(
+            "补Lane尝试: variant=cluster_fast_path, lane_prefix={}, pool_size={}, pool_data={:.3f}G, prioritize_scattered_mix=False".format(
+                lane_id_prefix,
+                len(pool),
+                sum(lib.get_data_amount_gb() for lib in pool),
+            )
+        )
+        return _attempt_build_lane_from_pool(
+            pool=list(pool),
+            validator=validator,
+            machine_type=machine_type,
+            lane_id_prefix=lane_id_prefix,
+            lane_serial=lane_serial,
+            index_conflict_attempts=index_conflict_attempts,
+            other_failure_attempts=other_failure_attempts,
+            extra_metadata=extra_metadata,
+            prioritize_scattered_mix=False,
+        )
 
     seen_variants: Set[Tuple[bool, Tuple[int, ...]]] = set()
     non_clinical_pool = [
@@ -1312,6 +1581,8 @@ def _attempt_build_lane_from_prioritized_pool(
     idx_validator = _MODULE_IDX_VALIDATOR
     index_conflict_retry_count = 0
     other_failure_retry_count = 0
+    seen_selected_signatures: Set[Tuple[str, ...]] = set()
+    special_data_limit = _resolve_special_library_data_limit(machine_type)
     while (
         index_conflict_retry_count < index_conflict_attempts
         and other_failure_retry_count < other_failure_attempts
@@ -1322,57 +1593,96 @@ def _attempt_build_lane_from_prioritized_pool(
         total = 0.0
         random_target: Optional[float] = None
 
-        def _ordered_candidates(pool: List[EnhancedLibraryInfo], prefer_balanced: bool) -> List[EnhancedLibraryInfo]:
+        def _ordered_candidates(
+            pool: List[EnhancedLibraryInfo],
+            prefer_balanced: bool,
+            current_lane_libs: Optional[List[EnhancedLibraryInfo]] = None,
+        ) -> List[EnhancedLibraryInfo]:
             filtered_pool = [lib for lib in pool if match_fn(lib)] if match_fn is not None else list(pool)
             return sorted(
                 filtered_pool,
                 key=lambda lib: (
                     0 if (_BASE_IMBALANCE_HANDLER.is_imbalance_library(lib) is (not prefer_balanced)) else 1,
+                    *_build_imbalance_fill_sort_key(
+                        list(current_lane_libs or []),
+                        lib,
+                        machine_type=machine_type,
+                        special_data_limit=special_data_limit,
+                    ),
                     -float(getattr(lib, "contract_data_raw", 0.0) or 0.0),
                     str(getattr(lib, "origrec", "") or ""),
                 ),
             )
 
-        candidate_buckets = [
-            _ordered_candidates(active_primary_pool, prefer_balanced=False),
-            _ordered_candidates(active_secondary_pool, prefer_balanced=True),
-        ]
-
-        for candidates in candidate_buckets:
-            for lib in candidates:
-                if lib in selected:
-                    continue
-                data = lib.get_data_amount_gb()
-                trial_libs = selected + [lib]
-                trial_min_allowed, trial_max_allowed = _resolve_lane_capacity_limits(
-                    libraries=trial_libs,
+        while True:
+            selected_min_allowed = 0.0
+            if selected:
+                selected_min_allowed, _ = _resolve_lane_capacity_limits(
+                    libraries=selected,
                     machine_type=machine_type,
                 )
-                if total + data > trial_max_allowed:
-                    continue
-                ss_valid, _, _ = _validate_lane_special_split_rule(trial_libs)
-                if not ss_valid:
-                    continue
-                imbalance_mix_valid, _ = _validate_lane_57_mix_rules(
-                    trial_libs,
-                    enforce_total_limit=False,
-                )
-                if not imbalance_mix_valid:
-                    continue
-                # 带缓存增量检查，避免对 selected 中已有文库的索引反复解析
-                idx_valid, lib_indices = idx_validator.validate_new_lib_quick_with_cache(
-                    selected_idx_cache, lib
-                )
-                if not idx_valid:
-                    continue
-                selected.append(lib)
-                selected_idx_cache.append(lib_indices)
-                total += data
-                if random_target is None and total >= trial_min_allowed:
-                    random_target = random.uniform(trial_min_allowed, trial_max_allowed)
-                if random_target is not None and total >= random_target:
+            lane_context_for_sort = selected if selected else None
+            candidate_buckets = [
+                _ordered_candidates(
+                    [lib for lib in active_primary_pool if lib not in selected],
+                    prefer_balanced=False,
+                    current_lane_libs=lane_context_for_sort,
+                ),
+                _ordered_candidates(
+                    [lib for lib in active_secondary_pool if lib not in selected],
+                    prefer_balanced=True,
+                    current_lane_libs=lane_context_for_sort,
+                ),
+            ]
+
+            added_candidate = False
+            for candidates in candidate_buckets:
+                for lib in candidates:
+                    projected_special_data = _project_lane_special_data(selected, lib)
+                    if projected_special_data > special_data_limit + SPECIAL_LIBRARY_LIMIT_EPSILON:
+                        continue
+                    if (
+                        selected
+                        and total >= selected_min_allowed
+                        and not _candidate_improves_imbalance_target(
+                            selected,
+                            lib,
+                            machine_type=machine_type,
+                            special_data_limit=special_data_limit,
+                        )
+                    ):
+                        continue
+                    data = lib.get_data_amount_gb()
+                    trial_libs = selected + [lib]
+                    trial_min_allowed, trial_max_allowed = _resolve_lane_capacity_limits(
+                        libraries=trial_libs,
+                        machine_type=machine_type,
+                    )
+                    if total + data > trial_max_allowed:
+                        continue
+                    ss_valid, _, _ = _validate_lane_special_split_rule(trial_libs)
+                    if not ss_valid:
+                        continue
+                    imbalance_mix_valid, _ = _validate_lane_57_mix_rules(
+                        trial_libs,
+                        enforce_total_limit=False,
+                    )
+                    if not imbalance_mix_valid:
+                        continue
+                    # 带缓存增量检查，避免对 selected 中已有文库的索引反复解析
+                    idx_valid, lib_indices = idx_validator.validate_new_lib_quick_with_cache(
+                        selected_idx_cache, lib
+                    )
+                    if not idx_valid:
+                        continue
+                    selected.append(lib)
+                    selected_idx_cache.append(lib_indices)
+                    total += data
+                    added_candidate = True
                     break
-            if random_target is not None and total >= random_target:
+                if added_candidate:
+                    break
+            if not added_candidate:
                 break
 
         if not selected:
@@ -1399,6 +1709,16 @@ def _attempt_build_lane_from_prioritized_pool(
             ):
                 break
             continue
+        selected_signature = tuple(_get_library_identity_key(lib) for lib in selected)
+        if selected_signature in seen_selected_signatures:
+            logger.debug(
+                "优先池补Lane命中重复候选组合，终止无效重试: prefix={}, machine={}, size={}",
+                lane_id_prefix,
+                machine_type.value,
+                len(selected_signature),
+            )
+            break
+        seen_selected_signatures.add(selected_signature)
 
         lane_id = f"{lane_id_prefix}_{machine_type.value}_{lane_serial:03d}"
         lane = LaneAssignment(
@@ -1418,6 +1738,13 @@ def _attempt_build_lane_from_prioritized_pool(
             index_conflict_retry_count += 1
         else:
             other_failure_retry_count += 1
+        logger.debug(
+            "优先池补Lane候选组合验证失败且路径确定，停止重复尝试: prefix={}, machine={}, lane_id={}",
+            lane_id_prefix,
+            machine_type.value,
+            lane_id,
+        )
+        break
 
     return None, []
 
@@ -1785,8 +2112,8 @@ def _apply_balance_reservation_to_capacity_selection(
         selection.soft_target_gb = max(PACKAGE_LANE_TARGET_GB - reserve_gb, 0.0)
         selection.min_target_gb = max(PACKAGE_LANE_TARGET_GB - reserve_gb, 0.0)
         selection.max_target_gb = max(PACKAGE_LANE_TARGET_GB - reserve_gb, 0.0)
-        selection.effective_min_gb = max(PACKAGE_LANE_MIN - reserve_gb, 0.0)
-        selection.effective_max_gb = max(PACKAGE_LANE_MAX - reserve_gb, 0.0)
+        selection.effective_min_gb = max(PACKAGE_LANE_MIN_GB - reserve_gb, 0.0)
+        selection.effective_max_gb = max(PACKAGE_LANE_MAX_GB - reserve_gb, 0.0)
     elif mode == "ratio":
         factor = max(0.0, 1.0 - float(reserve.get("reserve_ratio", 0.0) or 0.0))
         selection.soft_target_gb = max(float(selection.soft_target_gb) * factor, 0.0)
@@ -2798,6 +3125,144 @@ def try_multi_lib_swap_rebalance(
                 new_lanes_count += 1
 
     return {"new_lanes": new_lanes_count, "remaining_unassigned": len(unassigned)}
+
+
+def try_targeted_imbalance_upgrade(
+    solution,
+    validator,
+    *,
+    max_successful_swaps: int = 6,
+    max_candidate_libraries: int = 24,
+    max_lanes_per_candidate: int = 6,
+    max_donors_per_lane: int = 10,
+) -> Dict[str, float]:
+    """在不减少Lane数的前提下，局部替换已成Lane以提升不均衡消耗。"""
+    lanes = list(getattr(solution, "lane_assignments", []) or [])
+    unassigned = list(getattr(solution, "unassigned_libraries", []) or [])
+    if not lanes or not unassigned or max_successful_swaps <= 0:
+        return {
+            "successful_swaps": 0,
+            "changed_lanes": 0,
+            "consumed_imbalance_gb": 0.0,
+            "remaining_unassigned": len(unassigned),
+        }
+
+    candidate_lanes = [
+        lane for lane in lanes
+        if not _is_package_lane_assignment(lane)
+        and str(getattr(lane, "lane_id", "") or "").startswith(("RM_", "RB_", "EX_", "MX_"))
+    ]
+    if not candidate_lanes:
+        return {
+            "successful_swaps": 0,
+            "changed_lanes": 0,
+            "consumed_imbalance_gb": 0.0,
+            "remaining_unassigned": len(unassigned),
+        }
+
+    imbalance_candidates = [
+        lib for lib in unassigned
+        if _is_imbalance_library_candidate(lib)
+    ]
+    if not imbalance_candidates:
+        return {
+            "successful_swaps": 0,
+            "changed_lanes": 0,
+            "consumed_imbalance_gb": 0.0,
+            "remaining_unassigned": len(unassigned),
+        }
+
+    def _lane_upgrade_sort_key(
+        lane: LaneAssignment,
+        candidate: EnhancedLibraryInfo,
+    ) -> Tuple[float, float, int]:
+        _, imbalance_data, _ = _summarize_lane_imbalance(list(lane.libraries or []))
+        candidate_data = float(getattr(candidate, "contract_data_raw", 0.0) or 0.0)
+        special_limit = _resolve_special_library_data_limit(
+            lane.machine_type or MachineType.NOVA_X_25B
+        )
+        headroom = max(special_limit - imbalance_data, 0.0)
+        projected_ratio = _project_lane_imbalance_ratio(list(lane.libraries or []), candidate)
+        return (
+            0.0 if headroom + SPECIAL_LIBRARY_LIMIT_EPSILON >= candidate_data else 1.0,
+            _imbalance_target_distance(projected_ratio),
+            len(lane.libraries or []),
+        )
+
+    successful_swaps = 0
+    changed_lanes: Set[str] = set()
+    consumed_imbalance_gb = 0.0
+    prioritized_candidates = sorted(
+        imbalance_candidates,
+        key=lambda lib: (
+            _get_scattered_mix_priority_rank(lib),
+            -float(getattr(lib, "contract_data_raw", 0.0) or 0.0),
+            _get_scattered_mix_delete_date_sort_value(lib),
+            str(getattr(lib, "origrec", "") or ""),
+        ),
+    )[:max_candidate_libraries]
+
+    for candidate in prioritized_candidates:
+        if successful_swaps >= max_successful_swaps:
+            break
+        if candidate not in unassigned:
+            continue
+
+        candidate_rank = _get_scattered_mix_priority_rank(candidate)
+        candidate_data = float(getattr(candidate, "contract_data_raw", 0.0) or 0.0)
+        ordered_lanes = sorted(
+            candidate_lanes,
+            key=lambda lane: _lane_upgrade_sort_key(lane, candidate),
+        )
+        upgraded = False
+
+        for lane in ordered_lanes[:max_lanes_per_candidate]:
+            lane_libraries = list(lane.libraries or [])
+            if not lane_libraries:
+                continue
+            donor_candidates = [
+                lib for lib in lane_libraries
+                if not _is_imbalance_library_candidate(lib)
+                and _get_scattered_mix_priority_rank(lib) >= candidate_rank
+            ]
+            if not donor_candidates:
+                continue
+            donor_candidates = sorted(
+                donor_candidates,
+                key=lambda lib: (
+                    _get_scattered_mix_priority_rank(lib),
+                    abs(float(getattr(lib, "contract_data_raw", 0.0) or 0.0) - candidate_data),
+                    float(getattr(lib, "contract_data_raw", 0.0) or 0.0),
+                    str(getattr(lib, "origrec", "") or ""),
+                ),
+            )[:max_donors_per_lane]
+
+            for donor in donor_candidates:
+                trial_libraries = [lib for lib in lane_libraries if lib is not donor] + [candidate]
+                result = _validate_lane_state(validator, lane, trial_libraries)
+                if not result.is_valid:
+                    continue
+
+                lane.libraries = trial_libraries
+                lane.total_data_gb = _total_lane_data(trial_libraries)
+                lane.calculate_metrics()
+                unassigned.remove(candidate)
+                unassigned.append(donor)
+                successful_swaps += 1
+                changed_lanes.add(str(lane.lane_id))
+                consumed_imbalance_gb += candidate_data
+                upgraded = True
+                break
+            if upgraded:
+                break
+
+    solution.unassigned_libraries = unassigned
+    return {
+        "successful_swaps": successful_swaps,
+        "changed_lanes": len(changed_lanes),
+        "consumed_imbalance_gb": round(consumed_imbalance_gb, 3),
+        "remaining_unassigned": len(unassigned),
+    }
 
 
 def _get_residual_regroup_cluster_key(lib: EnhancedLibraryInfo) -> str:
