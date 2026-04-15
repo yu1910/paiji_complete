@@ -23,6 +23,7 @@ class LibrarySplitter:
     MODE_ONE_POINT_ONE = "1.1"
     MODE_ONE_POINT_ONE_ALIASES = ("1.1", "1.0")
     MODE_3_6T_NEW = "3.6t-new"
+    MODE_LANE_SEQ = "lane seq"
     MODE_OTHER = "other"
 
     def __init__(self):
@@ -204,14 +205,16 @@ class LibrarySplitter:
         return False
 
     def _detect_sequence_mode(self, lib: EnhancedLibraryInfo) -> str:
-        """识别测序模式，区分1.1模式族与3.6T-NEW模式。"""
+        """识别测序模式，区分1.1模式族与3.6T-NEW模式。
+
+        拆分规则只关心当前排机上下文，不应被历史字段 ``llastcxms`` 干扰。
+        ``llastcxms`` 仅用于 1.1 模式分流和第二轮候选识别，不参与拆分模式判断。
+        """
         mode_candidates = [
             getattr(lib, "_lane_sj_mode_raw", None),
             getattr(lib, "lane_sj_mode", None),
             getattr(lib, "_current_seq_mode_raw", None),
             getattr(lib, "current_seq_mode", None),
-            getattr(lib, "_last_cxms_raw", None),
-            getattr(lib, "last_cxms", None),
             getattr(lib, "seq_scheme", None),
             getattr(lib, "test_no", None),
         ]
@@ -228,12 +231,67 @@ class LibrarySplitter:
                 return self.MODE_ONE_POINT_ONE
             if self._contains_mode_token(text, self.MODE_3_6T_NEW):
                 return self.MODE_3_6T_NEW
+            if self._contains_mode_token(text, self.MODE_LANE_SEQ):
+                return self.MODE_OTHER
+
+        if self._is_lane_seq_library(lib):
+            return self.MODE_OTHER
+        if self._is_default_3_6t_new_library(lib):
+            return self.MODE_3_6T_NEW
         return self.MODE_OTHER
 
     @staticmethod
     def _contains_mode_token(text: str, mode_token: str) -> bool:
         """判断文本中是否包含独立的模式标记，如1.0或1.1。"""
         return re.search(rf"(?<!\d){re.escape(mode_token.lower())}(?!\d)", text) is not None
+
+    def _is_lane_seq_library(self, lib: EnhancedLibraryInfo) -> bool:
+        """判断是否为 lane seq 策略，避免误按 3.6T-NEW 处理。"""
+        strategy_candidates = [
+            getattr(lib, "seq_scheme", None),
+            getattr(lib, "_seq_scheme_raw", None),
+            getattr(lib, "test_no", None),
+        ]
+        for value in strategy_candidates:
+            if value is None:
+                continue
+            text = str(value).strip().lower()
+            if not text:
+                continue
+            if self._contains_mode_token(text, "10+24"):
+                return True
+            if self._contains_mode_token(text, self.MODE_LANE_SEQ):
+                return True
+        return False
+
+    def _is_default_3_6t_new_library(self, lib: EnhancedLibraryInfo) -> bool:
+        """按当前配置口径为缺省模式的 X Plus 文库兜底到 3.6T-NEW。"""
+        test_code = getattr(lib, "test_code", None)
+        try:
+            normalized_test_code = int(float(test_code))
+        except (TypeError, ValueError):
+            normalized_test_code = None
+
+        if normalized_test_code == 1595 and not self._is_lane_seq_library(lib):
+            return True
+
+        test_no = str(getattr(lib, "test_no", "") or "").strip().lower()
+        eq_type = str(getattr(lib, "eq_type", "") or "").strip().lower()
+        if self._is_lane_seq_library(lib):
+            return False
+
+        xplus_keywords = (
+            "novaseq x plus",
+            "nova x plus",
+        )
+        machine_keywords = (
+            "nova x-25b",
+            "nova x-10b",
+        )
+
+        return any(keyword in test_no for keyword in xplus_keywords) or any(
+            keyword in eq_type for keyword in machine_keywords
+        )
 
     def _perform_split(self, lib: EnhancedLibraryInfo) -> List[EnhancedLibraryInfo]:
         """执行拆分操作 - 支持多级拆分

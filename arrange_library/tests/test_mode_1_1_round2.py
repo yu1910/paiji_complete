@@ -12,13 +12,17 @@
 
 import sys
 from pathlib import Path
+from types import SimpleNamespace
 
 import pytest
 
 sys.path.insert(0, str(Path(__file__).resolve().parent.parent.parent))
 
+import arrange_library.arrange_library_model6 as arrange_library_model6
 from arrange_library.core.scheduling.mode_1_1_round2 import Mode11Round2Handler
+from arrange_library.core.scheduling.scheduling_types import LaneAssignment
 from arrange_library.models.library_info import EnhancedLibraryInfo
+from arrange_library.models.library_info import MachineType
 
 
 def _make_lib(
@@ -26,6 +30,7 @@ def _make_lib(
     last_lane_round: str = "",
     last_laneid: str = "",
     contract_data_raw: float = 50.0,
+    last_outrate: float | None = None,
 ) -> EnhancedLibraryInfo:
     """构造测试用文库对象"""
     lib = EnhancedLibraryInfo(
@@ -54,6 +59,8 @@ def _make_lib(
     )
     lib.last_lane_round = last_lane_round if last_lane_round else None
     lib.last_laneid = last_laneid if last_laneid else None
+    if last_outrate is not None:
+        lib._last_outrate_raw = float(last_outrate)
     return lib
 
 
@@ -149,3 +156,79 @@ class TestRound2Grouping:
         assert result.total_candidates == 3
         assert len(result.non_candidates) == 1
         assert len(result.candidate_groups) == 2
+
+
+class TestRound2Scheduling:
+    """第二轮真实排机测试"""
+
+    def test_schedule_round2_returns_lanes_with_round_metadata(self, monkeypatch):
+        lane = LaneAssignment(
+            lane_id="R2_LANE_001",
+            machine_id="M_R2_LANE_001",
+            machine_type=MachineType.NOVA_X_25B,
+            libraries=[],
+            metadata={},
+        )
+
+        def _fake_test_with_model(libraries, existing_lanes=None):
+            lane.libraries = list(libraries)
+            return {}, SimpleNamespace(
+                lane_assignments=[lane],
+                unassigned_libraries=[],
+            )
+
+        monkeypatch.setattr(arrange_library_model6, "test_with_model", _fake_test_with_model)
+
+        libs = [
+            _make_lib(origrec="L1", last_lane_round="1.1第一轮", last_laneid="LANE_X"),
+            _make_lib(origrec="L2", last_lane_round="1.1第一轮", last_laneid="LANE_X"),
+        ]
+        handler = Mode11Round2Handler(_SAMPLE_CONFIG)
+        identified = handler.identify_round2_candidates(libs)
+        scheduled = handler.schedule_round2(identified.candidate_groups)
+
+        assert len(scheduled.lanes) == 1
+        assert scheduled.scheduled_groups == 1
+        assert scheduled.broken_groups == 0
+        assert scheduled.lanes[0].metadata["selected_seq_mode"] == "1.1"
+        assert scheduled.lanes[0].metadata["selected_round_label"] == "1.1第二轮"
+        assert scheduled.lanes[0].metadata["dispatch_stage"] == "second_round_1_1"
+
+    def test_schedule_round2_marks_low_output_pooling_factor(self, monkeypatch):
+        lane = LaneAssignment(
+            lane_id="R2_LANE_002",
+            machine_id="M_R2_LANE_002",
+            machine_type=MachineType.NOVA_X_25B,
+            libraries=[],
+            metadata={},
+        )
+
+        def _fake_test_with_model(libraries, existing_lanes=None):
+            lane.libraries = list(libraries)
+            return {}, SimpleNamespace(
+                lane_assignments=[lane],
+                unassigned_libraries=[],
+            )
+
+        monkeypatch.setattr(arrange_library_model6, "test_with_model", _fake_test_with_model)
+
+        libs = [
+            _make_lib(
+                origrec="LOW_OUT",
+                last_lane_round="1.1第一轮",
+                last_laneid="LANE_Y",
+                last_outrate=35.0,
+            ),
+            _make_lib(
+                origrec="NORMAL_OUT",
+                last_lane_round="1.1第一轮",
+                last_laneid="LANE_Y",
+                last_outrate=55.0,
+            ),
+        ]
+        handler = Mode11Round2Handler(_SAMPLE_CONFIG)
+        identified = handler.identify_round2_candidates(libs)
+        scheduled = handler.schedule_round2(identified.candidate_groups)
+
+        assert scheduled.lanes[0].metadata["mode_1_1_round2_pooling_factor"] == 2.5
+        assert scheduled.lanes[0].metadata["mode_1_1_round2_low_output_origrecs"] == ["LOW_OUT"]

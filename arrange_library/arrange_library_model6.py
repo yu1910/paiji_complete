@@ -4201,6 +4201,130 @@ def _apply_add_test_output_rate_rule_to_prediction_df(
     return df
 
 
+def _apply_mode_1_1_round2_pooling_rule_to_prediction_df(
+    prediction_df: pd.DataFrame,
+    output_path: Optional[Path] = None,
+) -> pd.DataFrame:
+    """对1.1第二轮低产出率文库应用默认pooling系数规则。"""
+    if prediction_df is None or prediction_df.empty:
+        return prediction_df
+
+    df = prediction_df.copy()
+    mode_1_1_config = get_scheduling_config().get_mode_1_1_config()
+    second_round_label = str(mode_1_1_config.get("second_round_label", "1.1第二轮"))
+
+    applied_count = 0
+    for idx, row in df.iterrows():
+        lane_round = _get_row_attr_text(row, ["laneround"])
+        if lane_round != second_round_label:
+            continue
+
+        pooling_factor = _get_row_attr_float(row, ["resolved_round2_pooling_factor"])
+        contract_data = _get_row_attr_float(row, ["wkcontractdata", "contractdata"])
+        if pooling_factor is None or pooling_factor <= 0 or contract_data is None or contract_data <= 0:
+            continue
+
+        rounded_order = round(float(contract_data) * float(pooling_factor), 6)
+        df.at[idx, "lorderdata"] = rounded_order
+        if "predicted_lorderdata" in df.columns:
+            df.at[idx, "predicted_lorderdata"] = rounded_order
+        applied_count += 1
+
+    df = df.drop(columns=["resolved_round2_pooling_factor"], errors="ignore")
+    logger.info("1.1第二轮pooling规则应用完成: 覆盖{}条".format(applied_count))
+
+    if output_path is not None:
+        df.to_csv(output_path, index=False)
+        logger.info(f"已写回1.1第二轮pooling修正结果: {output_path}")
+
+    return df
+
+
+def _apply_mode_1_1_round2_balance_rule_to_prediction_df(
+    prediction_df: pd.DataFrame,
+    output_path: Optional[Path] = None,
+) -> pd.DataFrame:
+    """按1.1第二轮规则回写平衡文库合同量/下单量。"""
+    if prediction_df is None or prediction_df.empty:
+        return prediction_df
+
+    df = prediction_df.copy()
+    if "resolved_round2_balance_ratio" not in df.columns:
+        return df
+    if BALANCE_LIBRARY_MARKER_COLUMN not in df.columns:
+        df = df.drop(columns=["resolved_round2_balance_ratio"], errors="ignore")
+        return df
+
+    mode_1_1_config = get_scheduling_config().get_mode_1_1_config()
+    second_round_label = str(mode_1_1_config.get("second_round_label", "1.1第二轮"))
+    marker = df[BALANCE_LIBRARY_MARKER_COLUMN].fillna(False).astype(str).str.lower().isin({"true", "1", "yes"})
+    if not marker.any():
+        df = df.drop(columns=["resolved_round2_balance_ratio"], errors="ignore")
+        return df
+
+    applied_lane_count = 0
+    lane_id_series = df.get("llaneid")
+    if lane_id_series is None:
+        lane_id_series = df.get("laneid")
+    if lane_id_series is None:
+        df = df.drop(columns=["resolved_round2_balance_ratio"], errors="ignore")
+        return df
+
+    for lane_id in lane_id_series.fillna("").astype(str).unique():
+        lane_id = str(lane_id).strip()
+        if not lane_id:
+            continue
+
+        lane_mask = lane_id_series.fillna("").astype(str).eq(lane_id)
+        balance_mask = lane_mask & marker
+        if not balance_mask.any():
+            continue
+
+        lane_round_values = df.loc[lane_mask, "laneround"] if "laneround" in df.columns else pd.Series(dtype=object)
+        if second_round_label not in {str(item).strip() for item in lane_round_values.dropna().tolist()}:
+            continue
+
+        ratio_series = pd.to_numeric(
+            df.loc[lane_mask, "resolved_round2_balance_ratio"] if "resolved_round2_balance_ratio" in df.columns else pd.Series(dtype=float),
+            errors="coerce",
+        ).dropna()
+        if ratio_series.empty:
+            continue
+
+        balance_ratio = float(ratio_series.max())
+        if balance_ratio <= 0:
+            continue
+
+        non_balance_order_sum = float(
+            pd.to_numeric(df.loc[lane_mask & (~marker), "lorderdata"], errors="coerce").fillna(0.0).sum()
+        )
+        if non_balance_order_sum <= 0:
+            continue
+
+        balance_amount = round(non_balance_order_sum * balance_ratio, 6)
+        balance_row_count = int(balance_mask.sum())
+        if balance_row_count <= 0:
+            continue
+        per_row_balance_amount = round(balance_amount / balance_row_count, 6)
+
+        df.loc[balance_mask, "wkcontractdata"] = per_row_balance_amount
+        df.loc[balance_mask, "lorderdata"] = per_row_balance_amount
+        if "predicted_lorderdata" in df.columns:
+            df.loc[balance_mask, "predicted_lorderdata"] = per_row_balance_amount
+        if "lai_output" in df.columns:
+            df.loc[balance_mask, "lai_output"] = pd.NA
+        applied_lane_count += 1
+
+    df = df.drop(columns=["resolved_round2_balance_ratio"], errors="ignore")
+    logger.info("1.1第二轮平衡文库规则应用完成: 覆盖{}条Lane".format(applied_lane_count))
+
+    if output_path is not None:
+        df.to_csv(output_path, index=False)
+        logger.info(f"已写回1.1第二轮平衡文库修正结果: {output_path}")
+
+    return df
+
+
 def _build_origrec_key(df: pd.DataFrame) -> pd.Series:
     """构建origrec唯一键"""
     keys: List[str] = []
@@ -5002,6 +5126,22 @@ def _collect_prediction_rows(
         # 从 lane metadata 中读取模式与轮次标记（编排器注入）
         lane_selected_seq_mode = str(lane_meta.get("selected_seq_mode", "") or "").strip()
         lane_selected_round_label = str(lane_meta.get("selected_round_label", "") or "").strip()
+        round2_low_output_origrecs = {
+            str(item).strip()
+            for item in (lane_meta.get("mode_1_1_round2_low_output_origrecs") or [])
+            if str(item).strip()
+        }
+        round2_pooling_factor = _safe_float(
+            lane_meta.get("mode_1_1_round2_pooling_factor"),
+            default=None,
+        )
+        round2_balance_ratio = None
+        if lane_selected_round_label == str(
+            get_scheduling_config().get_mode_1_1_config().get("second_round_label", "1.1第二轮")
+        ):
+            resolved_ratio = _resolve_lane_balance_ratio(lane)
+            if resolved_ratio > 0:
+                round2_balance_ratio = resolved_ratio
 
         # 排机阶段不做下单/产出预测，统一在 prediction_delivery 阶段落地。
         for lib in libs:
@@ -5032,6 +5172,13 @@ def _collect_prediction_rows(
                     "resolved_lsjfs": lane_loading_method or None,
                     "resolved_lcxms": lane_sequencing_mode or None,
                     "resolved_index_check_rule": lane_index_rule or None,
+                    "resolved_round2_pooling_factor": (
+                        round2_pooling_factor
+                        if round2_pooling_factor is not None
+                        and str(getattr(lib, "origrec", "") or "").strip() in round2_low_output_origrecs
+                        else None
+                    ),
+                    "resolved_round2_balance_ratio": round2_balance_ratio,
                     "wkcontractdata": contract,
                     "wkbalancedata": (
                         lane_balance_data_value
@@ -5321,6 +5468,8 @@ def _build_detail_output(
             "resolved_seq_mode",
             "resolved_round_label",
             "resolved_index_check_rule",
+            "resolved_round2_pooling_factor",
+            "resolved_round2_balance_ratio",
             "wkbalancedata",
             BALANCE_LIBRARY_MARKER_COLUMN,
             "predicted_lorderdata",
@@ -5340,6 +5489,8 @@ def _build_detail_output(
                 "resolved_seq_mode",
                 "resolved_round_label",
                 "resolved_index_check_rule",
+                "resolved_round2_pooling_factor",
+                "resolved_round2_balance_ratio",
                 "wkbalancedata",
                 BALANCE_LIBRARY_MARKER_COLUMN,
                 "predicted_lorderdata",
@@ -6065,6 +6216,14 @@ def _run_prediction_delivery(input_data: Union[Path, pd.DataFrame], output_path:
         prediction_df=prediction_df,
         output_path=output_path,
     )
+    prediction_df = _apply_mode_1_1_round2_pooling_rule_to_prediction_df(
+        prediction_df=prediction_df,
+        output_path=output_path,
+    )
+    prediction_df = _apply_mode_1_1_round2_balance_rule_to_prediction_df(
+        prediction_df=prediction_df,
+        output_path=output_path,
+    )
     if BALANCE_LIBRARY_MARKER_COLUMN in prediction_df.columns:
         marker = prediction_df[BALANCE_LIBRARY_MARKER_COLUMN].fillna(False)
         marker = marker.astype(str).str.lower().isin({"true", "1", "yes"})
@@ -6298,14 +6457,25 @@ def arrange_library(
                     lib._current_seq_mode_raw = ""
                 normal_libs_for_36t.extend(pool_1_1_all)
 
-        # 第二轮候选识别（首版仅做识别和日志，不执行真实排机）
+        # 第二轮候选识别与真实排机
         round2_handler = Mode11Round2Handler(mode_1_1_config)
         round2_result = round2_handler.identify_round2_candidates(normal_libs_for_36t)
         if round2_result.total_candidates > 0:
-            round2_handler.schedule_round2(round2_result.candidate_groups)
-            # 第二轮候选暂不从普通池移除，首版仍走3.6T-NEW排机
+            round2_schedule_result = round2_handler.schedule_round2(round2_result.candidate_groups)
+            mode_1_1_lanes.extend(round2_schedule_result.lanes)
+            normal_libs = (
+                list(round2_result.non_candidates)
+                + list(round2_schedule_result.fallback_libraries)
+            )
+            logger.info(
+                "1.1第二轮真实排机完成: 新增Lane={}, 回流3.6T文库={}, 打破强绑定分组={}",
+                len(round2_schedule_result.lanes),
+                len(round2_schedule_result.fallback_libraries),
+                round2_schedule_result.broken_groups,
+            )
+        else:
+            normal_libs = normal_libs_for_36t
 
-        normal_libs = normal_libs_for_36t
         logger.info("模式分流编排完成: 3.6T-NEW候选池={}个文库, 1.1 Lane={}条",
                      len(normal_libs), len(mode_1_1_lanes))
     else:
