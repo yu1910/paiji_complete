@@ -11,5 +11,5 @@ test/pooling/paiji_complete/*.log
 .vscode/
 .idea/
 *.swp
-*.csv
 test/
+tmp/
