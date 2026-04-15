@@ -367,6 +367,13 @@ def load_libraries_from_csv(
                 raise ValueError(f"第{total_rows}行数据非法: {exc}") from exc
             continue
 
+        dept_value = str(mapped.get("DEPT") or "").strip()
+        if dept_value:
+            # 平衡文库补位阶段需要按“实验室+工序”查模板，这里保留原始实验室字段。
+            library._wkdept_raw = dept_value
+            library.wkdept = dept_value
+            library.dept = dept_value
+
         libraries.append(library)
 
         if limit is not None and len(libraries) >= limit:

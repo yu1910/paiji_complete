@@ -42,6 +42,7 @@ from loguru import logger
 # setup_liblane_paths()
 
 from arrange_library.core.config.scheduling_config import get_scheduling_config
+from arrange_library.core.preprocessing.base_imbalance_handler import BaseImbalanceHandler
 from arrange_library.models.library_info import EnhancedLibraryInfo
 
 
@@ -144,6 +145,7 @@ class LaneValidator:
         self.fc_min_data: Dict[str, float] = limits.fc_min_data
         self.base_imbalance_keywords: List[str] = limits.base_imbalance_keywords
         self.special_library_keywords: List[str] = limits.special_library_keywords
+        self._imbalance_handler = BaseImbalanceHandler()
 
         # 复用同一个 IndexConflictValidator 实例，避免每次 _validate_index_conflicts
         # 调用时都重复初始化（每次初始化会打印 INFO 日志，高频调用时有明显开销）
@@ -514,7 +516,7 @@ class LaneValidator:
         machine_type: str,
         limit_override: Optional[float] = None
     ) -> Optional[ValidationError]:
-        """校验碱基不均衡占比"""
+        """校验普通混样Lane的碱基不均衡比例与56/57混排规则。"""
         total_data = sum(float(lib.contract_data_raw or 0) for lib in libraries)
         if total_data == 0:
             return None
@@ -529,12 +531,9 @@ class LaneValidator:
         
         if imbalance_data == 0:
             return None
-        
+
         imbalance_ratio = imbalance_data / total_data
-        
-        # 根据模式选择限制
         limit = limit_override if limit_override is not None else self.base_imbalance_ratio_limit
-        
         if imbalance_ratio > limit:
             return ValidationError(
                 rule_type=ValidationRuleType.BASE_IMBALANCE_RATIO,
@@ -542,9 +541,25 @@ class LaneValidator:
                 message=f"碱基不均衡占比{imbalance_ratio:.1%}超过{limit:.0%}限制",
                 current_value=imbalance_ratio,
                 threshold_value=limit,
-                affected_libraries=imbalance_libs
+                affected_libraries=imbalance_libs,
             )
-        
+
+        has_balanced = (total_data - imbalance_data) > 1e-6
+        if has_balanced and self._imbalance_handler:
+            is_compatible, reason = self._imbalance_handler.check_mix_compatibility(
+                libraries,
+                enforce_total_limit=False,
+            )
+            if not is_compatible:
+                return ValidationError(
+                    rule_type=ValidationRuleType.BASE_IMBALANCE_RATIO,
+                    severity=ValidationSeverity.ERROR,
+                    message=f"碱基均衡+不均衡混排不符合56/57规则: {reason}",
+                    current_value=imbalance_ratio,
+                    threshold_value=limit,
+                    affected_libraries=imbalance_libs,
+                )
+
         return None
     
     def _is_base_imbalance_library(self, lib: EnhancedLibraryInfo) -> bool:
@@ -726,17 +741,6 @@ class LaneValidator:
             else:
                 balanced_count += 1
         
-        # ===== [2025-12-25 新增] 碱基不均衡专用Lane策略 =====
-        # 如果Lane内全部是碱基不均衡文库（无碱基均衡文库），跳过数据量限制
-        is_dedicated_lane = (balanced_count == 0 and imbalance_count > 0)
-        if is_dedicated_lane:
-            # 专用Lane不检查类型数量和数据量，直接通过
-            # 因为人工排机的专用Lane允许任意碱基不均衡文库组合
-            logger.debug(f"碱基不均衡专用Lane检测: {imbalance_count}个碱基不均衡文库, {special_data:.1f}GB, 跳过数据量限制")
-            return None
-        
-        # ===== 混排Lane的原有检查逻辑 =====
-        # 仅保留特殊文库总量检查，类型数量不再作为限制条件
         capacity_limit = self.special_library_capacity.get(
             machine_type,
             self.special_library_capacity.get('default', 240.0),

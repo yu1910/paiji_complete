@@ -31,6 +31,7 @@
 
 import random
 import time
+import math
 from typing import Any, List, Dict, Optional, Tuple, Set
 from dataclasses import dataclass, field, replace
 from loguru import logger
@@ -391,6 +392,166 @@ class GreedyLaneScheduler:
             else:
                 internal_libs.append(lib)
         return customer_libs, internal_libs
+
+    @staticmethod
+    def _clamp_float(value: float, min_value: float, max_value: float) -> float:
+        """将浮点数限制在给定区间内。"""
+        return max(min_value, min(value, max_value))
+
+    def _is_valid_dedicated_imbalance_candidate(
+        self,
+        candidate_libs: List[EnhancedLibraryInfo],
+    ) -> bool:
+        """检查候选碱基不均衡专Lane子集是否满足基础约束。"""
+        if not candidate_libs:
+            return False
+        if self.config.enable_index_check and not self.index_validator.validate_lane_quick(candidate_libs):
+            return False
+        if not self._check_peak_size_compatible(candidate_libs):
+            return False
+        is_compatible, _ = self.imbalance_handler.check_mix_compatibility(
+            candidate_libs,
+            enforce_total_limit=False,
+        )
+        return is_compatible
+
+    def _pick_dedicated_imbalance_subset_greedy(
+        self,
+        remaining: List[EnhancedLibraryInfo],
+        min_data: float,
+        max_data: float,
+    ) -> Tuple[List[EnhancedLibraryInfo], List[EnhancedLibraryInfo]]:
+        """回退用贪心子集选择器。"""
+        picked: List[EnhancedLibraryInfo] = []
+        next_remaining: List[EnhancedLibraryInfo] = []
+        picked_data = 0.0
+
+        for lib in remaining:
+            lib_data = lib.get_data_amount_gb()
+            if picked_data + lib_data > max_data + 1e-6:
+                next_remaining.append(lib)
+                continue
+
+            test_libs = picked + [lib]
+            if not self._is_valid_dedicated_imbalance_candidate(test_libs):
+                next_remaining.append(lib)
+                continue
+
+            picked.append(lib)
+            picked_data += lib_data
+
+        if not picked or picked_data < min_data - 1e-6:
+            return [], list(remaining)
+        return picked, next_remaining
+
+    def _pick_dedicated_imbalance_subset(
+        self,
+        remaining: List[EnhancedLibraryInfo],
+        min_data: float,
+        max_data: float,
+        target_data: float,
+    ) -> Tuple[List[EnhancedLibraryInfo], List[EnhancedLibraryInfo]]:
+        """按目标区间选择一组碱基不均衡文库，优先命中目标量。"""
+        if not remaining:
+            return [], []
+
+        scale = 10
+        min_units = int(math.ceil(min_data * scale - 1e-6))
+        max_units = int(math.floor(max_data * scale + 1e-6))
+        target_units = int(round(target_data * scale))
+        if min_units > max_units:
+            return [], list(remaining)
+
+        values = [max(1, int(round(lib.get_data_amount_gb() * scale))) for lib in remaining]
+        states: Dict[int, Tuple[int, int]] = {0: (-1, -1)}
+
+        for idx, value in enumerate(values):
+            for current_sum in sorted(states.keys(), reverse=True):
+                new_sum = current_sum + value
+                if new_sum > max_units or new_sum in states:
+                    continue
+                states[new_sum] = (current_sum, idx)
+
+        candidate_sums = [s for s in states.keys() if min_units <= s <= max_units and s > 0]
+        candidate_sums.sort(key=lambda s: (abs(s - target_units), -s))
+
+        for selected_sum in candidate_sums:
+            selected_indices: Set[int] = set()
+            cursor = selected_sum
+            while cursor > 0:
+                prev_sum, idx = states[cursor]
+                if idx < 0:
+                    break
+                selected_indices.add(idx)
+                cursor = prev_sum
+
+            picked = [lib for idx, lib in enumerate(remaining) if idx in selected_indices]
+            next_remaining = [lib for idx, lib in enumerate(remaining) if idx not in selected_indices]
+            if self._is_valid_dedicated_imbalance_candidate(picked):
+                return picked, next_remaining
+
+        return self._pick_dedicated_imbalance_subset_greedy(remaining, min_data, max_data)
+
+    def _get_dedicated_lane_profile(
+        self,
+        target_group: str,
+        libs: List[EnhancedLibraryInfo],
+        machine_type: str,
+    ) -> Optional[Dict[str, float]]:
+        """解析碱基不均衡专Lane的容量区间与目标占比。"""
+        if not libs:
+            return None
+
+        metadata = {"is_dedicated_imbalance_lane": True}
+        selection = self._resolve_lane_capacity_rule(
+            libraries=libs,
+            machine_type=machine_type,
+            metadata=metadata,
+        )
+        imbalance_ratio = float(self.imbalance_handler.get_group_data_ratio(target_group) or 0.0)
+        balance_ratio = float(self.imbalance_handler.get_group_balance_ratio(target_group) or 0.0)
+        if imbalance_ratio <= 0:
+            return None
+
+        min_total = float(selection.effective_min_gb)
+        max_total = float(selection.effective_max_gb)
+        target_total = self._clamp_float(
+            float(selection.soft_target_gb or max_total or min_total),
+            min_total,
+            max_total,
+        )
+
+        if balance_ratio <= 1e-9:
+            imbalance_min = min_total
+            imbalance_max = max_total
+            target_imbalance = target_total
+        else:
+            imbalance_min = min_total * imbalance_ratio
+            imbalance_max = max_total * imbalance_ratio
+            target_imbalance = target_total * imbalance_ratio
+
+        return {
+            "imbalance_ratio": imbalance_ratio,
+            "balance_ratio": balance_ratio,
+            "target_total_gb": target_total,
+            "min_total_gb": min_total,
+            "max_total_gb": max_total,
+            "target_imbalance_gb": target_imbalance,
+            "min_imbalance_gb": imbalance_min,
+            "max_imbalance_gb": imbalance_max,
+        }
+
+    def _calculate_dedicated_balance_data(
+        self,
+        imbalance_data: float,
+        imbalance_ratio: float,
+        balance_ratio: float,
+    ) -> float:
+        """根据分组占比反推应补的平衡文库量。"""
+        if imbalance_data <= 0 or imbalance_ratio <= 0 or balance_ratio <= 1e-9:
+            return 0.0
+        total_data = imbalance_data / imbalance_ratio
+        return max(total_data - imbalance_data, 0.0)
 
     def _build_imbalance_dedicated_lanes(
         self, failed: List[EnhancedLibraryInfo], machine_type: MachineType
@@ -1567,46 +1728,27 @@ class GreedyLaneScheduler:
 
             for target_group, libs in grouped.items():
                 remaining = self._sort_remaining_for_scattered_mix_lane(libs)
-                target_ratio = self.imbalance_handler.get_group_data_ratio(target_group)
-                target_imbalance = self.config.lane_capacity_gb * target_ratio
-                min_imbalance = target_imbalance * 0.95
-                if target_imbalance <= 0:
+                lane_profile = self._get_dedicated_lane_profile(
+                    target_group=target_group,
+                    libs=libs,
+                    machine_type=machine_type_str,
+                )
+                if lane_profile is None:
                     remaining_all.extend(remaining)
                     continue
 
                 while remaining:
                     lane_id = self._get_next_lane_id("DL", machine_type)
-                    picked: List[EnhancedLibraryInfo] = []
-                    next_remaining: List[EnhancedLibraryInfo] = []
-                    picked_data = 0.0
-
-                    for lib in remaining:
-                        lib_data = lib.get_data_amount_gb()
-                        if picked_data + lib_data > target_imbalance + 1e-6:
-                            next_remaining.append(lib)
-                            continue
-
-                        test_libs = picked + [lib]
-                        if self.config.enable_index_check and not self.index_validator.validate_lane_quick(test_libs):
-                            next_remaining.append(lib)
-                            continue
-                        if not self._check_peak_size_compatible(test_libs):
-                            next_remaining.append(lib)
-                            continue
-                        is_compatible, _ = self.imbalance_handler.check_mix_compatibility(
-                            test_libs,
-                            enforce_total_limit=False,
-                        )
-                        if not is_compatible:
-                            next_remaining.append(lib)
-                            continue
-
-                        picked.append(lib)
-                        picked_data += lib_data
-
-                    if not picked or picked_data < min_imbalance:
-                        remaining_all.extend(picked + next_remaining)
+                    picked, next_remaining = self._pick_dedicated_imbalance_subset(
+                        remaining=remaining,
+                        min_data=lane_profile["min_imbalance_gb"],
+                        max_data=lane_profile["max_imbalance_gb"],
+                        target_data=lane_profile["target_imbalance_gb"],
+                    )
+                    if not picked:
+                        remaining_all.extend(remaining)
                         break
+                    picked_data = sum(lib.get_data_amount_gb() for lib in picked)
 
                     lane = LaneAssignment(
                         lane_id=lane_id,
@@ -1617,27 +1759,36 @@ class GreedyLaneScheduler:
                     for lib in picked:
                         lane.add_library(lib)
 
-                    balance_data = max(self.config.lane_capacity_gb - picked_data, 0.0)
+                    balance_data = self._calculate_dedicated_balance_data(
+                        imbalance_data=picked_data,
+                        imbalance_ratio=lane_profile["imbalance_ratio"],
+                        balance_ratio=lane_profile["balance_ratio"],
+                    )
                     lane.metadata["required_balance_data_gb"] = round(balance_data, 3)
                     lane.metadata["wkbalancedata"] = round(balance_data, 3)
 
                     lane.metadata["is_dedicated_imbalance_lane"] = True
                     lane.metadata["dedicated_group"] = target_group
-                    lane.metadata["dedicated_target_ratio"] = round(target_ratio, 4)
+                    lane.metadata["dedicated_target_ratio"] = round(lane_profile["imbalance_ratio"], 4)
+                    lane.metadata["dedicated_balance_ratio"] = round(lane_profile["balance_ratio"], 4)
                     lane.metadata["dedicated_imbalance_data_gb"] = round(picked_data, 3)
-                    lane.metadata["dedicated_target_imbalance_gb"] = round(target_imbalance, 3)
+                    lane.metadata["dedicated_target_imbalance_gb"] = round(lane_profile["target_imbalance_gb"], 3)
+                    lane.metadata["dedicated_target_total_gb"] = round(lane_profile["target_total_gb"], 3)
 
                     effective_total = lane.total_data_gb + balance_data
-                    utilization = effective_total / self.config.lane_capacity_gb if self.config.lane_capacity_gb > 0 else 0.0
                     lane_machine_type_str = (
                         lane.machine_type.value if lane.machine_type else machine_type_str
                     )
-                    _, max_allowed = self._resolve_lane_capacity_limits(
+                    min_allowed, max_allowed = self._resolve_lane_capacity_limits(
                         lane.libraries,
                         lane_machine_type_str,
                         lane=lane,
+                        metadata={
+                            "is_dedicated_imbalance_lane": True,
+                            "wkbalancedata": balance_data,
+                        },
                     )
-                    if effective_total > max_allowed + 1e-6:
+                    if effective_total > max_allowed + 1e-6 or effective_total < min_allowed - 1e-6:
                         remaining_all.extend(picked + next_remaining)
                         break
 
@@ -2060,8 +2211,9 @@ class GreedyLaneScheduler:
         if not lane.libraries:
             return 0.0
 
-        max_ratio = self.config.max_imbalance_ratio if max_ratio is None else max_ratio
-        
+        if max_ratio is None:
+            max_ratio = self.config.max_imbalance_ratio
+
         # 计算添加后的总数据量和碱基不均衡数据量
         current_total = sum(float(getattr(l, 'contract_data_raw', 0) or 0) for l in lane.libraries)
         current_imbalance = sum(float(getattr(l, 'contract_data_raw', 0) or 0) for l in lane.libraries if l.is_base_imbalance())
@@ -2225,7 +2377,7 @@ class GreedyLaneScheduler:
         """
         if len(libraries) < 1:
             return True
-        
+
         total_data = sum(lib.get_data_amount_gb() for lib in libraries)
         if total_data == 0:
             return True
@@ -2239,10 +2391,20 @@ class GreedyLaneScheduler:
         # 如果没有碱基不均衡文库，通过
         if imbalance_data == 0:
             return True
-        
-        # 碱基不均衡占比 <= 配置上限
+
         imbalance_ratio = imbalance_data / total_data
-        return imbalance_ratio <= self.config.max_imbalance_ratio
+        if imbalance_ratio > self.config.max_imbalance_ratio:
+            return False
+
+        has_balanced = (total_data - imbalance_data) > 1e-6
+        if has_balanced and self.imbalance_handler:
+            is_compatible, _ = self.imbalance_handler.check_mix_compatibility(
+                libraries,
+                enforce_total_limit=False,
+            )
+            return is_compatible
+
+        return True
 
     def _check_single_end_ratio_compatible(self, libraries: List[EnhancedLibraryInfo]) -> bool:
         """
@@ -4078,9 +4240,16 @@ class GreedyLaneScheduler:
         if not self.imbalance_handler:
             return True
 
-        # 收集Lane内所有文库（包括待添加的）
         test_libraries = lane.libraries + [lib]
-        is_compatible, reason = self.imbalance_handler.check_mix_compatibility(test_libraries)
+        has_imbalance = any(item.is_base_imbalance() for item in test_libraries)
+        has_balanced = any(not item.is_base_imbalance() for item in test_libraries)
+        if not (has_imbalance and has_balanced):
+            return True
+
+        is_compatible, reason = self.imbalance_handler.check_mix_compatibility(
+            test_libraries,
+            enforce_total_limit=False,
+        )
         if not is_compatible:
             logger.debug(f"碱基不均衡混排不兼容: {reason}")
         return is_compatible
@@ -4162,6 +4331,35 @@ class GreedyLaneScheduler:
             '产线标识': getattr(lib, 'production_line', '') or '',
             'index碱基数目': len(index_seq.split(';')[0]) if index_seq and ';' in index_seq else len(index_seq),
         }
+
+    def _validate_lane_imbalance_rules_for_context(
+        self,
+        lane: LaneAssignment,
+    ) -> Tuple[bool, str]:
+        """按 lane 类型边界校验碱基不均衡组合规则。"""
+        if not self.config.enable_imbalance_check or not self.imbalance_handler:
+            return True, ""
+
+        metadata = self._build_lane_validation_metadata(lane)
+        if metadata.get("is_package_lane"):
+            return True, "package lane skips generic imbalance mix rules"
+
+        libraries = list(lane.libraries or [])
+        if not libraries:
+            return True, ""
+
+        has_imbalance = any(lib.is_base_imbalance() for lib in libraries)
+        if not has_imbalance:
+            return True, ""
+
+        has_balanced = any(not lib.is_base_imbalance() for lib in libraries)
+        if metadata.get("is_dedicated_imbalance_lane") or has_balanced:
+            return self.imbalance_handler.check_mix_compatibility(
+                libraries,
+                enforce_total_limit=False,
+            )
+
+        return True, "ordinary pure-imbalance lane does not apply 1-55 compatibility"
     
     def _validate_completed_lane(self, lane: LaneAssignment) -> tuple[bool, list[str]]:
         """
@@ -4198,7 +4396,7 @@ class GreedyLaneScheduler:
         
         # 3. 使用BaseImbalanceHandler进行碱基不均衡最终验证
         if self.config.enable_imbalance_check and self.imbalance_handler:
-            is_compatible, reason = self.imbalance_handler.check_mix_compatibility(lane.libraries)
+            is_compatible, reason = self._validate_lane_imbalance_rules_for_context(lane)
             if not is_compatible:
                 logger.debug(f"Lane {lane.lane_id} 碱基不均衡验证失败: {reason}")
                 return False, ["imbalance_check"]
@@ -4632,10 +4830,11 @@ class GreedyLaneScheduler:
             lib.get_data_amount_gb() for lib in selected if lib.is_base_imbalance()
         )
         imbalance_ratio = imbalance_data / total_data if total_data > 0 else 0.0
-        max_imbalance_ratio = self.config.max_imbalance_ratio
+        all_imbalance = bool(selected) and all(lib.is_base_imbalance() for lib in selected)
         use_dedicated_imbalance = (
             getattr(self.config, "enable_dedicated_imbalance_lane", False)
-            and imbalance_ratio > max_imbalance_ratio
+            and imbalance_data > 0
+            and all_imbalance
         )
         metadata = {"is_dedicated_imbalance_lane": True} if use_dedicated_imbalance else {}
 

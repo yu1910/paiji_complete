@@ -28,6 +28,8 @@ from arrange_library.arrange_library_model6 import (
     _trim_lane_for_balance_capacity,
     _run_prediction_delivery,
 )
+from arrange_library.core.constraints.lane_validator import LaneValidator
+from arrange_library.core.data import load_libraries_from_csv
 from arrange_library.core.scheduling.scheduling_types import LaneAssignment
 from arrange_library.models.library_info import EnhancedLibraryInfo
 
@@ -684,6 +686,119 @@ def test_build_detail_output_generates_balance_library_row_without_raw_template(
     assert float(balance_rows.iloc[0]["wkcontractdata"]) == 20.0
     assert float(balance_rows.iloc[0]["lorderdata"]) == 20.0
     assert balance_rows.iloc[0]["llaneid"] == "LANE_001"
+
+
+def test_package_lane_balance_materialization_uses_loaded_wkdept_from_csv(
+    tmp_path,
+    monkeypatch,
+):
+    csv_path = tmp_path / "package_lane.csv"
+    df = pd.DataFrame(
+        [
+            {
+                "wkorigrec": "11266224",
+                "wksampleid": "FKDL250209501-1A",
+                "wksampletype": "客户-10X ATAC文库",
+                "wkdatatype": "客户-10X ATAC文库",
+                "wkindexseq": "AAACGGCG,CCTACCAT,GGCGTTTC,TTGTAAGA",
+                "wkeqtype": "Nova X-25B",
+                "wkcontractdata": 225.0,
+                "wktestno": "Novaseq X Plus-PE150",
+                "wkdept": "天津科技服务实验室",
+                "wkbaleno": "C2511044598",
+                "wkbalancedata": 100.0,
+            },
+            {
+                "wkorigrec": "11266226",
+                "wksampleid": "FKDL250209503-1A",
+                "wksampletype": "客户-10X ATAC文库",
+                "wkdatatype": "客户-10X ATAC文库",
+                "wkindexseq": "AGGCTACC,CTAGCTGT,GCCAACAA,TATTGGTG",
+                "wkeqtype": "Nova X-25B",
+                "wkcontractdata": 225.0,
+                "wktestno": "Novaseq X Plus-PE150",
+                "wkdept": "天津科技服务实验室",
+                "wkbaleno": "C2511044598",
+                "wkbalancedata": 100.0,
+            },
+            {
+                "wkorigrec": "11266225",
+                "wksampleid": "FKDL250209502-1A",
+                "wksampletype": "客户-10X ATAC文库",
+                "wkdatatype": "客户-10X ATAC文库",
+                "wkindexseq": "AGCCCTTT,CAAGTCCA,GTGAGAAG,TCTTAGGC",
+                "wkeqtype": "Nova X-25B",
+                "wkcontractdata": 225.0,
+                "wktestno": "Novaseq X Plus-PE150",
+                "wkdept": "天津科技服务实验室",
+                "wkbaleno": "C2511044598",
+                "wkbalancedata": 100.0,
+            },
+            {
+                "wkorigrec": "11266223",
+                "wksampleid": "FKDL250209500-1A",
+                "wksampletype": "客户-10X ATAC文库",
+                "wkdatatype": "客户-10X ATAC文库",
+                "wkindexseq": "AAGTTGAT,CCCACCCA,GGTCGAGC,TTAGATTG",
+                "wkeqtype": "Nova X-25B",
+                "wkcontractdata": 225.0,
+                "wktestno": "Novaseq X Plus-PE150",
+                "wkdept": "天津科技服务实验室",
+                "wkbaleno": "C2511044598",
+                "wkbalancedata": 100.0,
+            },
+        ]
+    )
+    df.to_csv(csv_path, index=False)
+
+    libraries = load_libraries_from_csv(csv_path, enable_remark_recognition=False)
+    assert [getattr(lib, "_wkdept_raw", "") for lib in libraries] == ["天津科技服务实验室"] * 4
+
+    lane = LaneAssignment(
+        lane_id="PKG_LANE_001",
+        machine_id="M_PKG_LANE_001",
+        machine_type=arrange_model6.MachineType.NOVA_X_25B,
+        libraries=libraries,
+        total_data_gb=900.0,
+        metadata={
+            "is_package_lane": True,
+            "package_id": "C2511044598",
+            "wkbalancedata": 100.0,
+        },
+    )
+
+    monkeypatch.setattr(
+        arrange_model6,
+        "_load_balance_library_templates",
+        lambda: {
+            (
+                arrange_model6._normalize_text_for_match("天津科技服务实验室"),
+                arrange_model6._normalize_text_for_match("Novaseq X Plus-PE150"),
+            ): [
+                {
+                    "wksampleid": "phix",
+                    "wkdept": "天津科技服务实验室",
+                    "wktestno": "Novaseq X Plus-PE150",
+                    "wkindexseq": "GGGGGGGGGG;ACCGAGATCT",
+                    "_template_order": 0,
+                }
+            ]
+        },
+    )
+
+    added = _materialize_balance_library_for_lane(
+        lane=lane,
+        all_lanes=[lane],
+        unassigned_pool=[],
+        validator=LaneValidator(strict_mode=True),
+    )
+
+    assert added is True
+    assert len(lane.libraries) == 5
+    balance_libs = [lib for lib in lane.libraries if getattr(lib, BALANCE_LIBRARY_MARKER_COLUMN, False)]
+    assert len(balance_libs) == 1
+    assert balance_libs[0].sample_id == "phix"
+    assert balance_libs[0].contract_data_raw == 100.0
 
 
 def test_run_prediction_delivery_restores_balance_library_lorderdata_and_clears_output(tmp_path, monkeypatch):

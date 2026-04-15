@@ -53,6 +53,7 @@ class LaneResult:
     index_conflicts: List[str] = field(default_factory=list)
     pooling_coefficients: Dict[str, float] = field(default_factory=dict)
     volumes: Dict[str, float] = field(default_factory=dict)
+    planned_balance_data_gb: float = 0.0
     
     @property
     def library_count(self) -> int:
@@ -652,15 +653,18 @@ class PackageLaneScheduler:
         
         for pkg_id, libs in groups.items():
             total_data = self._calculate_total_contract_data(libs)
+            explicit_balance_data = self._resolve_explicit_balance_data(libs)
+            effective_total_data = total_data + explicit_balance_data
             machine_types = set(getattr(lib, 'eq_type', '') or '' for lib in libs)
             machine_types.discard('')
             machine_type = list(machine_types)[0] if machine_types else 'Nova X-25B'
             lane_rule = self._get_package_lane_capacity_range(machine_type)
             
             # 包Lane容量校验：优先使用统一规则配置
-            if total_data < lane_rule.effective_min_gb or total_data > lane_rule.effective_max_gb:
+            if effective_total_data < lane_rule.effective_min_gb or effective_total_data > lane_rule.effective_max_gb:
                 failed_packages[f"package_lane_{pkg_id}"] = (
-                    f"数据量{total_data:.1f}G不在允许范围{lane_rule.effective_min_gb:.1f}G-"
+                    f"有效数据量{effective_total_data:.1f}G(合同{total_data:.1f}G+平衡{explicit_balance_data:.1f}G)"
+                    f"不在允许范围{lane_rule.effective_min_gb:.1f}G-"
                     f"{lane_rule.effective_max_gb:.1f}G内，规则={lane_rule.rule_code}"
                 )
                 unprocessed.extend(libs)
@@ -709,7 +713,8 @@ class PackageLaneScheduler:
                 package_type=PackageType.PACKAGE_LANE,
                 package_id=pkg_id,
                 index_valid=True,
-                index_conflicts=[]
+                index_conflicts=[],
+                planned_balance_data_gb=explicit_balance_data,
             )
             
             # 计算Pooling系数
@@ -1054,6 +1059,31 @@ class PackageLaneScheduler:
     def _calculate_total_contract_data(self, libraries: List[EnhancedLibraryInfo]) -> float:
         """统计整条Lane合同数据量。"""
         return sum(float(getattr(lib, 'contract_data_raw', 0.0) or 0.0) for lib in libraries)
+
+    def _resolve_explicit_balance_data(self, libraries: List[EnhancedLibraryInfo]) -> float:
+        """解析包lane显式平衡补量。
+
+        源数据里同一包lane的 `wkbalancedata` 往往会重复写在每条文库上，
+        因此这里按 lane 维度取最大值，不按行求和。
+        """
+        values: List[float] = []
+        for lib in libraries:
+            for attr_name in ("balance_data", "balancedata"):
+                value = float(getattr(lib, attr_name, 0.0) or 0.0)
+                if value > 0:
+                    values.append(round(value, 3))
+
+        if not values:
+            return 0.0
+
+        distinct_values = sorted(set(values))
+        if len(distinct_values) > 1:
+            logger.warning(
+                "包Lane显式平衡补量存在多个不同取值 {}，按lane维度取最大值 {:.3f}G",
+                distinct_values,
+                max(distinct_values),
+            )
+        return max(distinct_values)
     
     def _validate_package_lane_imbalance(
         self, 
@@ -1063,8 +1093,11 @@ class PackageLaneScheduler:
         
         规则文档（Line 76-83）要求：
         - 碱基不均衡文库若申请包Lane，需同时满足所属分组最大数据量（统一240G）
-        - 需满足类型混排规则（仅允许文档规定的混排组合）
         - 需严格满足分组数据量占比（0.8/0.99/1.0等）
+        
+        说明：
+        - 包Lane属于独立规则空间，不复用普通混样/碱基不均专Lane的1-57组合兼容性
+        - 因此这里不调用 BaseImbalanceHandler.check_mix_compatibility()
         
         Args:
             libraries: 文库列表
@@ -1072,6 +1105,12 @@ class PackageLaneScheduler:
         Returns:
             (是否通过校验, 失败原因)
         """
+        explicit_balance_data = self._resolve_explicit_balance_data(libraries)
+        if explicit_balance_data > 0:
+            # 包lane若已显式指定平衡补量，则按“固定包lane + 后补真实平衡文库”处理。
+            # 此时不再叠加自动推导的240G/组内占比限制，避免与人工指定方案冲突。
+            return True, None
+
         # 按分组统计碱基不均衡文库数据量
         group_data: Dict[str, float] = defaultdict(float)
         group_limits: Dict[str, float] = {}
@@ -1104,11 +1143,6 @@ class PackageLaneScheduler:
             limit = group_limits.get(group_id, 240.0)
             if data_gb > limit:
                 return False, f"分组{group_id}碱基不均衡文库数据量{data_gb:.1f}G超过限制{limit}G"
-
-        # 严格检查分组类型混排规则（G27/G28/G29等）
-        mix_ok, mix_reason = self.imbalance_handler.check_mix_compatibility(libraries)
-        if not mix_ok:
-            return False, f"碱基不均衡类型混排不满足: {mix_reason}"
 
         # 严格检查分组数据量占比（0.8/0.99/1.0等）
         ratio_ok, ratio_reason = self.imbalance_handler.check_group_data_ratio(libraries)
