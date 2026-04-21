@@ -1,0 +1,66 @@
+{
+  "model_type": "segmented_v6_contract_guard",
+  "segment_threshold_contract": 7.0,
+  "target_quantile": 0.8,
+  "target_bounds": {
+    "min_order_ratio": 0.95,
+    "max_order_ratio": 2.2,
+    "min_efficiency": 0.25,
+    "max_efficiency": 1.6
+  },
+  "risk_adjustment": {
+    "target_shortage_prob": 0.26,
+    "target_enough_prob": 0.78,
+    "risk_base_scale": 0.45,
+    "risk_extra_scale": 1.2,
+    "max_uplift": 1.8,
+    "min_order_ratio": 0.95,
+    "max_order_ratio": 2.2,
+    "risk_uplift_bonus_by_sampletype": {
+      "Lnc非互作文库": 1.15,
+      "客户-真核普通转录组文库": 1.1,
+      "宏转录组": 1.08,
+      "DNA小片段文库": 1.06
+    },
+    "runtime_order_multiplier_by_sampletype": {
+      "Lnc非互作文库": 1.15,
+      "客户-真核普通转录组文库": 1.15,
+      "DNA小片段文库": 1.15,
+      "宏转录组": 1.06
+    },
+    "group_cols": [
+      "wksampletype",
+      "wkjkhj",
+      "wkproductline"
+    ],
+    "group_target_enough_prob": {
+      "small": {},
+      "large": {}
+    },
+    "group_hard_min_ratio": {
+      "small": {},
+      "large": {}
+    },
+    "lane_realloc": {
+      "enabled": false,
+      "max_iter": 2,
+      "move_ratio": 0.03,
+      "receiver_quantile": 0.75,
+      "donor_quantile": 0.3
+    }
+  },
+  "target_ratio_bonus_by_sampletype": {
+    "Lnc非互作文库": 1.2,
+    "客户-真核普通转录组文库": 1.14,
+    "宏转录组": 1.1,
+    "DNA小片段文库": 1.08
+  },
+  "focus_sampletypes": [
+    "Lnc非互作文库",
+    "VIP-真核普通转录组文库",
+    "全基因组文库",
+    "宏转录组",
+    "客户-全基因组文库",
+    "客户-真核普通转录组文库"
+  ]
+}
