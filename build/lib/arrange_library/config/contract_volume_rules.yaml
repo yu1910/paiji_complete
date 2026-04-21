@@ -1,0 +1,401 @@
+# 合同数据量规则配置
+# 创建时间：2025-10-09 10:00:00
+# 更新时间：2025-12-01 10:00:00
+# 数据来源：天津-规则表6：生产自主包Lane/散样排机的Lane数据量
+# 参考文档：docs/排机规则文档.md#合同数据量校验-规则1
+
+# 工序合同数据量规则
+workflows:
+  # Novaseq PE150 工序（工序编码405）
+  novaseq_pe150:
+    workflow_code: 405
+    workflow_name: "Novaseq PE150"
+    machine_type: "Novaseq"
+    sequencing_strategy: "PE150"
+    mixing_allowed: true
+    laboratory: "天津"
+    
+    # 按优先级档位和条件配置
+    configurations:
+      - priority: "临检"
+        product_line: ["S"]
+        sequencing_mode: "3.0T"
+        lane_volume_gb: 780
+        fc_volume_gb: 3120
+        float_range_gb: 10
+        lane_count: 4
+        loading_method: "S4 XP"
+        min_data_volume: 100  # lane中临检文库>100G
+        condition: "lane中临检文库>100G时"
+        
+      - priority: "临检"
+        product_line: ["S"]
+        sequencing_mode: "3.6T-New"
+        lane_volume_gb: 880
+        fc_volume_gb: 3520
+        float_range_gb: 10
+        lane_count: 4
+        loading_method: "S4 XP"
+        max_data_volume: 100  # lane中临检文库<100G
+        condition: "lane中临检文库<100G时"
+        note: "合同数据量按962.5G/lane"
+        
+      - priority: "YC"
+        product_line: ["S"]
+        sequencing_mode: "3.2T"
+        lane_volume_gb: 810
+        fc_volume_gb: 3240
+        float_range_gb: 10
+        lane_count: 4
+        loading_method: "S4 XP"
+        min_data_volume: 100  # lane中YC文库>100G
+        condition: "lane中YC文库>100G时"
+        
+      - priority: "YC"
+        product_line: ["S"]
+        sequencing_mode: "3.6T-New"
+        lane_volume_gb: 880
+        fc_volume_gb: 3520
+        float_range_gb: 10
+        lane_count: 4
+        loading_method: "S4 XP"
+        max_data_volume: 100  # lane中YC文库<100G
+        condition: "lane中YC文库<100G时"
+        note: "合同数据量按962.5G/lane"
+        
+      - priority: "其他"
+        product_line: ["S"]
+        sequencing_mode: "3.6T-New"
+        lane_volume_gb: 930
+        fc_volume_gb: 3720
+        float_range_gb: 10
+        lane_count: 4
+        loading_method: "S4 XP"
+        condition: "10X文库自主包lane"
+        
+      - priority: "其他"
+        product_line: ["S"]
+        sequencing_mode: "3.6T-New"
+        lane_volume_gb: 960
+        fc_volume_gb: 3840
+        float_range_gb: 10
+        lane_count: 4
+        loading_method: "S4 XP"
+        condition: "甲基化文库自主包lane，添加8.33%phix"
+        
+      - priority: "其他"
+        product_line: ["S", "Z", "ZS"]
+        sequencing_mode: "3.6T-New"
+        lane_volume_gb: 880
+        fc_volume_gb: 3520
+        float_range_gb: 10
+        lane_count: 4
+        loading_method: "S4 XP"
+        condition: "标准散样排机"
+
+  # Novaseq X Plus-PE150 工序（工序编码1595）
+  novaseq_x_plus_pe150:
+    workflow_code: 1595
+    workflow_name: "Novaseq X Plus-PE150"
+    sequencing_strategy: "PE150"
+    mixing_allowed: true
+    laboratory: "天津"
+    
+    # Nova X-10B机器配置
+    nova_x_10b:
+      machine_type: "Nova X-10B"
+      configurations:
+        - priority: "临检"
+          product_line: ["S", "Z", "ZS"]
+          sequencing_mode: "3.6T-New"
+          lane_volume_gb: 380
+          fc_volume_gb: 3040
+          float_range_gb: 10
+          lane_count: 8
+          loading_method: "10B"
+          
+        - priority: "YC"
+          product_line: ["S", "Z", "ZS"]
+          sequencing_mode: "3.6T-New"
+          lane_volume_gb: 380
+          fc_volume_gb: 3040
+          float_range_gb: 10
+          lane_count: 8
+          loading_method: "10B"
+          
+        - priority: "其他"
+          product_line: ["S", "Z", "ZS"]
+          sequencing_mode: "3.6T-New"
+          lane_volume_gb: 380
+          fc_volume_gb: 3040
+          float_range_gb: 10
+          lane_count: 8
+          loading_method: "10B"
+    
+    # Nova X-25B机器配置
+    nova_x_25b:
+      machine_type: "Nova X-25B"
+      configurations:
+        - priority: "其他"
+          product_line: ["S", "Z", "ZS"]
+          sequencing_mode: "3.6T-New"
+          lane_volume_gb: 975
+          fc_volume_gb: 7800
+          float_range_gb: 10
+          lane_count: 8
+          loading_method: "25B"
+          min_data_volume: 1150
+          
+        - priority: "临检"
+          product_line: ["S", "Z", "ZS"]
+          sequencing_mode: "3.6T-New"
+          lane_volume_gb: 975
+          fc_volume_gb: 7800
+          float_range_gb: 10
+          lane_count: 8
+          loading_method: "25B"
+          
+        - priority: "YC"
+          product_line: ["S", "Z", "ZS"]
+          sequencing_mode: "3.6T-New"
+          lane_volume_gb: 975
+          fc_volume_gb: 7800
+          float_range_gb: 10
+          lane_count: 8
+          loading_method: "25B"
+    
+    # NovaSeq X Plus机器配置
+    novaseq_x_plus:
+      machine_type: "NovaSeq X Plus"
+      configurations:
+        - priority: "其他"
+          product_line: ["S", "Z", "ZS"]
+          sequencing_mode: "3.6T-New"
+          lane_volume_gb: 975
+          fc_volume_gb: 7800
+          float_range_gb: 10
+          lane_count: 8
+          loading_method: "25B"
+          
+        - priority: "临检"
+          product_line: ["S", "Z", "ZS"]
+          sequencing_mode: "3.6T-New"
+          lane_volume_gb: 975
+          fc_volume_gb: 7800
+          float_range_gb: 10
+          lane_count: 8
+          loading_method: "25B"
+          
+        - priority: "YC"
+          product_line: ["S", "Z", "ZS"]
+          sequencing_mode: "3.6T-New"
+          lane_volume_gb: 975
+          fc_volume_gb: 7800
+          float_range_gb: 10
+          lane_count: 8
+          loading_method: "25B"
+
+  # Novaseq-T7 工序（工序编码876）
+  novaseq_t7:
+    workflow_code: 876
+    workflow_name: "Novaseq-T7"
+    machine_type: "T7"
+    sequencing_strategy: "PE150"
+    mixing_allowed: true
+    laboratory: "天津"
+    
+    configurations:
+      - priority: "其他"
+        product_line: ["S", "Z", "ZS"]
+        sequencing_mode: "3.6T-New"
+        lane_volume_gb: 1670
+        fc_volume_gb: 1670
+        float_range_gb: 10
+        lane_count: 1
+        loading_method: "S4"
+        condition: "标准排机"
+        
+      - priority: "其他"
+        product_line: ["S", "Z", "ZS"]
+        sequencing_mode: "3.6T-New"
+        lane_volume_gb: 1600
+        fc_volume_gb: 1600
+        float_range_gb: 10
+        lane_count: 1
+        loading_method: "S4"
+        condition: "含甲基化文库且数据量占比≤160G（客户-Methylation文库、微量 (Methylation文库)）"
+        
+      - priority: "其他"
+        product_line: ["S", "Z", "ZS"]
+        sequencing_mode: "3.6T-New"
+        machine_subtype: "T7-Methylation"
+        lane_volume_gb: 1580
+        fc_volume_gb: 1580
+        float_range_gb: 10
+        lane_count: 1
+        loading_method: "S4"
+        condition: "甲基化文库包lane"
+
+  # T7-C4 PE100 工序（工序编码1770）
+  t7_c4_pe100:
+    workflow_code: 1770
+    workflow_name: "T7-C4 PE100"
+    sequencing_strategy: "PE100"
+    mixing_allowed: true
+    laboratory: "天津"
+    
+    configurations:
+      - priority: "其他"
+        product_line: ["S"]
+        machine_type: "T7-C4"
+        loading_method: "S4"
+        lane_volume_gb: 4500
+        fc_volume_gb: 4500
+        float_range_gb: 10
+        lane_count: 1
+        sequencing_mode: "lane seq"
+        condition: "cDNA与oligo混排时其中oligo上限数据量<700G"
+        
+      - priority: "其他"
+        product_line: ["S"]
+        machine_type: "T7-Stereo-FFPE"
+        loading_method: "Stereo FFPE"
+        lane_volume_gb: 5000
+        fc_volume_gb: 5000
+        float_range_gb: 10
+        lane_count: 1
+        sequencing_mode: "lane seq"
+        condition: "FFPE样本空间转录组"
+        
+      - priority: "其他"
+        product_line: ["S"]
+        machine_type: "T7-Stereo"
+        loading_method: "StereoV1_2；StereoV1_3"
+        lane_volume_gb: 4000
+        fc_volume_gb: 4000
+        float_range_gb: 10
+        lane_count: 1
+        sequencing_mode: "lane seq"
+        condition: "标准空间转录组"
+
+  # SURFSEQ-PE150 工序（工序编码1832）
+  surfseq_pe150:
+    workflow_code: 1832
+    workflow_name: "SURFSEQ-PE150"
+    sequencing_strategy: "PE150"
+    mixing_allowed: true
+    laboratory: "天津"
+    
+    configurations:
+      - priority: "其他"
+        product_line: ["S", "Z", "ZS"]
+        machine_type: "SURFSEQ-5000"
+        sequencing_mode: "3.6T-New"
+        lane_volume_gb: 1200
+        fc_volume_gb: 1200
+        float_range_gb: 10
+        lane_count: 1
+        loading_method: "C4"
+        
+      - priority: "其他"
+        product_line: ["S", "Z", "ZS"]
+        machine_type: "SURFSEQ-Q"
+        sequencing_mode: "3.6T-New"
+        lane_volume_gb: 750
+        fc_volume_gb: 6000
+        float_range_gb: 10
+        lane_count: 8
+        loading_method: "FH8"
+
+  # Novaseq SE50 工序（工序编码418）
+  novaseq_se50:
+    workflow_code: 418
+    workflow_name: "Novaseq SE50"
+    machine_type: "Novaseq"
+    sequencing_strategy: "SE50"
+    mixing_allowed: true
+    laboratory: "天津"
+    
+    configurations:
+      - priority: "其他"
+        product_line: ["S"]
+        lane_volume_gb: 435
+        fc_volume_gb: 870
+        float_range_gb: 10
+        lane_count: 2
+        loading_method: "S4 XP"
+
+  # Novaseq PE250 工序（工序编码419）
+  novaseq_pe250:
+    workflow_code: 419
+    workflow_name: "Novaseq PE250"
+    machine_type: "Novaseq"
+    sequencing_strategy: "PE250"
+    mixing_allowed: true
+    laboratory: "天津"
+    
+    configurations:
+      - priority: "其他"
+        product_line: ["S"]
+        lane_volume_gb: 400
+        fc_volume_gb: 800
+        float_range_gb: 10
+        lane_count: 2
+        loading_method: "S4 XP"
+        condition: "错位barcode数据量比例≥85%，不添加phix"
+        
+      - priority: "其他"
+        product_line: ["S"]
+        lane_volume_gb: 410
+        fc_volume_gb: 820
+        float_range_gb: 10
+        lane_count: 2
+        loading_method: "S4 XP"
+        condition: "85%＞错位barcode数据量比例≥70%，添加5%phix"
+        
+      - priority: "其他"
+        product_line: ["S"]
+        lane_volume_gb: 420
+        fc_volume_gb: 840
+        float_range_gb: 10
+        lane_count: 2
+        loading_method: "S4 XP"
+        condition: "70%＞错位barcode数据量比例，添加33%phix"
+
+  # Novaseq PE50 工序（工序编码426）
+  novaseq_pe50:
+    workflow_code: 426
+    workflow_name: "Novaseq PE50"
+    machine_type: "Novaseq"
+    sequencing_strategy: "PE50"
+    mixing_allowed: true
+    laboratory: "天津"
+    
+    configurations:
+      - priority: "其他"
+        product_line: ["S"]
+        lane_volume_gb: 400
+        fc_volume_gb: 800
+        float_range_gb: 10
+        lane_count: 2
+        loading_method: "S4 XP"
+
+# 默认容量配置（向后兼容）
+# 注意：按长度排序，最长的最先匹配
+default_capacities:
+  "T7-Stereo-FFPE": 5000
+  "T7-Stereo": 4000
+  "T7-Methylation": 1580
+  "T7-C4": 4500
+  "NovaSeq X Plus": 975
+  "Novaseq SE50": 435
+  "Novaseq PE250": 400
+  "Novaseq PE50": 400
+  "Novaseq PE150": 880
+  "Nova X-10B": 380
+  "Nova X-25B": 975
+  "SURFSEQ-5000": 1200
+  "SURFSEQ-Q": 750
+  "T7": 1670
+  "Novaseq": 880  # 默认Novaseq
+
