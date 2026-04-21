@@ -26,6 +26,7 @@ from arrange_library.arrange_library_model6 import (
     _attempt_build_rescue_lane_from_pool,
     _build_detail_output,
     _collect_prediction_rows,
+    _enforce_global_priority_hard_constraint,
     _ensure_unique_lane_ids,
     _filter_valid_lanes,
     _reset_auto_lane_serial_counters,
@@ -33,6 +34,7 @@ from arrange_library.arrange_library_model6 import (
     _rescue_remaining_lanes_by_layered_regroup_search,
     _rescue_failed_lanes_by_57_rules,
     _resolve_lane_loading_concentration,
+    _try_increase_lane_count,
     try_targeted_imbalance_upgrade,
     try_multi_lib_swap_rebalance,
     _validate_final_package_lanes,
@@ -280,6 +282,594 @@ def test_build_detail_output_increments_aiarrangenumber_for_schedulable_assigned
     assert int(result.loc[0, "aiarrangenumber"]) == 1
     assert result.loc[0, "llaneid"] == "LANE_001"
     assert result.loc[0, "lrunid"] == "RUN_001"
+
+
+def test_attempt_build_rescue_lane_from_pool_skips_impossible_small_pool(monkeypatch) -> None:
+    pool = [
+        _build_library(origrec="R1", contract_data=30.0),
+        _build_library(origrec="R2", contract_data=30.0),
+        _build_library(origrec="R3", contract_data=30.0),
+    ]
+
+    attempted = {"count": 0}
+
+    def _fake_attempt_build_lane_from_pool(**kwargs):
+        attempted["count"] += 1
+        return None, []
+
+    monkeypatch.setattr(arrange_model6, "_resolve_lane_capacity_limits", lambda libraries, machine_type: (100.0, 120.0))
+    monkeypatch.setattr(arrange_model6, "_attempt_build_lane_from_pool", _fake_attempt_build_lane_from_pool)
+
+    lane, used = _attempt_build_rescue_lane_from_pool(
+        pool=pool,
+        validator=LaneValidator(strict_mode=True),
+        machine_type=MachineType.NOVA_X_25B,
+        lane_id_prefix="EX",
+    )
+
+    assert lane is None
+    assert used == []
+    assert attempted["count"] == 0
+
+
+def test_try_increase_lane_count_stops_retrying_same_pool_after_first_failure(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    attempts = {"count": 0}
+
+    monkeypatch.setattr(
+        arrange_model6,
+        "_resolve_lane_capacity_limits",
+        lambda libraries, machine_type, lane_id="", lane_metadata=None: (1.0, 100.0),
+    )
+
+    def _fake_attempt(**kwargs):
+        attempts["count"] += 1
+        return None, []
+
+    monkeypatch.setattr(arrange_model6, "_attempt_build_rescue_lane_from_pool", _fake_attempt)
+
+    solution = SchedulingSolution(
+        lane_assignments=[],
+        unassigned_libraries=[
+            _build_library(origrec="EX_FAIL_1", contract_data=10.0),
+            _build_library(origrec="EX_FAIL_2", contract_data=10.0),
+        ],
+    )
+
+    added = _try_increase_lane_count(
+        solution=solution,
+        validator=LaneValidator(strict_mode=True),
+        max_new_lanes=2,
+    )
+
+    assert added == 0
+    assert attempts["count"] == 1
+
+
+def test_try_multi_lib_swap_rebalance_stops_retrying_same_pool_after_first_failure(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    attempts = {"count": 0}
+
+    monkeypatch.setattr(
+        arrange_model6,
+        "_resolve_lane_capacity_limits",
+        lambda libraries, machine_type, lane_id="", lane_metadata=None: (1.0, 100.0),
+    )
+
+    def _fake_attempt(**kwargs):
+        attempts["count"] += 1
+        return None, []
+
+    monkeypatch.setattr(arrange_model6, "_attempt_build_rescue_lane_from_pool", _fake_attempt)
+
+    solution = SchedulingSolution(
+        lane_assignments=[],
+        unassigned_libraries=[
+            _build_library(origrec="RB_FAIL_1", contract_data=10.0),
+            _build_library(origrec="RB_FAIL_2", contract_data=10.0),
+        ],
+    )
+
+    result = try_multi_lib_swap_rebalance(
+        solution,
+        LaneValidator(strict_mode=True),
+        max_new_lanes=2,
+    )
+
+    assert result["new_lanes"] == 0
+    assert attempts["count"] == 1
+
+
+def test_enforce_global_priority_hard_constraint_caches_rebuildability_for_same_priority_pool(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    clinical = _build_library(origrec="PG_CLIN", data_type="临检", contract_data=100.0)
+    other_a = _build_library(origrec="PG_OTHER_A", data_type="其他", contract_data=40.0)
+    other_b = _build_library(origrec="PG_OTHER_B", data_type="其他", contract_data=45.0)
+
+    lane_a = _build_lane_assignment("GL_PG_001", [other_a])
+    lane_b = _build_lane_assignment("GL_PG_002", [other_b])
+    solution = SchedulingSolution(
+        lane_assignments=[lane_a, lane_b],
+        unassigned_libraries=[clinical],
+    )
+
+    monkeypatch.setattr(
+        arrange_model6,
+        "_resolve_lane_capacity_limits",
+        lambda libraries, machine_type, lane_id="", lane_metadata=None: (100.0, 200.0),
+    )
+
+    attempts = {"count": 0}
+
+    def _fake_can_rebuild(**kwargs):
+        attempts["count"] += 1
+        return False
+
+    monkeypatch.setattr(arrange_model6, "_can_rebuild_lane_from_priority_pool", _fake_can_rebuild)
+
+    stats = _enforce_global_priority_hard_constraint(
+        solution=solution,
+        validator=LaneValidator(strict_mode=True),
+    )
+
+    assert attempts["count"] == 1
+    assert stats["adjusted_lanes"] == 2
+    assert stats["removed_lanes"] == 0
+    assert len(solution.lane_assignments) == 2
+
+
+def test_attempt_build_lane_from_pool_dedupes_equivalent_scattered_mix_combinations(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    lib_a = _build_library(origrec="EQ_A", contract_data=60.0)
+    lib_b = _build_library(origrec="EQ_B", contract_data=50.0)
+    validation_calls = {"count": 0}
+
+    monkeypatch.setattr(
+        arrange_model6,
+        "_resolve_lane_capacity_limits",
+        lambda libraries, machine_type, lane_id="", lane_metadata=None: (100.0, 200.0),
+    )
+    monkeypatch.setattr(
+        arrange_model6,
+        "_validate_lane_special_split_rule",
+        lambda libraries: (True, set(), ""),
+    )
+    monkeypatch.setattr(
+        arrange_model6,
+        "_validate_lane_57_mix_rules",
+        lambda libraries, enforce_total_limit=False, lane_id="", lane_metadata=None: (True, ""),
+    )
+    monkeypatch.setattr(
+        arrange_model6._MODULE_IDX_VALIDATOR,
+        "validate_new_lib_quick_with_cache",
+        lambda selected_idx_cache, lib: (True, lib.origrec),
+    )
+
+    def _fake_candidate_order(
+        libraries,
+        current_lane_libs=None,
+        seed_offset=0,
+        machine_type=None,
+        special_data_limit=None,
+    ):
+        ordered = list(libraries)
+        return ordered if seed_offset % 2 == 0 else list(reversed(ordered))
+
+    def _fake_validate_lane_with_latest_index(**kwargs):
+        validation_calls["count"] += 1
+        return types.SimpleNamespace(
+            is_valid=False,
+            errors=[types.SimpleNamespace(rule_type=arrange_model6.ValidationRuleType.CAPACITY)],
+        )
+
+    monkeypatch.setattr(arrange_model6, "_build_scattered_mix_candidate_order", _fake_candidate_order)
+    monkeypatch.setattr(arrange_model6, "_validate_lane_with_latest_index", _fake_validate_lane_with_latest_index)
+
+    lane, used = _attempt_build_lane_from_pool(
+        pool=[lib_a, lib_b],
+        validator=LaneValidator(strict_mode=True),
+        machine_type=MachineType.NOVA_X_25B,
+        lane_id_prefix="RM",
+        prioritize_scattered_mix=True,
+        index_conflict_attempts=1,
+        other_failure_attempts=4,
+    )
+
+    assert lane is None
+    assert used == []
+    assert validation_calls["count"] == 1
+
+
+def test_attempt_build_lane_from_pool_caches_equivalent_quick_index_checks(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    lib_a = _build_library(origrec="IDX_EQ_A", contract_data=60.0, index_seq="AAAA;TTTT")
+    lib_b = _build_library(origrec="IDX_EQ_B", contract_data=50.0, index_seq="CCCC;GGGG")
+    quick_check_calls = {"count": 0}
+
+    arrange_model6._clear_imbalance_helper_caches()
+    monkeypatch.setattr(
+        arrange_model6,
+        "_resolve_lane_capacity_limits",
+        lambda libraries, machine_type, lane_id="", lane_metadata=None: (100.0, 200.0),
+    )
+    monkeypatch.setattr(
+        arrange_model6,
+        "_validate_lane_special_split_rule",
+        lambda libraries: (True, set(), ""),
+    )
+    monkeypatch.setattr(
+        arrange_model6,
+        "_validate_lane_57_mix_rules",
+        lambda libraries, enforce_total_limit=False, lane_id="", lane_metadata=None: (True, ""),
+    )
+
+    def _fake_validate_new_lib_quick(selected_idx_cache, lib):
+        quick_check_calls["count"] += 1
+        return True, [(lib.origrec, None)]
+
+    monkeypatch.setattr(
+        arrange_model6._MODULE_IDX_VALIDATOR,
+        "validate_new_lib_quick_with_cache",
+        _fake_validate_new_lib_quick,
+    )
+    monkeypatch.setattr(
+        arrange_model6,
+        "_build_scattered_mix_candidate_order",
+        lambda libraries, **kwargs: list(libraries),
+    )
+    monkeypatch.setattr(
+        arrange_model6,
+        "_validate_lane_with_latest_index",
+        lambda **kwargs: types.SimpleNamespace(
+            is_valid=False,
+            errors=[types.SimpleNamespace(rule_type=arrange_model6.ValidationRuleType.CAPACITY)],
+        ),
+    )
+
+    lane, used = _attempt_build_lane_from_pool(
+        pool=[lib_a, lib_b],
+        validator=LaneValidator(strict_mode=True),
+        machine_type=MachineType.NOVA_X_25B,
+        lane_id_prefix="RM",
+        prioritize_scattered_mix=True,
+        index_conflict_attempts=1,
+        other_failure_attempts=4,
+    )
+
+    assert lane is None
+    assert used == []
+    assert quick_check_calls["count"] == 2
+
+
+def test_validate_completed_lane_caches_equivalent_library_sets(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    scheduler = GreedyLaneScheduler()
+    scheduler.config.enable_rule_checker = False
+    scheduler.config.enable_imbalance_check = False
+
+    lib_a = _build_library(origrec="CACHE_A", contract_data=60.0)
+    lib_b = _build_library(origrec="CACHE_B", contract_data=50.0)
+    lane_a = _build_lane_assignment("GL_CACHE_001", [lib_a, lib_b])
+    lane_b = _build_lane_assignment("GL_CACHE_002", [lib_b, lib_a])
+
+    validation_calls = {"count": 0}
+
+    def _fake_validate_lane(*, libraries, lane_id, machine_type, metadata):
+        validation_calls["count"] += 1
+        return types.SimpleNamespace(is_valid=True, errors=[])
+
+    monkeypatch.setattr(scheduler.lane_validator, "validate_lane", _fake_validate_lane)
+
+    assert scheduler._validate_completed_lane(lane_a) == (True, [])
+    assert scheduler._validate_completed_lane(lane_b) == (True, [])
+    assert validation_calls["count"] == 1
+
+
+def test_is_imbalance_library_candidate_caches_by_library_identity(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    lib = _build_library(origrec="IMB_CACHE", sample_type="客户-PCR产物")
+    calls = {"count": 0}
+
+    def _fake_is_imbalance(target):
+        calls["count"] += 1
+        return target.origrec == "IMB_CACHE"
+
+    arrange_model6._clear_imbalance_helper_caches()
+    monkeypatch.setattr(arrange_model6._BASE_IMBALANCE_HANDLER, "is_imbalance_library", _fake_is_imbalance)
+
+    assert arrange_model6._is_imbalance_library_candidate(lib) is True
+    assert arrange_model6._is_imbalance_library_candidate(lib) is True
+    assert calls["count"] == 1
+
+
+def test_summarize_lane_imbalance_caches_same_lane_context(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    lib_a = _build_library(origrec="IMB_SUM_A", contract_data=60.0)
+    lib_b = _build_library(origrec="IMB_SUM_B", contract_data=40.0)
+    calls = {"count": 0}
+
+    def _fake_is_candidate(lib):
+        calls["count"] += 1
+        return lib.origrec == "IMB_SUM_A"
+
+    arrange_model6._clear_imbalance_helper_caches()
+    monkeypatch.setattr(arrange_model6, "_is_imbalance_library_candidate", _fake_is_candidate)
+
+    summary1 = arrange_model6._summarize_lane_imbalance([lib_a, lib_b])
+    summary2 = arrange_model6._summarize_lane_imbalance([lib_a, lib_b])
+
+    assert summary1 == (100.0, 60.0, 0.6)
+    assert summary2 == summary1
+    assert calls["count"] == 2
+
+
+def test_validate_lane_57_mix_rules_caches_equivalent_library_sets(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    lib_a = _build_library(origrec="MIX_CACHE_A", contract_data=60.0)
+    lib_b = _build_library(origrec="MIX_CACHE_B", contract_data=40.0)
+    calls = {"count": 0}
+
+    def _fake_is_candidate(lib):
+        return lib.origrec == "MIX_CACHE_A"
+
+    def _fake_check_mix_compatibility(libraries, enforce_total_limit=False):
+        calls["count"] += 1
+        return True, f"checked_{len(libraries)}"
+
+    arrange_model6._clear_imbalance_helper_caches()
+    monkeypatch.setattr(arrange_model6, "_is_imbalance_library_candidate", _fake_is_candidate)
+    monkeypatch.setattr(
+        arrange_model6._BASE_IMBALANCE_HANDLER,
+        "check_mix_compatibility",
+        _fake_check_mix_compatibility,
+    )
+
+    result1 = arrange_model6._validate_lane_57_mix_rules([lib_a, lib_b])
+    result2 = arrange_model6._validate_lane_57_mix_rules([lib_b, lib_a])
+
+    assert result1 == (True, "checked_2")
+    assert result2 == result1
+    assert calls["count"] == 1
+
+
+def test_base_imbalance_handler_identify_imbalance_type_caches_result(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    handler = arrange_model6._BASE_IMBALANCE_HANDLER
+    lib = _build_library(origrec="IMB_GROUP_CACHE", sample_type="客户-PCR产物", jjbj="")
+    calls = {"count": 0}
+
+    for attr_name in ("_imbalance_group_id_cache", "_imbalance_library_type_cache"):
+        if hasattr(lib, attr_name):
+            delattr(lib, attr_name)
+
+    def _fake_get_library_type(target):
+        calls["count"] += 1
+        return "客户-PCR产物"
+
+    monkeypatch.setattr(handler, "_get_library_type", _fake_get_library_type)
+
+    assert handler.identify_imbalance_type(lib) == "G29"
+    assert handler.identify_imbalance_type(lib) == "G29"
+    assert calls["count"] == 1
+
+
+def test_resolve_lane_capacity_selection_caches_equivalent_library_sets(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    lib_a = _build_library(origrec="CAP_CACHE_A", contract_data=60.0)
+    lib_b = _build_library(origrec="CAP_CACHE_B", contract_data=40.0)
+    calls = {"count": 0}
+
+    class _FakeSchedulingConfig:
+        def get_lane_capacity_range(self, libraries, machine_type, metadata=None):
+            calls["count"] += 1
+            return types.SimpleNamespace(
+                rule_code="unit_test_rule",
+                max_target_gb=1000.0,
+                effective_max_gb=1005.0,
+                effective_min_gb=995.0,
+            )
+
+    arrange_model6._clear_imbalance_helper_caches()
+    monkeypatch.setattr(arrange_model6, "get_scheduling_config", lambda: _FakeSchedulingConfig())
+    monkeypatch.setattr(
+        arrange_model6,
+        "_apply_balance_reservation_to_capacity_selection",
+        lambda selection, **kwargs: selection,
+    )
+
+    sel1 = arrange_model6._resolve_lane_capacity_selection([lib_a, lib_b], MachineType.NOVA_X_25B)
+    sel2 = arrange_model6._resolve_lane_capacity_selection([lib_b, lib_a], MachineType.NOVA_X_25B)
+
+    assert sel1.effective_min_gb == 995.0
+    assert sel2.effective_max_gb == 1005.0
+    assert calls["count"] == 1
+
+
+def test_scheduling_config_resolve_seq_strategy_caches_same_candidate_signature(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    scheduling_config = get_scheduling_config()
+    scheduling_config._clear_runtime_caches()
+    lib = _build_library(
+        origrec="SEQ_STRATEGY_CACHE",
+        seq_scheme="NovaSeq X Plus-PE150",
+        machine_note="PE150",
+    )
+    calls = {"count": 0}
+    original_normalize = type(scheduling_config)._normalize_seq_keyword.__func__
+
+    def _counting_normalize_seq_keyword(value):
+        calls["count"] += 1
+        return original_normalize(type(scheduling_config), value)
+
+    monkeypatch.setattr(scheduling_config, "_normalize_seq_keyword", _counting_normalize_seq_keyword)
+
+    result1 = scheduling_config._resolve_seq_strategy([lib], {})
+    first_call_count = calls["count"]
+    result2 = scheduling_config._resolve_seq_strategy([lib], {})
+
+    assert result1 == "PE150"
+    assert result2 == result1
+    assert first_call_count > 0
+    assert calls["count"] == first_call_count
+
+
+def test_scheduling_config_is_customer_library_caches_method_result() -> None:
+    scheduling_config = get_scheduling_config()
+    scheduling_config._clear_runtime_caches()
+    lib = _build_library(origrec="CUSTOMER_FLAG_CACHE", customer_library="")
+    calls = {"count": 0}
+
+    def _fake_is_customer_library():
+        calls["count"] += 1
+        return True
+
+    lib.is_customer_library = _fake_is_customer_library
+
+    assert scheduling_config._is_customer_library(lib) is True
+    assert scheduling_config._is_customer_library(lib) is True
+    assert calls["count"] == 1
+
+
+def test_scheduling_config_resolve_lane_context_features_caches_equivalent_library_sets(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    scheduling_config = get_scheduling_config()
+    scheduling_config._clear_runtime_caches()
+    lib_a = _build_library(origrec="LANE_CTX_CACHE_A")
+    lib_b = _build_library(origrec="LANE_CTX_CACHE_B", sample_type="DNA小片段文库")
+    calls = {"count": 0}
+    original_classify = scheduling_config._classify_lane_project_type
+
+    def _counting_classify(libraries):
+        calls["count"] += 1
+        return original_classify(libraries)
+
+    monkeypatch.setattr(scheduling_config, "_classify_lane_project_type", _counting_classify)
+
+    result1 = scheduling_config._resolve_lane_context_features([lib_a, lib_b])
+    result2 = scheduling_config._resolve_lane_context_features([lib_b, lib_a])
+
+    assert result1 == result2
+    assert calls["count"] == 1
+
+
+def test_scheduling_config_resolve_lane_rule_selection_caches_equivalent_lane_scope(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    scheduling_config = get_scheduling_config()
+    scheduling_config._clear_runtime_caches()
+
+    lib_a1 = _build_library(origrec="RULE_SCOPE_A1", sample_type="DNA小片段文库")
+    lib_a1.test_code = 1595
+    lib_a1._current_seq_mode_raw = "3.6T-NEW"
+
+    lib_a2 = _build_library(origrec="RULE_SCOPE_A2", sample_type="DNA小片段文库")
+    lib_a2.test_code = 1595
+    lib_a2._current_seq_mode_raw = "3.6T-NEW"
+
+    calls = {"count": 0}
+    original_match_scope = scheduling_config._match_scope
+
+    def _counting_match_scope(normalized_value, allowed_values):
+        calls["count"] += 1
+        return original_match_scope(normalized_value, allowed_values)
+
+    monkeypatch.setattr(scheduling_config, "_match_scope", _counting_match_scope)
+
+    result1 = scheduling_config.resolve_lane_rule_selection([lib_a1], "Nova X-25B")
+    first_call_count = calls["count"]
+    result2 = scheduling_config.resolve_lane_rule_selection([lib_a2], "Nova X-25B")
+
+    assert result1 is not None
+    assert result2 is not None
+    assert result2.rule_code == result1.rule_code
+    assert first_call_count > 0
+    assert calls["count"] == first_call_count
+
+
+def test_get_scattered_mix_priority_rank_caches_by_library_signature() -> None:
+    lib = _build_library(origrec="SCATTERED_PRIORITY_CACHE", customer_library="")
+    calls = {"clinical": 0, "sj": 0, "yc": 0}
+
+    def _fake_is_clinical():
+        calls["clinical"] += 1
+        return False
+
+    def _fake_is_sj():
+        calls["sj"] += 1
+        return False
+
+    def _fake_is_yc():
+        calls["yc"] += 1
+        return True
+
+    lib.is_clinical_by_code = _fake_is_clinical
+    lib.is_s_level_customer = _fake_is_sj
+    lib.is_yc_library = _fake_is_yc
+
+    assert arrange_model6._get_scattered_mix_priority_rank(lib) == 1
+    assert arrange_model6._get_scattered_mix_priority_rank(lib) == 1
+    assert calls == {"clinical": 1, "sj": 1, "yc": 1}
+
+
+def test_sort_remaining_for_scattered_mix_lane_caches_equivalent_library_sets(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    lib_a = _build_library(origrec="SCATTERED_SORT_CACHE_A", contract_data=60.0)
+    lib_b = _build_library(origrec="SCATTERED_SORT_CACHE_B", contract_data=40.0)
+    calls = {"count": 0}
+    original_sort = arrange_model6._sort_by_board_preference_for_scattered_mix
+
+    def _counting_sort(libraries):
+        calls["count"] += 1
+        return original_sort(libraries)
+
+    arrange_model6._clear_imbalance_helper_caches()
+    monkeypatch.setattr(arrange_model6, "_sort_by_board_preference_for_scattered_mix", _counting_sort)
+
+    result1 = arrange_model6._sort_remaining_for_scattered_mix_lane([lib_a, lib_b])
+    result2 = arrange_model6._sort_remaining_for_scattered_mix_lane([lib_b, lib_a])
+
+    assert [lib.origrec for lib in result1] == [lib.origrec for lib in result2]
+    assert calls["count"] == 1
+
+
+def test_resolve_balance_reservation_context_fast_skips_known_non_package_lane(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    lib = _build_library(origrec="BAL_FAST_SKIP", contract_data=60.0)
+
+    monkeypatch.setattr(
+        arrange_model6,
+        "_get_explicit_balance_data_from_context",
+        lambda libraries, lane_metadata=None: (_ for _ in ()).throw(AssertionError("should not scan explicit balance")),
+    )
+    monkeypatch.setattr(
+        arrange_model6,
+        "_is_package_lane_context",
+        lambda libraries, lane_metadata=None: (_ for _ in ()).throw(AssertionError("should not check package context")),
+    )
+
+    result = arrange_model6._resolve_balance_reservation_context(
+        libraries=[lib],
+        machine_type=MachineType.NOVA_X_25B,
+        lane_id="MX_TMP",
+        lane_metadata={},
+    )
+
+    assert result == {"applied": False}
 
 
 def test_reserve_auto_lane_serial_increments_per_prefix_and_machine() -> None:
@@ -1845,7 +2435,7 @@ def test_load_libraries_from_csv_uses_arrange_library_model_class(tmp_path: Path
     assert libs[0].special_splits is None
 
 
-def test_schedule_stops_after_eight_consecutive_rounds_without_new_lane(
+def test_schedule_stops_after_stagnant_retry_pool_repeats(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     scheduler = GreedyLaneScheduler()
@@ -1857,6 +2447,7 @@ def test_schedule_stops_after_eight_consecutive_rounds_without_new_lane(
 
     monkeypatch.setattr(scheduler, "_run_batch_analysis", lambda libraries: None)
     monkeypatch.setattr(scheduler, "_sort_libraries", lambda libraries: list(libraries))
+    monkeypatch.setattr(scheduler, "_pool_has_enough_data_for_lane", lambda libraries, machine_type, lane=None: True)
     monkeypatch.setattr(
         scheduler,
         "_group_by_machine_type",
@@ -1882,9 +2473,54 @@ def test_schedule_stops_after_eight_consecutive_rounds_without_new_lane(
 
     solution = scheduler.schedule(libraries, libraries_already_split=True)
 
-    assert call_counter["count"] == 11
+    assert call_counter["count"] == 5
     assert len(solution.lane_assignments) == 0
     assert len(solution.unassigned_libraries) == len(libraries)
+
+
+def test_schedule_keeps_retrying_when_failed_pool_is_still_changing(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    scheduler = GreedyLaneScheduler()
+    scheduler._strategy_plan = types.SimpleNamespace(
+        enable_dedicated_imbalance_lane=False,
+        enable_non_10bp_dedicated_lane=False,
+        enable_backbone_reservation=False,
+    )
+
+    monkeypatch.setattr(scheduler, "_run_batch_analysis", lambda libraries: None)
+    monkeypatch.setattr(scheduler, "_sort_libraries", lambda libraries: list(libraries))
+    monkeypatch.setattr(scheduler, "_pool_has_enough_data_for_lane", lambda libraries, machine_type, lane=None: True)
+    monkeypatch.setattr(
+        scheduler,
+        "_group_by_machine_type",
+        lambda libraries: {"Nova X-25B": list(libraries)},
+    )
+
+    call_counter = {"count": 0}
+
+    def fake_schedule_machine_group(libraries, machine_type):
+        call_counter["count"] += 1
+        if len(libraries) <= 1:
+            return [], list(libraries)
+        return [], list(libraries[1:])
+
+    monkeypatch.setattr(scheduler, "_schedule_machine_group", fake_schedule_machine_group)
+
+    libraries = [
+        _build_library(
+            origrec=f"ROUND_CHANGE_{idx}",
+            contract_data=10.0,
+            board_number=f"RC{idx:02d}",
+        )
+        for idx in range(20)
+    ]
+
+    solution = scheduler.schedule(libraries, libraries_already_split=True)
+
+    assert call_counter["count"] == 11
+    assert len(solution.lane_assignments) == 0
+    assert len(solution.unassigned_libraries) == 9
 
 
 def test_collect_donations_for_pool_prefers_smallest_removable_library(

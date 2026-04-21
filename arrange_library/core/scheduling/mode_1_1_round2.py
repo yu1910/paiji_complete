@@ -1,24 +1,22 @@
 """
 1.1模式第二轮候选识别与分组模块
 创建时间：2026-04-14 13:40:00
-更新时间：2026-04-14 13:40:00
-
-首版只交付候选识别与分组框架，不含真实闭环排机。
-真实排机（pooling 2.5 特例、二轮平衡文库口径等）预留接口，后续迭代补充。
+更新时间：2026-04-16 12:25:00
 
 职责：
-- 从待排文库中识别 lastlaneround == "1.1第一轮" 的第二轮候选
+- 从待排文库中识别 lastlaneround == "1.1第一轮" 且历史测序模式属于 1/1.0/1.1 的第二轮候选
 - 按 llastlaneid 分组形成强绑定候选包
-- 预留第二轮排机调用入口
+- 第二轮不重新排机，直接按历史 llastlaneid 复用第一轮已成型组合
 """
 
-from copy import deepcopy
 from dataclasses import dataclass, field
 from typing import Any, Dict, List, Optional
 
 from loguru import logger
 
 from arrange_library.models.library_info import EnhancedLibraryInfo
+from arrange_library.models.library_info import MachineType
+from arrange_library.core.scheduling.scheduling_types import LaneAssignment
 
 
 @dataclass
@@ -61,8 +59,12 @@ class Round2SchedulingResult:
 class Mode11Round2Handler:
     """1.1模式第二轮候选识别与分组
 
-    按照规则15：
-    - lastlaneround == "1.1第一轮" 的文库为第二轮候选
+    按照当前业务口径：
+    - lastlaneround == "1.1第一轮" 时，当前这次排机属于第二轮
+    - lastlaneround == "1.1第二轮" 时，说明上一轮已结束，当前重新回到第一轮
+    - laneround 是当前排机结果字段，由程序根据 lastlaneround 回填，不作为输入识别条件
+    - lcxms/lastcxms 属于 1/1.0/1.1，且 llastlaneid 有值
+      满足以上条件的文库为第二轮候选
     - llastlaneid 相同的候选文库排在同 lane（强约束）
     """
 
@@ -89,10 +91,15 @@ class Mode11Round2Handler:
         groups_map: Dict[str, Round2CandidateGroup] = {}
 
         for lib in libraries:
-            last_round = self._get_last_lane_round(lib)
+            last_lane_round = self._get_last_lane_round(lib)
             last_lid = self._get_last_lane_id(lib)
+            seq_mode = self._get_seq_mode(lib)
 
-            if last_round == self._first_round_label and last_lid:
+            if (
+                last_lane_round == self._first_round_label
+                and last_lid
+                and self._is_mode_1_1_family(seq_mode)
+            ):
                 if last_lid not in groups_map:
                     groups_map[last_lid] = Round2CandidateGroup(last_lane_id=last_lid)
                 group = groups_map[last_lid]
@@ -127,50 +134,95 @@ class Mode11Round2Handler:
         self,
         candidate_groups: List[Round2CandidateGroup],
     ) -> Round2SchedulingResult:
-        """执行第二轮真实排机并返回lane与回流结果。"""
+        """按历史 llastlaneid 直接生成第二轮 lane。
+
+        业务口径：
+        - 第二轮不需要重新排机
+        - 同一个 llastlaneid 下的文库直接复用第一轮已成立的组合
+        - 程序只负责生成 lane 结果，并在后续 prediction 阶段重算下单量/pooling
+        """
         result = Round2SchedulingResult()
         if not candidate_groups:
             return result
 
-        lane_buckets = self._build_lane_buckets(candidate_groups)
         logger.info(
-            "1.1第二轮排机: 候选分组={}，装箱后待调度桶={}",
+            "1.1第二轮直出Lane: 候选分组={}",
             len(candidate_groups),
-            len(lane_buckets),
         )
 
-        for bucket in lane_buckets:
-            bucket_schedule = self._schedule_bucket(bucket)
-            result.lanes.extend(bucket_schedule.lanes)
-            result.scheduled_lane_results.extend(bucket_schedule.scheduled_lane_results)
-            result.fallback_libraries.extend(bucket_schedule.fallback_libraries)
-            result.scheduled_groups += bucket_schedule.scheduled_groups
-            result.broken_groups += bucket_schedule.broken_groups
-            result.total_scheduled_libraries += bucket_schedule.total_scheduled_libraries
-            result.group_break_reasons.update(bucket_schedule.group_break_reasons)
+        for index, group in enumerate(candidate_groups, start=1):
+            lane = self._build_round2_lane(group, lane_index=index)
+            result.lanes.append(lane)
+            result.scheduled_lane_results.append(
+                Round2ScheduledLane(
+                    lane=lane,
+                    source_last_lane_ids=[group.last_lane_id],
+                    strong_binding_kept=True,
+                    break_reason="",
+                )
+            )
+            result.scheduled_groups += 1
+            result.total_scheduled_libraries += len(group.libraries)
 
         logger.info(
-            "1.1第二轮排机完成: 生成Lane={}, 调度分组={}, 打破强绑定分组={}, 回流3.6T文库={}",
+            "1.1第二轮直出完成: 生成Lane={}, 调度分组={}, 回流3.6T文库={}",
             len(result.lanes),
             result.scheduled_groups,
-            result.broken_groups,
             len(result.fallback_libraries),
         )
         return result
 
     def _get_last_lane_round(self, lib: EnhancedLibraryInfo) -> str:
-        """获取文库的上轮测序轮数"""
-        # 优先从 dataclass 字段读取，其次从运行时附加的原始值读取
+        """获取文库上轮轮次，兼容 lastlaneround/last_lane_round 多种口径。"""
         value = getattr(lib, "last_lane_round", None)
+        if not value:
+            value = getattr(lib, "lastlaneround", None)
         if not value:
             value = getattr(lib, "_last_lane_round_raw", None)
         return str(value or "").strip()
 
+    def _get_seq_mode(self, lib: EnhancedLibraryInfo) -> str:
+        """获取第二轮识别所需的参考测序模式。
+
+        第二轮候选识别优先依据历史模式字段（llastcxms/lastcxms），
+        只有历史值缺失时才回退到当前 lcxms。
+        """
+        for attr_name in (
+            "_last_cxms_raw",
+            "last_cxms",
+            "lastcxms",
+            "llastcxms",
+            "_current_seq_mode_raw",
+            "current_seq_mode",
+            "seq_mode",
+            "lcxms",
+        ):
+            value = getattr(lib, attr_name, None)
+            if value not in (None, ""):
+                return str(value).strip()
+        return ""
+
+    def _is_mode_1_1_family(self, value: str) -> bool:
+        """判断测序模式是否属于 1.1 模式族。
+
+        兼容历史字段中逗号拼接的模式串；只有所有非空片段均属于 1/1.0/1.1
+        时，才认为该历史lane属于 1.1 模式族。
+        """
+        raw_value = str(value or "").strip()
+        if not raw_value:
+            return False
+        tokens = [item.strip() for item in raw_value.split(",") if item and item.strip()]
+        if not tokens:
+            return False
+        return all(token in {"1", "1.0", "1.1"} for token in tokens)
+
     def _get_last_lane_id(self, lib: EnhancedLibraryInfo) -> str:
-        """获取文库的上次 lane ID"""
+        """获取文库的上次 lane ID（即系统推送的 llastlaneid）。"""
         value = getattr(lib, "last_laneid", None)
         if not value:
             value = getattr(lib, "lastlaneid", None)
+        if not value:
+            value = getattr(lib, "llastlaneid", None)
         return str(value or "").strip()
 
     def _get_last_output_rate(self, lib: EnhancedLibraryInfo) -> Optional[float]:
@@ -180,14 +232,26 @@ class Mode11Round2Handler:
             if value in (None, ""):
                 continue
             try:
-                return float(value)
+                rate = float(value)
+                if 0 < rate <= 1.0:
+                    rate = rate * 100.0
+                return rate
             except (TypeError, ValueError):
                 continue
         return None
 
+    def _is_add_test_like(self, lib: EnhancedLibraryInfo) -> bool:
+        """判断是否属于规则14的加测/混合文库。"""
+        remark = str(getattr(lib, "add_tests_remark", "") or "").strip()
+        if not remark:
+            return False
+        return any(keyword in remark for keyword in ("加测", "混合"))
+
     def _group_requires_default_pooling(self, group: Round2CandidateGroup) -> bool:
         """判断分组是否需要应用第二轮默认pooling系数。"""
         for lib in group.libraries:
+            if not self._is_add_test_like(lib):
+                continue
             last_outrate = self._get_last_output_rate(lib)
             if last_outrate is not None and last_outrate < self._output_rate_threshold:
                 return True
@@ -197,6 +261,8 @@ class Mode11Round2Handler:
         """返回需要应用第二轮默认pooling系数的文库origrec。"""
         origrecs: List[str] = []
         for lib in group.libraries:
+            if not self._is_add_test_like(lib):
+                continue
             last_outrate = self._get_last_output_rate(lib)
             if last_outrate is None or last_outrate >= self._output_rate_threshold:
                 continue
@@ -205,149 +271,53 @@ class Mode11Round2Handler:
                 origrecs.append(origrec)
         return origrecs
 
-    def _build_lane_buckets(
+    def _build_round2_lane(
         self,
-        candidate_groups: List[Round2CandidateGroup],
-    ) -> List[List[Round2CandidateGroup]]:
-        """按1.1容量上限对第二轮分组进行贪心装桶。"""
-        from arrange_library.arrange_library_model6 import _resolve_lane_capacity_limits
-
-        sorted_groups = sorted(
-            candidate_groups,
-            key=lambda group: (
-                0 if self._group_requires_default_pooling(group) else 1,
-                -group.total_contract_gb,
-                group.last_lane_id,
-            ),
+        group: Round2CandidateGroup,
+        lane_index: int,
+    ) -> LaneAssignment:
+        """基于历史 llastlaneid 直接构造第二轮 lane。"""
+        libraries = list(group.libraries or [])
+        machine_type = self._resolve_machine_type(libraries)
+        total_data_gb = sum(float(getattr(lib, "contract_data_raw", 0.0) or 0.0) for lib in libraries)
+        lane = LaneAssignment(
+            lane_id=f"M11R2_{lane_index:03d}",
+            machine_id=f"M_M11R2_{lane_index:03d}",
+            machine_type=machine_type,
+            libraries=libraries,
+            total_data_gb=total_data_gb,
+            metadata={
+                "dispatch_stage": "second_round_1_1",
+                "selected_seq_mode": "1.1",
+                "selected_round_label": self._second_round_label,
+                "mode_1_1_round2_source_last_lane_ids": [group.last_lane_id],
+                "mode_1_1_round2_group_count": 1,
+                "skip_strict_validation": True,
+            },
         )
-        buckets: List[List[Round2CandidateGroup]] = []
+        lane.calculate_metrics()
 
-        for group in sorted_groups:
-            placed = False
-            best_bucket_index = -1
-            best_remaining = float("inf")
+        low_output_origrecs = self._get_low_output_origrecs(group)
+        if low_output_origrecs:
+            lane.metadata["mode_1_1_round2_pooling_factor"] = self._default_pooling_factor
+            lane.metadata["mode_1_1_round2_low_output_origrecs"] = sorted(low_output_origrecs)
 
-            for idx, bucket in enumerate(buckets):
-                combined_groups = bucket + [group]
-                combined_libraries = self._flatten_group_libraries(combined_groups)
-                if not combined_libraries:
-                    continue
-                _, max_limit = _resolve_lane_capacity_limits(
-                    libraries=combined_libraries,
-                    machine_type=getattr(combined_libraries[0], "machine_type", None),
-                    lane_id="M11R2_TMP",
-                    lane_metadata={"lcxms": "1.1"},
-                )
-                total_gb = sum(item.total_contract_gb for item in combined_groups)
-                if total_gb > max_limit + 1e-6:
-                    continue
-                remaining = max_limit - total_gb
-                if remaining < best_remaining:
-                    best_bucket_index = idx
-                    best_remaining = remaining
+        return lane
 
-            if best_bucket_index >= 0:
-                buckets[best_bucket_index].append(group)
-                placed = True
-
-            if not placed:
-                buckets.append([group])
-
-        return buckets
-
-    def _schedule_bucket(
+    def _resolve_machine_type(
         self,
-        bucket_groups: List[Round2CandidateGroup],
-    ) -> Round2SchedulingResult:
-        """对单个装桶结果调用现有排机主能力，形成第二轮lane。"""
-        from arrange_library.arrange_library_model6 import test_with_model
+        libraries: List[EnhancedLibraryInfo],
+    ) -> MachineType:
+        """从文库列表中解析机器类型，默认回退 Nova X-25B。"""
+        if not libraries:
+            return MachineType.NOVA_X_25B
 
-        result = Round2SchedulingResult()
-        if not bucket_groups:
-            return result
+        machine_type = getattr(libraries[0], "machine_type", None)
+        if isinstance(machine_type, MachineType):
+            return machine_type
 
-        source_last_lane_ids = [group.last_lane_id for group in bucket_groups]
-        bucket_libraries = self._flatten_group_libraries(bucket_groups)
-        for lib in bucket_libraries:
-            lib._current_seq_mode_raw = "1.1"
-
-        low_output_origrecs = sorted(
-            {
-                origrec
-                for group in bucket_groups
-                for origrec in self._get_low_output_origrecs(group)
-            }
-        )
-
-        break_reason = ""
-        strong_binding_kept = True
-        try:
-            _, solution = test_with_model(
-                deepcopy(bucket_libraries),
-                existing_lanes=[],
-            )
-        except Exception as exc:
-            logger.error(
-                "1.1第二轮排机失败，整桶回流3.6T-NEW: llastlaneid={}, error={}",
-                source_last_lane_ids,
-                exc,
-            )
-            result.fallback_libraries.extend(bucket_libraries)
-            for group in bucket_groups:
-                result.group_break_reasons[group.last_lane_id] = "round2_schedule_exception"
-            return result
-        finally:
-            for lib in bucket_libraries:
-                lib._current_seq_mode_raw = ""
-
-        scheduled_lanes = list(getattr(solution, "lane_assignments", []) or [])
-        fallback_libraries = list(getattr(solution, "unassigned_libraries", []) or [])
-        if len(scheduled_lanes) != 1 or fallback_libraries:
-            strong_binding_kept = False
-            if len(scheduled_lanes) == 0:
-                break_reason = "round2_scheduler_no_lane"
-            elif fallback_libraries:
-                break_reason = "round2_scheduler_partial_fallback"
-            else:
-                break_reason = "round2_scheduler_split_multiple_lanes"
-            for group in bucket_groups:
-                result.group_break_reasons[group.last_lane_id] = break_reason
-
-        for lane in scheduled_lanes:
-            if not isinstance(getattr(lane, "metadata", None), dict):
-                lane.metadata = {}
-            lane.metadata["dispatch_stage"] = "second_round_1_1"
-            lane.metadata["selected_seq_mode"] = "1.1"
-            lane.metadata["selected_round_label"] = self._second_round_label
-            lane.metadata["mode_1_1_round2_source_last_lane_ids"] = list(source_last_lane_ids)
-            lane.metadata["mode_1_1_round2_group_count"] = len(bucket_groups)
-            if low_output_origrecs:
-                lane.metadata["mode_1_1_round2_pooling_factor"] = self._default_pooling_factor
-                lane.metadata["mode_1_1_round2_low_output_origrecs"] = list(low_output_origrecs)
-
-            result.lanes.append(lane)
-            result.scheduled_lane_results.append(
-                Round2ScheduledLane(
-                    lane=lane,
-                    source_last_lane_ids=list(source_last_lane_ids),
-                    strong_binding_kept=strong_binding_kept,
-                    break_reason=break_reason,
-                )
-            )
-            result.total_scheduled_libraries += len(list(getattr(lane, "libraries", []) or []))
-
-        result.fallback_libraries.extend(fallback_libraries)
-        result.scheduled_groups += len(bucket_groups)
-        if not strong_binding_kept:
-            result.broken_groups += len(bucket_groups)
-        return result
-
-    def _flatten_group_libraries(
-        self,
-        groups: List[Round2CandidateGroup],
-    ) -> List[EnhancedLibraryInfo]:
-        """将分组列表展开为文库列表。"""
-        libraries: List[EnhancedLibraryInfo] = []
-        for group in groups:
-            libraries.extend(list(group.libraries or []))
-        return libraries
+        eq_type = str(getattr(libraries[0], "eq_type", "") or "").strip()
+        for item in MachineType:
+            if item.value == eq_type:
+                return item
+        return MachineType.NOVA_X_25B

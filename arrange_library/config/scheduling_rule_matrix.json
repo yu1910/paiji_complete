@@ -65,6 +65,28 @@
       "fc_min_data_gb": 1150.0
     },
     {
+      "rule_code": "tj_1595_mode_1_1_normal_prefer_single_lane",
+      "priority": 370,
+      "process_codes": [1595],
+      "test_nos": ["Novaseq X Plus-PE150"],
+      "machine_types": ["Nova X-25B", "NovaSeq X Plus"],
+      "seq_strategy_keywords_any": ["PE150"],
+      "seq_strategy_keywords_exclude": ["10+24"],
+      "seq_modes": ["1.1"],
+      "project_types": [],
+      "customer_complex_results_any": ["合格"],
+      "internal_risk_build_flags_any": ["正常建库"],
+      "soft_single_lane_preferred": true,
+      "soft_target_gb": 2100.0,
+      "min_target_gb": 2000.0,
+      "max_target_gb": 2200.0,
+      "tolerance_gb": 5.0,
+      "lane_count": 8,
+      "loading_method": "25B",
+      "sequencing_mode": "1.1",
+      "fc_min_data_gb": 1150.0
+    },
+    {
       "rule_code": "tj_1595_mode_1_1_risk_prefer_single_lane",
       "priority": 360,
       "process_codes": [1595],
@@ -191,10 +213,6 @@
         {
           "condition_type": "lane_project_type_not_in",
           "project_types": ["其他"]
-        },
-        {
-          "condition_type": "library_add_test_or_mixed",
-          "keywords": ["加测", "混合"]
         },
         {
           "condition_type": "library_sample_type_contains_any",

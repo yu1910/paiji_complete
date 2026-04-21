@@ -31,6 +31,13 @@
     "YC",
     "SJ"
   ],
+  "priority_36t_preconsume_borrow_fillers_from_1_1": true,
+  "priority_36t_preconsume_max_filler_gb_per_lane": 250,
+  "priority_data_types_to_1_1_overflow": {
+    "enabled": true,
+    "trigger_min_pool_gb": 1850,
+    "max_total_gb": 100
+  },
   "eligible_data_types_for_1_1": [
     "临检",
     "YC",
@@ -43,6 +50,121 @@
     "加测",
     "混合"
   ],
+  "manual_dispatch_overrides": {
+    "prefer_1_1": [
+      {
+        "name": "auto_rna_vip_440",
+        "task_group_keywords": [
+          "RNA转录组建库-库检-Novaseq X Plus-PE150"
+        ],
+        "sample_types": [
+          "VIP-真核普通转录组文库"
+        ],
+        "peak_sizes": [
+          440
+        ],
+        "seed_rank": 0
+      },
+      {
+        "name": "nonstandard_strand_rna",
+        "task_group_keywords": [
+          "诺禾非标文库-库检-Novaseq X Plus-PE150"
+        ],
+        "sample_types": [
+          "真核链特异性转录组文库"
+        ],
+        "peak_sizes": [
+          440,
+          460
+        ],
+        "seed_rank": 0
+      },
+      {
+        "name": "auto_wgs_10g_dna",
+        "task_group_keywords": [
+          "（自动化）WGS建库-库检-Novaseq X Plus-PE150"
+        ],
+        "sample_types": [
+          "DNA小片段文库"
+        ],
+        "peak_sizes": [
+          460
+        ],
+        "min_contract_gb": 9.5,
+        "max_contract_gb": 10.5,
+        "seed_rank": 1
+      },
+      {
+        "name": "scatter_customer_priority",
+        "task_group_keywords": [
+          "天津Novaseq X Plus-PE150(散样)"
+        ],
+        "sample_types": [
+          "客户-单细胞文库",
+          "客户-PCR产物",
+          "客户-Methylation文库",
+          "客户-Chip-seq文库",
+          "客户-Hi-C文库",
+          "客户-其他碱基不均衡文库",
+          "客户-真核普通转录组文库",
+          "客户-CUT-Tag文库",
+          "客户-动植物全基因组重测序文库",
+          "客户-寻因单细胞文库"
+        ],
+        "seed_rank": 2
+      }
+    ],
+    "prefer_36t": [
+      {
+        "name": "internal_wgs_strong_36t",
+        "task_group_keywords": [
+          "（生产内部自动化）WGS建库-库检-Novaseq X Plus-PE150"
+        ]
+      },
+      {
+        "name": "medical_commit_strong_36t",
+        "task_group_keywords": [
+          "天津医检所委托库检-天津Novaseq X Plus-PE150",
+          "天津医检所-只定量（医检所专用工序）-天津Novaseq X Plus-PE150"
+        ]
+      },
+      {
+        "name": "capture_exome_strong_36t",
+        "task_group_keywords": [
+          "捕获建库+库检-天津Novaseq X Plus-PE150"
+        ]
+      },
+      {
+        "name": "secondary_quant_strong_36t",
+        "task_group_keywords": [
+          "二次定量-天津Novaseq X Plus-PE150（运营专用）",
+          "二次稀释定量-Novaseq X Plus-PE150上机"
+        ]
+      },
+      {
+        "name": "lnc_taskgroup_strong_36t",
+        "task_group_keywords": [
+          "LncRNA文库-库检-天津Novaseq X Plus-PE150"
+        ]
+      },
+      {
+        "name": "customer_self_build_scatter_36t",
+        "task_group_keywords": [
+          "客户散样自建库库检-天津Novaseq X Plus-PE150"
+        ]
+      },
+      {
+        "name": "exome_like_sampletypes_36t",
+        "sample_types": [
+          "外显子文库",
+          "RNA真普文库",
+          "全基因组文库",
+          "动植物全基因组重测序文库",
+          "Lnc非互作文库"
+        ]
+      }
+    ]
+  },
   "first_round_order_halving": {
     "enabled": true,
     "excluded_data_types": [
