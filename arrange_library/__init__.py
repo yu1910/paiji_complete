@@ -3,7 +3,8 @@ arrange_library 顶层包。
 
 对外暴露的核心函数:
 - arrange_library: 端到端排机 + 调用 prediction_delivery 进行 Pooling 预测
-- run_mode_1_1_round1/run_mode_1_1_round2/run_mode_1_1_full: 1.1模式稳定服务入口
+- run_mode_1_1_round1/run_mode_1_1_round2/run_mode_1_1_round2_export/run_mode_1_1_full:
+  1.1模式稳定服务入口
 
 对外暴露的异常:
 - SchedulingTimeoutError: 排机超时（超过 10 分钟）时抛出，调用方可捕获并作为失败原因回推
@@ -14,11 +15,13 @@ from .mode_1_1_service import (
     Mode11FullServiceResult,
     Mode11PreparedLibraries,
     Mode11Round1ServiceResult,
+    Mode11Round2ExportResult,
     Mode11Round2ServiceResult,
     prepare_mode_1_1_libraries,
     run_mode_1_1_full,
     run_mode_1_1_round1,
     run_mode_1_1_round2,
+    run_mode_1_1_round2_export,
 )
 
 __all__ = [
@@ -26,11 +29,13 @@ __all__ = [
     "Mode11FullServiceResult",
     "Mode11PreparedLibraries",
     "Mode11Round1ServiceResult",
+    "Mode11Round2ExportResult",
     "Mode11Round2ServiceResult",
     "prepare_mode_1_1_libraries",
     "run_mode_1_1_full",
     "run_mode_1_1_round1",
     "run_mode_1_1_round2",
+    "run_mode_1_1_round2_export",
     "SchedulingTimeoutError",
 ]
 

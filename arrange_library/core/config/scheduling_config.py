@@ -1,7 +1,7 @@
 """
 排机系统统一配置管理模块
 创建时间：2025-12-03 14:00:00
-更新时间：2026-04-14 13:20:00
+更新时间：2026-04-17 14:30:00
 
 集中管理所有排机相关的配置常量，避免硬编码分散在各个模块中。
 配置来源：docs/排机规则文档.md、config/business_rules.yaml
@@ -10,8 +10,9 @@
 import json
 import os
 import threading
+from copy import deepcopy
 from dataclasses import dataclass, field
-from typing import Dict, List, Optional, Any, Set
+from typing import Dict, List, Optional, Any, Set, Tuple
 from enum import Enum
 from pathlib import Path
 
@@ -371,6 +372,11 @@ class SchedulingConfigManager:
     
     _instance = None
     _lock = threading.Lock()
+    _NORMALIZATION_CACHE_MAX_SIZE = 8192
+    _RUNTIME_CACHE_MAX_SIZE = 4096
+    _NORMALIZED_TEXT_CACHE: Dict[str, str] = {}
+    _NORMALIZED_SEQ_KEYWORD_CACHE: Dict[str, str] = {}
+    _CANONICAL_SEQ_MODE_CACHE: Dict[str, str] = {}
     
     def __new__(cls):
         if cls._instance is None:
@@ -409,6 +415,13 @@ class SchedulingConfigManager:
         
         # 1.1模式专属规则配置
         self._mode_1_1_rules: Dict[str, Any] = {}
+        self._seq_strategy_resolution_cache: Dict[Tuple[str, ...], str] = {}
+        self._seq_mode_resolution_cache: Dict[Tuple[Any, ...], str] = {}
+        self._lane_rule_selection_cache: Dict[Tuple[Any, ...], Optional[LaneRuleSelection]] = {}
+        self._lane_context_feature_cache: Dict[
+            Tuple[str, ...],
+            Tuple[str, Tuple[str, ...], Tuple[Tuple[str, ...], Tuple[str, ...]]],
+        ] = {}
         
         # 从统一配置文件加载
         self._load_unified_config()
@@ -508,15 +521,42 @@ class SchedulingConfigManager:
         except Exception as e:
             logger.warning(f"加载统一配置文件失败: {e}")
 
-    @staticmethod
-    def _normalize_text(value: Any) -> str:
+    @classmethod
+    def _store_bounded_cache(
+        cls,
+        cache: Dict[Any, Any],
+        key: Any,
+        value: Any,
+        *,
+        max_size: int,
+    ) -> None:
+        """写入有上限的运行时缓存，超过上限时整体清空。"""
+        if len(cache) >= max_size:
+            cache.clear()
+        cache[key] = value
+
+    def _clear_runtime_caches(self) -> None:
+        """清理排机过程中的运行时缓存。"""
+        self._seq_strategy_resolution_cache.clear()
+        self._seq_mode_resolution_cache.clear()
+        self._lane_rule_selection_cache.clear()
+        self._lane_context_feature_cache.clear()
+        type(self)._NORMALIZED_TEXT_CACHE.clear()
+        type(self)._NORMALIZED_SEQ_KEYWORD_CACHE.clear()
+        type(self)._CANONICAL_SEQ_MODE_CACHE.clear()
+
+    @classmethod
+    def _normalize_text(cls, value: Any) -> str:
         """统一文本匹配口径。"""
         if value is None:
             return ""
         text = str(value).strip()
         if not text:
             return ""
-        return (
+        cached = cls._NORMALIZED_TEXT_CACHE.get(text)
+        if cached is not None:
+            return cached
+        normalized = (
             text.replace("’", "'")
             .replace("‘", "'")
             .replace("＇", "'")
@@ -524,11 +564,106 @@ class SchedulingConfigManager:
             .replace("×", "X")
             .upper()
         )
+        cls._store_bounded_cache(
+            cls._NORMALIZED_TEXT_CACHE,
+            text,
+            normalized,
+            max_size=cls._NORMALIZATION_CACHE_MAX_SIZE,
+        )
+        return normalized
 
     @classmethod
     def _normalize_seq_keyword(cls, value: Any) -> str:
         """统一测序策略/模式关键字。"""
-        return cls._normalize_text(value).replace("BP", "").replace(" ", "")
+        if value is None:
+            return ""
+        text = str(value).strip()
+        if not text:
+            return ""
+        cached = cls._NORMALIZED_SEQ_KEYWORD_CACHE.get(text)
+        if cached is not None:
+            return cached
+        normalized = cls._normalize_text(text).replace("BP", "").replace(" ", "")
+        cls._store_bounded_cache(
+            cls._NORMALIZED_SEQ_KEYWORD_CACHE,
+            text,
+            normalized,
+            max_size=cls._NORMALIZATION_CACHE_MAX_SIZE,
+        )
+        return normalized
+
+    def _build_normalized_text_signature(self, values: List[Any]) -> Tuple[str, ...]:
+        """构建去空后的标准化文本签名。"""
+        signature: List[str] = []
+        for value in values:
+            normalized = self._normalize_text(value)
+            if normalized:
+                signature.append(normalized)
+        return tuple(signature)
+
+    def _build_normalized_keyword_signature(self, values: List[Any]) -> Tuple[str, ...]:
+        """构建去空后的标准化关键字签名。"""
+        signature: List[str] = []
+        for value in values:
+            normalized = self._normalize_seq_keyword(value)
+            if normalized:
+                signature.append(normalized)
+        return tuple(signature)
+
+    @classmethod
+    def _canonicalize_seq_mode_value(cls, value: Any) -> str:
+        """将单个测序模式值规整到规则矩阵使用的统一口径。"""
+        if value is None:
+            return ""
+        text = str(value).strip()
+        if not text:
+            return ""
+        cached = cls._CANONICAL_SEQ_MODE_CACHE.get(text)
+        if cached is not None:
+            return cached
+        normalized_text = cls._normalize_text(text)
+        normalized_keyword = cls._normalize_seq_keyword(text)
+        if "LANESEQ" in normalized_keyword:
+            canonical = cls._normalize_text("Lane seq")
+        elif "3.6T" in normalized_keyword:
+            canonical = cls._normalize_text("3.6T-NEW")
+        elif normalized_keyword in {"1.0", "1.1", "1.0MODE", "1.1MODE"}:
+            canonical = cls._normalize_text("1.1")
+        else:
+            canonical = normalized_text
+        cls._store_bounded_cache(
+            cls._CANONICAL_SEQ_MODE_CACHE,
+            text,
+            canonical,
+            max_size=cls._NORMALIZATION_CACHE_MAX_SIZE,
+        )
+        return canonical
+
+    def _build_canonical_seq_mode_signature(self, values: List[Any]) -> Tuple[str, ...]:
+        """构建测序模式候选的统一签名。"""
+        signature: List[str] = []
+        for value in values:
+            canonical = self._canonicalize_seq_mode_value(value)
+            if canonical:
+                signature.append(canonical)
+        return tuple(signature)
+
+    def _get_library_cached_signature(
+        self,
+        lib: Any,
+        *,
+        raw_attrs: Tuple[str, ...],
+        cache_attr: str,
+        builder,
+    ) -> Tuple[str, ...]:
+        """按文库缓存常用签名，避免在选Lane时重复标准化同一批字段。"""
+        raw_values = tuple(getattr(lib, attr_name, None) for attr_name in raw_attrs)
+        cached = getattr(lib, cache_attr, None)
+        if cached is not None and cached[0] == raw_values:
+            return cached[1]
+        signature = builder(list(raw_values))
+        setattr(lib, cache_attr, (raw_values, signature))
+        return signature
 
     def _load_rule_matrix_config(self) -> None:
         """加载统一排机规则总配置。"""
@@ -661,9 +796,23 @@ class SchedulingConfigManager:
 
     def _get_library_sample_type(self, lib: Any) -> str:
         """获取文库类型标准值。"""
-        return self._normalize_text(
-            getattr(lib, 'sample_type_code', '') or getattr(lib, 'sampletype', '')
+        signature = self._get_library_cached_signature(
+            lib,
+            raw_attrs=('sample_type_code', 'sampletype'),
+            cache_attr='_scheduling_sample_type_signature_cache',
+            builder=self._build_normalized_text_signature,
         )
+        return signature[0] if signature else ""
+
+    def _get_library_project_data_type(self, lib: Any) -> str:
+        """获取项目类型判定所需的标准化 data_type。"""
+        signature = self._get_library_cached_signature(
+            lib,
+            raw_attrs=('data_type',),
+            cache_attr='_scheduling_project_data_type_signature_cache',
+            builder=self._build_normalized_text_signature,
+        )
+        return signature[0] if signature else ""
 
     def _get_lane_sample_types(self, libraries: List[Any]) -> Set[str]:
         """获取Lane内文库类型集合。"""
@@ -675,10 +824,23 @@ class SchedulingConfigManager:
 
     def _is_customer_library(self, lib: Any) -> bool:
         """判断文库是否为客户文库。"""
+        raw_values = (
+            getattr(lib, 'customer_library', None),
+            getattr(lib, 'sample_type_code', None),
+            getattr(lib, 'sampletype', None),
+            getattr(lib, 'sample_id', None),
+            getattr(lib, 'lab_type', None),
+        )
+        cached = getattr(lib, '_scheduling_customer_library_cache', None)
+        if cached is not None and cached[0] == raw_values:
+            return cached[1]
+
         checker = getattr(lib, 'is_customer_library', None)
         if callable(checker):
             try:
-                return bool(checker())
+                resolved = bool(checker())
+                setattr(lib, '_scheduling_customer_library_cache', (raw_values, resolved))
+                return resolved
             except Exception:
                 pass
 
@@ -691,6 +853,7 @@ class SchedulingConfigManager:
             'TRUE',
             '1',
         }:
+            setattr(lib, '_scheduling_customer_library_cache', (raw_values, True))
             return True
         if customer_flag in {
             self._normalize_text('否'),
@@ -699,9 +862,41 @@ class SchedulingConfigManager:
             'FALSE',
             '0',
         }:
+            setattr(lib, '_scheduling_customer_library_cache', (raw_values, False))
             return False
         lab_type_text = self._normalize_text(getattr(lib, 'lab_type', '') or '')
-        return self._normalize_text('客户') in lab_type_text
+        resolved = self._normalize_text('客户') in lab_type_text
+        setattr(lib, '_scheduling_customer_library_cache', (raw_values, resolved))
+        return resolved
+
+    def _get_library_quality_risk_signature(self, lib: Any) -> Tuple[bool, str, str]:
+        """获取规则选择所需的单库质量风险签名。"""
+        raw_values = (
+            getattr(lib, 'customer_library', None),
+            getattr(lib, 'sample_type_code', None),
+            getattr(lib, 'sampletype', None),
+            getattr(lib, 'sample_id', None),
+            getattr(lib, 'lab_type', None),
+            getattr(lib, 'complex_result', None),
+            getattr(lib, 'wkcomplexresult', None),
+            getattr(lib, 'risk_build_flag', None),
+            getattr(lib, 'wkriskbuildflag', None),
+        )
+        cached = getattr(lib, '_scheduling_quality_risk_signature_cache', None)
+        if cached is not None and cached[0] == raw_values:
+            return cached[1]
+
+        signature = (
+            self._is_customer_library(lib),
+            self._normalize_text(
+                getattr(lib, 'complex_result', None) or getattr(lib, 'wkcomplexresult', None) or ''
+            ),
+            self._normalize_text(
+                getattr(lib, 'risk_build_flag', None) or getattr(lib, 'wkriskbuildflag', None) or ''
+            ),
+        )
+        setattr(lib, '_scheduling_quality_risk_signature_cache', (raw_values, signature))
+        return signature
 
     def _matches_lane_quality_risk_scope(self, libraries: List[Any], profile: Dict[str, Any]) -> bool:
         """评估规则中客户库检/诺禾风险建库组合条件。"""
@@ -740,7 +935,7 @@ class SchedulingConfigManager:
         has_clinical = False
         has_yc = False
         for lib in libraries:
-            data_type = self._normalize_text(getattr(lib, 'data_type', '') or '')
+            data_type = self._get_library_project_data_type(lib)
             if data_type == '临检':
                 has_clinical = True
             if data_type == 'YC':
@@ -811,29 +1006,10 @@ class SchedulingConfigManager:
     def _resolve_seq_mode(self, libraries: List[Any], metadata: Optional[Dict[str, Any]] = None) -> str:
         """解析Lane测序模式。"""
         metadata = metadata or {}
-        def _canonicalize_seq_mode(value: Any) -> str:
-            normalized_text = self._normalize_text(value)
-            if not normalized_text:
+        def _resolve_from_canonical_candidates(values: Tuple[str, ...]) -> str:
+            if not values:
                 return ""
-            normalized_keyword = self._normalize_seq_keyword(value)
-            if "LANESEQ" in normalized_keyword:
-                return self._normalize_text("Lane seq")
-            if "3.6T" in normalized_keyword:
-                return self._normalize_text("3.6T-NEW")
-            # 业务上 1.0 与 1.1 视为同一模式族；容量规则矩阵统一使用 1.1 口径。
-            if normalized_keyword in {"1.0", "1.1", "1.0MODE", "1.1MODE"}:
-                return self._normalize_text("1.1")
-            return normalized_text
-
-        def _resolve_from_candidates(values: List[Any]) -> str:
-            normalized_candidates: List[str] = []
-            for value in values:
-                normalized_value = _canonicalize_seq_mode(value)
-                if normalized_value:
-                    normalized_candidates.append(normalized_value)
-            if not normalized_candidates:
-                return ""
-            unique_candidates = list(dict.fromkeys(normalized_candidates))
+            unique_candidates = list(dict.fromkeys(values))
             if len(unique_candidates) == 1:
                 return unique_candidates[0]
             if self._normalize_text("Lane seq") in unique_candidates:
@@ -851,29 +1027,76 @@ class SchedulingConfigManager:
             return ""
 
         metadata_candidates = [metadata.get(key) for key in ('seq_mode', 'lcxms', 'sequencing_mode')]
-        resolved_metadata_mode = _resolve_from_candidates(metadata_candidates)
+        metadata_mode_signature = self._build_canonical_seq_mode_signature(metadata_candidates)
+        resolved_metadata_mode = _resolve_from_canonical_candidates(metadata_mode_signature)
         if resolved_metadata_mode:
             return resolved_metadata_mode
 
-        current_mode_candidates: List[Any] = []
-        for lib in libraries:
-            for attr_name in ('seq_mode', 'lcxms', '_current_seq_mode_raw'):
-                current_mode_candidates.append(getattr(lib, attr_name, None))
+        current_mode_signature = tuple(
+            candidate
+            for lib in libraries
+            for candidate in self._get_library_cached_signature(
+                lib,
+                raw_attrs=('seq_mode', 'lcxms', '_current_seq_mode_raw'),
+                cache_attr='_scheduling_seq_mode_signature_cache',
+                builder=self._build_canonical_seq_mode_signature,
+            )
+        )
 
-        resolved_current_mode = _resolve_from_candidates(current_mode_candidates)
+        seq_mode_cache_key = (
+            metadata_mode_signature,
+            current_mode_signature,
+            self._resolve_process_code(libraries, metadata),
+            self._resolve_seq_strategy(libraries, metadata),
+        )
+        cached_seq_mode = self._seq_mode_resolution_cache.get(seq_mode_cache_key)
+        if cached_seq_mode is not None:
+            return cached_seq_mode
+
+        resolved_current_mode = _resolve_from_canonical_candidates(current_mode_signature)
         if resolved_current_mode:
+            self._store_bounded_cache(
+                self._seq_mode_resolution_cache,
+                seq_mode_cache_key,
+                resolved_current_mode,
+                max_size=self._RUNTIME_CACHE_MAX_SIZE,
+            )
             return resolved_current_mode
 
         process_code = self._resolve_process_code(libraries, metadata)
         seq_strategy = self._resolve_seq_strategy(libraries, metadata)
         if process_code == 1595 and seq_strategy == '10+24':
-            return self._normalize_text('Lane seq')
+            resolved_mode = self._normalize_text('Lane seq')
+            self._store_bounded_cache(
+                self._seq_mode_resolution_cache,
+                seq_mode_cache_key,
+                resolved_mode,
+                max_size=self._RUNTIME_CACHE_MAX_SIZE,
+            )
+            return resolved_mode
         if process_code == 1595:
-            return self._normalize_text('3.6T-NEW')
+            resolved_mode = self._normalize_text('3.6T-NEW')
+            self._store_bounded_cache(
+                self._seq_mode_resolution_cache,
+                seq_mode_cache_key,
+                resolved_mode,
+                max_size=self._RUNTIME_CACHE_MAX_SIZE,
+            )
+            return resolved_mode
+        self._store_bounded_cache(
+            self._seq_mode_resolution_cache,
+            seq_mode_cache_key,
+            "",
+            max_size=self._RUNTIME_CACHE_MAX_SIZE,
+        )
         return ""
 
-    def _resolve_seq_strategy(self, libraries: List[Any], metadata: Optional[Dict[str, Any]] = None) -> str:
-        """解析Lane测序策略。"""
+    def _collect_seq_strategy_candidate_values(
+        self,
+        libraries: List[Any],
+        metadata: Optional[Dict[str, Any]] = None,
+    ) -> List[Any]:
+        """收集解析测序策略所需的候选值。"""
         metadata = metadata or {}
         candidate_values: List[Any] = []
         for key in ('seq_strategy', 'seq_scheme', 'test_no', 'run_cycle'):
@@ -889,14 +1112,55 @@ class SchedulingConfigManager:
                     getattr(lib, '_lane_sj_mode_raw', None),
                 ]
             )
-        normalized_candidates = [self._normalize_seq_keyword(item) for item in candidate_values if self._normalize_seq_keyword(item)]
+        return candidate_values
+
+    def _resolve_seq_strategy(self, libraries: List[Any], metadata: Optional[Dict[str, Any]] = None) -> str:
+        """解析Lane测序策略。"""
+        metadata = metadata or {}
+        metadata_signature = self._build_normalized_keyword_signature(
+            [metadata.get(key) for key in ('seq_strategy', 'seq_scheme', 'test_no', 'run_cycle') if key in metadata]
+        )
+        library_signature = tuple(
+            candidate
+            for lib in libraries
+            for candidate in self._get_library_cached_signature(
+                lib,
+                raw_attrs=('seq_strategy', 'seq_scheme', 'test_no', 'machine_note', '_lane_sj_mode_raw'),
+                cache_attr='_scheduling_seq_strategy_signature_cache',
+                builder=self._build_normalized_keyword_signature,
+            )
+        )
+        cache_key = metadata_signature + library_signature
+        cached_seq_strategy = self._seq_strategy_resolution_cache.get(cache_key)
+        if cached_seq_strategy is not None:
+            return cached_seq_strategy
+        normalized_candidates = list(cache_key)
         for candidate in normalized_candidates:
             if '10+24' in candidate:
+                self._store_bounded_cache(
+                    self._seq_strategy_resolution_cache,
+                    cache_key,
+                    '10+24',
+                    max_size=self._RUNTIME_CACHE_MAX_SIZE,
+                )
                 return '10+24'
         for candidate in normalized_candidates:
             if 'PE150' in candidate:
+                self._store_bounded_cache(
+                    self._seq_strategy_resolution_cache,
+                    cache_key,
+                    'PE150',
+                    max_size=self._RUNTIME_CACHE_MAX_SIZE,
+                )
                 return 'PE150'
-        return normalized_candidates[0] if normalized_candidates else ""
+        resolved_strategy = normalized_candidates[0] if normalized_candidates else ""
+        self._store_bounded_cache(
+            self._seq_strategy_resolution_cache,
+            cache_key,
+            resolved_strategy,
+            max_size=self._RUNTIME_CACHE_MAX_SIZE,
+        )
+        return resolved_strategy
 
     def _match_scope(self, normalized_value: str, allowed_values: Set[str]) -> bool:
         """判断标准化单值是否命中作用域。"""
@@ -916,7 +1180,55 @@ class SchedulingConfigManager:
             return False
         group_data = (self._rule_matrix_config.get('sample_type_groups') or {}).get(group_code, {})
         sample_types = set(group_data.get('sample_types', set()) or set())
-        return bool(sample_types) and lane_sample_types.issubset(sample_types)
+        return bool(sample_types) and set(lane_sample_types).issubset(sample_types)
+
+    def _build_lane_quality_risk_signature(
+        self,
+        libraries: List[Any],
+    ) -> Tuple[Tuple[str, ...], Tuple[str, ...]]:
+        """抽取规则选择所需的客户复杂度/内部风险签名。"""
+        customer_complex_results: Set[str] = set()
+        internal_risk_build_flags: Set[str] = set()
+        for lib in libraries:
+            is_customer, complex_result, risk_build_flag = self._get_library_quality_risk_signature(lib)
+            if is_customer:
+                if complex_result:
+                    customer_complex_results.add(complex_result)
+                continue
+            if risk_build_flag:
+                internal_risk_build_flags.add(risk_build_flag)
+        return tuple(sorted(customer_complex_results)), tuple(sorted(internal_risk_build_flags))
+
+    def _get_library_runtime_identity(self, lib: Any) -> str:
+        """获取当前进程内用于Lane特征缓存的稳定文库键。"""
+        for attr_name in ('_detail_output_key', 'fragment_id', 'wkaidbid', 'aidbid', '_origrec_key', 'origrec', 'sample_id'):
+            value = getattr(lib, attr_name, None)
+            if value is not None and str(value).strip():
+                return str(value).strip()
+        return str(id(lib))
+
+    def _resolve_lane_context_features(
+        self,
+        libraries: List[Any],
+    ) -> Tuple[str, Tuple[str, ...], Tuple[Tuple[str, ...], Tuple[str, ...]]]:
+        """解析规则选择所需的Lane上下文特征，并按等价文库集合缓存。"""
+        cache_key = tuple(sorted(self._get_library_runtime_identity(lib) for lib in libraries))
+        cached = self._lane_context_feature_cache.get(cache_key)
+        if cached is not None:
+            return cached
+
+        context_features = (
+            self._classify_lane_project_type(libraries),
+            tuple(sorted(self._get_lane_sample_types(libraries))),
+            self._build_lane_quality_risk_signature(libraries),
+        )
+        self._store_bounded_cache(
+            self._lane_context_feature_cache,
+            cache_key,
+            context_features,
+            max_size=self._RUNTIME_CACHE_MAX_SIZE,
+        )
+        return context_features
 
     def resolve_lane_rule_selection(
         self,
@@ -934,8 +1246,20 @@ class SchedulingConfigManager:
         test_no = self._resolve_test_no(libraries, metadata)
         seq_mode = self._resolve_seq_mode(libraries, metadata)
         seq_strategy = self._resolve_seq_strategy(libraries, metadata)
-        project_type = self._classify_lane_project_type(libraries)
-        lane_sample_types = self._get_lane_sample_types(libraries)
+        project_type, lane_sample_types, quality_risk_signature = self._resolve_lane_context_features(libraries)
+        cache_key = (
+            normalized_machine_type,
+            process_code,
+            test_no,
+            seq_mode,
+            seq_strategy,
+            project_type,
+            lane_sample_types,
+            quality_risk_signature,
+        )
+        if cache_key in self._lane_rule_selection_cache:
+            cached_selection = self._lane_rule_selection_cache[cache_key]
+            return deepcopy(cached_selection) if cached_selection is not None else None
 
         for profile in self._rule_matrix_config.get('lane_rule_profiles', []):
             if not self._match_scope(normalized_machine_type, set(profile.get('machine_types', set()) or set())):
@@ -968,7 +1292,7 @@ class SchedulingConfigManager:
             min_target_gb = float(profile.get('min_target_gb', 0.0) or 0.0)
             max_target_gb = float(profile.get('max_target_gb', 0.0) or 0.0)
             tolerance_gb = float(profile.get('tolerance_gb', 0.0) or 0.0)
-            return LaneRuleSelection(
+            selection = LaneRuleSelection(
                 rule_code=str(profile.get('rule_code', 'unknown_rule')),
                 soft_target_gb=float(profile.get('soft_target_gb', 0.0) or 0.0),
                 min_target_gb=min_target_gb,
@@ -986,7 +1310,20 @@ class SchedulingConfigManager:
                 soft_single_lane_preferred=bool(profile.get('soft_single_lane_preferred', False)),
                 profile=profile,
             )
+            self._store_bounded_cache(
+                self._lane_rule_selection_cache,
+                cache_key,
+                deepcopy(selection),
+                max_size=self._RUNTIME_CACHE_MAX_SIZE,
+            )
+            return selection
 
+        self._store_bounded_cache(
+            self._lane_rule_selection_cache,
+            cache_key,
+            None,
+            max_size=self._RUNTIME_CACHE_MAX_SIZE,
+        )
         return None
 
     def get_lane_capacity_range(
@@ -1105,13 +1442,27 @@ class SchedulingConfigManager:
         if bool(metadata.get('is_package_lane')):
             return True
 
+        _invalid_strs = {'', 'nan', 'none', 'null', 'na'}
         for lib in libraries:
             has_package_lane = str(getattr(lib, 'is_package_lane', '') or '').strip() == '是'
-            package_lane_number = str(
+            raw_pkg_num = (
                 getattr(lib, 'package_lane_number', None)
                 or getattr(lib, 'baleno', None)
-                or ''
-            ).strip()
+            )
+            # NaN / None / 空字符串统一视为"无包Lane号"，避免 str(nan)='nan' 被误判
+            if raw_pkg_num is None:
+                package_lane_number = ''
+            else:
+                try:
+                    import math
+                    if isinstance(raw_pkg_num, float) and math.isnan(raw_pkg_num):
+                        package_lane_number = ''
+                    else:
+                        package_lane_number = str(raw_pkg_num).strip()
+                        if package_lane_number.lower() in _invalid_strs:
+                            package_lane_number = ''
+                except Exception:
+                    package_lane_number = ''
             if has_package_lane or bool(package_lane_number):
                 return True
         return False

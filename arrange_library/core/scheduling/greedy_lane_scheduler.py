@@ -221,6 +221,10 @@ class GreedyLaneScheduler:
         # Pooling优化器
         self.pooling_optimizer = PoolingCoefficientOptimizer()
         self.library_splitter = LibrarySplitter()
+        self._completed_lane_validation_cache: Dict[
+            Tuple[str, Tuple[Tuple[str, str], ...], Tuple[str, ...]],
+            Tuple[bool, Tuple[str, ...]],
+        ] = {}
         
         # 记录配置信息
         config_mode = "按机型自动" if self._base_config.use_machine_config else "固定"
@@ -326,6 +330,24 @@ class GreedyLaneScheduler:
             metadata=metadata,
         )
         return float(selection.effective_min_gb), float(selection.effective_max_gb)
+
+    def _pool_has_enough_data_for_lane(
+        self,
+        libraries: Optional[List[EnhancedLibraryInfo]],
+        machine_type: str,
+        lane: Optional[LaneAssignment] = None,
+    ) -> bool:
+        """判断候选池总量是否达到当前规则下的最小成Lane门槛。"""
+        active_libraries = list(libraries or [])
+        if not active_libraries:
+            return False
+        total_data = sum(lib.get_data_amount_gb() for lib in active_libraries)
+        min_lane_data, _ = self._resolve_lane_capacity_limits(
+            active_libraries,
+            machine_type,
+            lane=lane,
+        )
+        return total_data + 1e-6 >= min_lane_data
     
     def _get_next_lane_id(self, prefix: str, machine_type: str) -> str:
         """获取下一个Lane ID，确保唯一性
@@ -360,6 +382,31 @@ class GreedyLaneScheduler:
         if source_key:
             return source_key
         return str(id(lib))
+
+    def _build_library_signature(
+        self,
+        libraries: List[EnhancedLibraryInfo],
+        *,
+        canonicalize: bool = True,
+    ) -> Tuple[str, ...]:
+        """构建Lane候选签名；canonicalize=True 时忽略候选顺序。"""
+        signature = tuple(self._get_library_runtime_key(lib) for lib in libraries)
+        if canonicalize:
+            return tuple(sorted(signature))
+        return signature
+
+    def _build_completed_lane_validation_cache_key(
+        self,
+        lane: LaneAssignment,
+        machine_type: str,
+        metadata: Dict[str, Any],
+    ) -> Tuple[str, Tuple[Tuple[str, str], ...], Tuple[str, ...]]:
+        """构建已成候选Lane的校验缓存键。"""
+        return (
+            str(machine_type or "Nova X-25B"),
+            tuple(sorted((str(key), repr(value)) for key, value in metadata.items())),
+            self._build_library_signature(list(lane.libraries or []), canonicalize=True),
+        )
 
     def _resolve_machine_type_enum(
         self,
@@ -583,6 +630,7 @@ class GreedyLaneScheduler:
         keep_failed_lanes: bool = False,
         libraries_already_split: bool = False,
         perform_presplit_family_rollback: bool = True,
+        enable_post_fill_optimization: bool = True,
     ) -> SchedulingSolution:
         """
         执行逐Lane贪心排机
@@ -592,6 +640,8 @@ class GreedyLaneScheduler:
             keep_failed_lanes: 是否保留验证失败的Lane（不拆解），供外层矫正处理
             libraries_already_split: 外层是否已完成预拆分
             perform_presplit_family_rollback: 是否在调度器内部执行拆分家族回滚
+            enable_post_fill_optimization: 是否执行最后填充与挪移优化。
+                默认保持原有行为；1.1 首轮会显式关闭，剩余文库直接回流 3.6T-NEW。
             
         Returns:
             SchedulingSolution: 排机结果
@@ -600,6 +650,7 @@ class GreedyLaneScheduler:
         
         # 重置Lane计数器
         self._reset_lane_counters()
+        self._completed_lane_validation_cache = {}
         
         if not libraries:
             logger.warning("输入文库列表为空")
@@ -724,41 +775,89 @@ class GreedyLaneScheduler:
             # 第一轮排机（混排）- 使用排除骨架后的文库
             lanes, failed = self._schedule_machine_group(libs, machine_type)
             all_lanes.extend(lanes)
+            failed_signature = self._build_retry_pool_signature(failed)
+            failed_pool_viable = self._pool_has_enough_data_for_lane(failed, machine_type)
+            if failed and not failed_pool_viable:
+                failed_total_data = sum(lib.get_data_amount_gb() for lib in failed)
+                failed_min_lane_data, _ = self._resolve_lane_capacity_limits(failed, machine_type)
+                logger.info(
+                    f"剩余池总量{failed_total_data:.1f}GB不足最小成Lane门槛{failed_min_lane_data:.1f}GB，跳过后续随机重试"
+                )
             
             # 第二轮：打乱输入池做探索，但真正构Lane前仍会按临检/SJ > YC > 其他重排。
-            if failed and len(failed) >= 10:
+            if failed and len(failed) >= 10 and failed_pool_viable:
                 random.shuffle(failed)
                 logger.info(f"第二轮排机: {len(failed)} 个未分配文库（随机顺序）")
                 lanes2, failed2 = self._schedule_machine_group(failed, machine_type)
                 all_lanes.extend(lanes2)
                 failed = failed2
+                failed_signature = self._build_retry_pool_signature(failed)
+                failed_pool_viable = self._pool_has_enough_data_for_lane(failed, machine_type)
+                if failed and not failed_pool_viable:
+                    failed_total_data = sum(lib.get_data_amount_gb() for lib in failed)
+                    failed_min_lane_data, _ = self._resolve_lane_capacity_limits(failed, machine_type)
+                    logger.info(
+                        f"第二轮后剩余池总量{failed_total_data:.1f}GB不足最小成Lane门槛{failed_min_lane_data:.1f}GB，停止继续随机重试"
+                    )
             
             # 第三轮：小文库优先探索，但单条Lane内仍由高优先级重排逻辑主导。
-            if failed and len(failed) >= 10:
+            if failed and len(failed) >= 10 and failed_pool_viable:
                 failed.sort(key=lambda lib: lib.get_data_amount_gb())
                 logger.info(f"第三轮排机: {len(failed)} 个未分配文库（小文库优先）")
                 lanes3, failed3 = self._schedule_machine_group(failed, machine_type)
                 all_lanes.extend(lanes3)
                 failed = failed3
+                failed_signature = self._build_retry_pool_signature(failed)
+                failed_pool_viable = self._pool_has_enough_data_for_lane(failed, machine_type)
+                if failed and not failed_pool_viable:
+                    failed_total_data = sum(lib.get_data_amount_gb() for lib in failed)
+                    failed_min_lane_data, _ = self._resolve_lane_capacity_limits(failed, machine_type)
+                    logger.info(
+                        f"第三轮后剩余池总量{failed_total_data:.1f}GB不足最小成Lane门槛{failed_min_lane_data:.1f}GB，停止继续随机重试"
+                    )
             
             # 多轮尝试：继续用不同随机顺序排机
             consecutive_failures = 0
+            stagnant_retry_rounds = 0
             for round_num in range(4, 50):  # 最多尝试到第50轮，增加尝试次数
-                if failed and len(failed) >= 10:
+                if failed and len(failed) >= 10 and failed_pool_viable:
                     random.shuffle(failed)
                     logger.info(f"第{round_num}轮排机: {len(failed)} 个未分配文库")
                     lanes_n, failed_n = self._schedule_machine_group(failed, machine_type)
+                    next_failed_signature = self._build_retry_pool_signature(failed_n)
                     # [2025-12-29 修复] 无论是否形成新Lane，都要更新failed
                     # 因为failed_n中包含了验证失败Lane的文库
                     failed = failed_n
+                    failed_pool_viable = self._pool_has_enough_data_for_lane(failed, machine_type)
                     if lanes_n:
                         all_lanes.extend(lanes_n)
                         consecutive_failures = 0  # 重置连续失败计数
+                        stagnant_retry_rounds = 0
                     else:
                         consecutive_failures += 1
+                        if next_failed_signature == failed_signature:
+                            stagnant_retry_rounds += 1
+                            logger.info(
+                                f"第{round_num}轮排机后未分配池无变化，连续{stagnant_retry_rounds}轮停滞"
+                            )
+                        else:
+                            stagnant_retry_rounds = 0
                         if consecutive_failures >= 8:  # 连续8轮没有新Lane，停止
                             logger.info(f"连续{consecutive_failures}轮无新Lane，停止尝试")
                             break
+                        if stagnant_retry_rounds >= 2:
+                            logger.info(
+                                f"连续{stagnant_retry_rounds}轮无新Lane且未分配池不变，提前结束无效重试"
+                            )
+                            break
+                    if failed and not failed_pool_viable:
+                        failed_total_data = sum(lib.get_data_amount_gb() for lib in failed)
+                        failed_min_lane_data, _ = self._resolve_lane_capacity_limits(failed, machine_type)
+                        logger.info(
+                            f"第{round_num}轮后剩余池总量{failed_total_data:.1f}GB不足最小成Lane门槛{failed_min_lane_data:.1f}GB，提前结束随机重试"
+                        )
+                        break
+                    failed_signature = next_failed_signature
 
             # 碱基不均衡残余专用Lane拆分（容量需满足利用率红线，按专用Lane验证）
             if failed and getattr(self.config, 'enable_dedicated_imbalance_lane', False):
@@ -837,7 +936,7 @@ class GreedyLaneScheduler:
         
         # ===== [2025-12-25 新增] 最后填充策略 =====
         # 尝试将剩余未分配文库塞入已有Lane的剩余空间
-        if unassigned and all_lanes:
+        if enable_post_fill_optimization and unassigned and all_lanes:
             logger.info(f"最后填充策略: 尝试将{len(unassigned)}个未分配文库塞入已有Lane")
             still_unassigned: List[EnhancedLibraryInfo] = []
             filled_count = 0
@@ -1090,11 +1189,17 @@ class GreedyLaneScheduler:
         
         # ===== [2025-12-25 新增] 挪移优化策略 =====
         # 当有未分配文库且无法新开Lane时，从现有Lane挪出部分文库合并成新Lane
-        if unassigned and all_lanes:
+        if enable_post_fill_optimization and unassigned and all_lanes:
             unassigned, new_lanes = self._optimize_by_redistribution(
                 unassigned, all_lanes, machine_type
             )
             all_lanes.extend(new_lanes)
+        elif not enable_post_fill_optimization and unassigned and all_lanes:
+            logger.info(
+                "最后填充与挪移优化已按调用方要求关闭: 保留{}个未分配文库直接回流后续流程".format(
+                    len(unassigned)
+                )
+            )
 
         # 统一回滚预拆分文库：任一拆分家族未全部成Lane，则整组回滚为原始文库
         if perform_presplit_family_rollback and presplit_family_context:
@@ -1455,11 +1560,31 @@ class GreedyLaneScheduler:
         return sorted(
             libraries,
             key=lambda lib: (
+                self._get_mode_1_1_seed_rank(lib),
+                self._get_mode_1_1_seed_group(lib),
                 self._get_scattered_mix_priority_rank(lib),
                 self._get_scattered_mix_delete_date_sort_value(lib),
                 -lib.get_data_amount_gb(),
             ),
         )
+
+    def _get_mode_1_1_seed_rank(self, lib: EnhancedLibraryInfo) -> int:
+        """1.1首轮可选聚簇优先级；仅在1.1模式下生效，其他模式保持默认。"""
+        current_mode = str(getattr(lib, "_current_seq_mode_raw", "") or "").strip()
+        if current_mode != "1.1":
+            return 99
+
+        raw_rank = getattr(lib, "_mode_1_1_seed_rank", None)
+        try:
+            return int(raw_rank) if raw_rank is not None else 99
+        except (TypeError, ValueError):
+            return 99
+
+    def _get_mode_1_1_seed_group(self, lib: EnhancedLibraryInfo) -> str:
+        current_mode = str(getattr(lib, "_current_seq_mode_raw", "") or "").strip()
+        if current_mode != "1.1":
+            return ""
+        return str(getattr(lib, "_mode_1_1_seed_group", "") or "").strip()
 
     def _get_scattered_mix_priority_rank(self, lib: EnhancedLibraryInfo) -> int:
         """散样混排优先级：临检和SJ > YC > 其他。"""
@@ -1522,6 +1647,8 @@ class GreedyLaneScheduler:
         return sorted(
             libraries,
             key=lambda lib: (
+                self._get_mode_1_1_seed_rank(lib),
+                self._get_mode_1_1_seed_group(lib),
                 self._get_scattered_mix_priority_rank(lib),
                 self._get_scattered_mix_delete_date_sort_value(lib),
                 board_order.get(id(lib), len(board_order)),
@@ -1539,13 +1666,24 @@ class GreedyLaneScheduler:
             return libraries
 
         seed_rank = self._get_scattered_mix_priority_rank(seed_lib)
+        seed_mode_rank = self._get_mode_1_1_seed_rank(seed_lib)
+        seed_mode_group = self._get_mode_1_1_seed_group(seed_lib)
         base_sorted = self._sort_remaining_for_scattered_mix_lane(libraries)
-        if seed_rank >= 2:
+        if seed_rank >= 2 and seed_mode_rank >= 99:
             return base_sorted
         base_order = {id(lib): idx for idx, lib in enumerate(base_sorted)}
         return sorted(
             libraries,
             key=lambda lib: (
+                0
+                if (
+                    seed_mode_rank < 99
+                    and self._get_mode_1_1_seed_rank(lib) == seed_mode_rank
+                    and self._get_mode_1_1_seed_group(lib) == seed_mode_group
+                )
+                else 1,
+                self._get_mode_1_1_seed_rank(lib),
+                self._get_mode_1_1_seed_group(lib),
                 0 if self._get_scattered_mix_priority_rank(lib) == seed_rank else 1,
                 self._get_scattered_mix_priority_rank(lib),
                 self._get_scattered_mix_delete_date_sort_value(lib),
@@ -3893,7 +4031,29 @@ class GreedyLaneScheduler:
             groups[machine_type].append(lib)
         
         return groups
-    
+
+    def _build_retry_pool_signature(
+        self,
+        libraries: List[EnhancedLibraryInfo],
+    ) -> Tuple[int, int, Tuple[Tuple[str, int], ...]]:
+        """构建未分配池签名，用于识别多轮重试是否仍停留在同一批文库。"""
+        if not libraries:
+            return (0, 0, tuple())
+
+        counts: Dict[str, int] = {}
+        for lib in libraries:
+            lib_key = "{}|{:.6f}".format(
+                str(getattr(lib, "origrec", "") or id(lib)),
+                float(lib.get_data_amount_gb()),
+            )
+            counts[lib_key] = counts.get(lib_key, 0) + 1
+
+        return (
+            len(libraries),
+            int(round(sum(lib.get_data_amount_gb() for lib in libraries) * 1000)),
+            tuple(sorted(counts.items())),
+        )
+
     def _schedule_machine_group(
         self, 
         libraries: List[EnhancedLibraryInfo],
@@ -4374,7 +4534,22 @@ class GreedyLaneScheduler:
         """
         machine_type_str = lane.machine_type.value if lane.machine_type else "Nova X-25B"
         metadata = self._build_lane_validation_metadata(lane)
-        
+        cache_key = self._build_completed_lane_validation_cache_key(
+            lane,
+            machine_type_str,
+            metadata,
+        )
+        cached_result = self._completed_lane_validation_cache.get(cache_key)
+        if cached_result is not None:
+            is_valid, cached_error_types = cached_result
+            logger.debug(
+                "已成候选Lane校验命中缓存: lane_id={}, machine_type={}, lib_count={}",
+                lane.lane_id,
+                machine_type_str,
+                len(lane.libraries or []),
+            )
+            return is_valid, list(cached_error_types)
+
         # 1. 基础红线规则验证（LaneValidator）
         result = self.lane_validator.validate_lane(
             libraries=lane.libraries,
@@ -4382,25 +4557,29 @@ class GreedyLaneScheduler:
             machine_type=machine_type_str,
             metadata=metadata
         )
-        
+
         if not result.is_valid:
             error_types = [e.rule_type.value for e in result.errors]
             logger.debug(f"Lane {lane.lane_id} LaneValidator验证失败: {error_types}")
+            self._completed_lane_validation_cache[cache_key] = (False, tuple(error_types))
             return False, error_types
-        
+
         # 2. 使用RuleChecker进行Lane级别规则检查
         if self.config.enable_rule_checker and self.rule_checker:
             rule_check_result = self._validate_lane_with_rule_checker(lane, machine_type_str)
             if not rule_check_result:
+                self._completed_lane_validation_cache[cache_key] = (False, ("rule_checker",))
                 return False, ["rule_checker"]
-        
+
         # 3. 使用BaseImbalanceHandler进行碱基不均衡最终验证
         if self.config.enable_imbalance_check and self.imbalance_handler:
             is_compatible, reason = self._validate_lane_imbalance_rules_for_context(lane)
             if not is_compatible:
                 logger.debug(f"Lane {lane.lane_id} 碱基不均衡验证失败: {reason}")
+                self._completed_lane_validation_cache[cache_key] = (False, ("imbalance_check",))
                 return False, ["imbalance_check"]
-        
+
+        self._completed_lane_validation_cache[cache_key] = (True, tuple())
         return True, []
     
     def _validate_lane_with_rule_checker(self, lane: LaneAssignment, machine_type: str) -> bool:

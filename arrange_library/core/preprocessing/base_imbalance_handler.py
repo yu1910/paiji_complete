@@ -71,6 +71,12 @@ class BaseImbalanceHandler:
             "10X转录组-3'文库",
             "10X转录组文库-3V4文库",
         }
+        self.group53_types_normalized = {
+            self._normalize_type_name(item) for item in self.group53_types
+        }
+        self.group54_types_normalized = {
+            self._normalize_type_name(item) for item in self.group54_types
+        }
         self.mozhuo5_types = {
             "墨卓转录组-5端文库",
             "墨卓5'文库",
@@ -115,13 +121,18 @@ class BaseImbalanceHandler:
         )
 
     def _get_library_type(self, lib: EnhancedLibraryInfo) -> str:
-        return self._normalize_type_name(
+        cached = getattr(lib, "_imbalance_library_type_cache", None)
+        if cached not in (None, ""):
+            return str(cached)
+        lib_type = self._normalize_type_name(
             getattr(lib, "sample_type_code", None)
             or getattr(lib, "sampletype", None)
             or getattr(lib, "data_type", None)
             or getattr(lib, "lab_type", None)
             or ""
         )
+        setattr(lib, "_imbalance_library_type_cache", lib_type)
+        return lib_type
 
     @staticmethod
     def _is_customer_library(lib: EnhancedLibraryInfo) -> bool:
@@ -361,27 +372,37 @@ class BaseImbalanceHandler:
         Returns:
             分组ID（如'G1', 'G27'等），非碱基不均衡返回None
         """
+        cached_group_id = getattr(lib, "_imbalance_group_id_cache", None)
+        if cached_group_id is not None:
+            return str(cached_group_id) or None
+
         # 1. 优先检查jjbj字段（数据预处理时已标记）
         jjbj = getattr(lib, 'jjbj', None)
         if jjbj is not None and str(jjbj).strip() == '否':
+            setattr(lib, "_imbalance_group_id_cache", "")
             return None  # 明确标记为非碱基不均衡
         
         # 2. 根据文库类型查找分组（优先53/54组合映射）
         lib_type = self._get_library_type(lib)
         if lib_type:
-            if lib_type in {self._normalize_type_name(item) for item in self.group53_types}:
+            if lib_type in self.group53_types_normalized:
+                setattr(lib, "_imbalance_group_id_cache", "G53")
                 return "G53"
-            if lib_type in {self._normalize_type_name(item) for item in self.group54_types}:
+            if lib_type in self.group54_types_normalized:
+                setattr(lib, "_imbalance_group_id_cache", "G54")
                 return "G54"
             group_id = self.type_to_group_map.get(lib_type)
             if group_id:
+                setattr(lib, "_imbalance_group_id_cache", group_id)
                 return group_id
         
         # 3. 如果jjbj字段标记为"是"，但没有匹配到具体分组，返回通用标记
         if jjbj is not None and str(jjbj).strip() == '是':
             # 返回一个通用的碱基不均衡标记（非特定分组）
+            setattr(lib, "_imbalance_group_id_cache", "G_UNKNOWN")
             return 'G_UNKNOWN'
 
+        setattr(lib, "_imbalance_group_id_cache", "")
         return None
     
     def is_imbalance_library(self, lib: EnhancedLibraryInfo) -> bool:
@@ -517,6 +538,7 @@ class BaseImbalanceHandler:
         group_ids: Set[str] = set()
         types: Set[str] = set()
         imbalance_libs = []
+        balanced_libs = []
         
         for lib in libs:
             gid = self.identify_imbalance_type(lib)
@@ -525,10 +547,11 @@ class BaseImbalanceHandler:
                 lib_type = self._get_library_type(lib)
                 types.add(lib_type)
                 imbalance_libs.append(lib)
+            else:
+                balanced_libs.append(lib)
                 
         if not imbalance_libs:
             return True, "No imbalance libraries"
-        balanced_libs = [lib for lib in libs if self.identify_imbalance_type(lib) in {None, "G_UNKNOWN"}]
         has_balanced = bool(balanced_libs)
         if "G53" in group_ids and "G54" in group_ids:
             return False, "分组53与分组54不可同Lane混排"

@@ -840,3 +840,172 @@ def test_run_prediction_delivery_restores_balance_library_lorderdata_and_clears_
     persisted = pd.read_csv(output_path)
     assert BALANCE_LIBRARY_MARKER_COLUMN not in persisted.columns
     assert float(persisted.loc[0, "lorderdata"]) == 20.0
+
+
+def test_run_prediction_delivery_applies_mode_1_1_first_round_order_halving(tmp_path, monkeypatch):
+    output_path = tmp_path / "prediction_mode11.csv"
+
+    def _fake_predict_pooling(input_data, output_file):
+        pd.DataFrame(
+            [
+                {
+                    "wkcontractdata": 20.0,
+                    "wkdatatype": "其他",
+                    "wkaddtestsremark": "普通",
+                    "wksampleid": "ORDINARY_001",
+                    "laneround": "1.1第一轮",
+                    "lorderdata": 20.0,
+                    "lai_output": 18.0,
+                    BALANCE_LIBRARY_MARKER_COLUMN: False,
+                    "llaneid": "LANE_001",
+                },
+                {
+                    "wkcontractdata": 30.0,
+                    "wkdatatype": "临检",
+                    "wkaddtestsremark": "普通",
+                    "wksampleid": "CLINICAL_001",
+                    "laneround": "1.1第一轮",
+                    "lorderdata": 30.0,
+                    "lai_output": 27.0,
+                    BALANCE_LIBRARY_MARKER_COLUMN: False,
+                    "llaneid": "LANE_001",
+                },
+                {
+                    "wkcontractdata": 40.0,
+                    "wkdatatype": "其他",
+                    "wkaddtestsremark": "加测",
+                    "wksampleid": "ADDTEST_001",
+                    "laneround": "1.1第一轮",
+                    "lorderdata": 40.0,
+                    "lai_output": 35.0,
+                    BALANCE_LIBRARY_MARKER_COLUMN: False,
+                    "llaneid": "LANE_001",
+                },
+                {
+                    "wkcontractdata": 50.0,
+                    "wkdatatype": "其他",
+                    "wkaddtestsremark": "普通",
+                    "wksample_number": "FDHE",
+                    "wksampleid": "SAMPLE_004",
+                    "laneround": "1.1第一轮",
+                    "lorderdata": 50.0,
+                    "lai_output": 44.0,
+                    BALANCE_LIBRARY_MARKER_COLUMN: False,
+                    "llaneid": "LANE_001",
+                },
+                {
+                    "wkcontractdata": 60.0,
+                    "wkdatatype": "其他",
+                    "wkaddtestsremark": "普通",
+                    "wksampleid": "ROUND2_001",
+                    "laneround": "1.1第二轮",
+                    "lorderdata": 60.0,
+                    "lai_output": 52.0,
+                    BALANCE_LIBRARY_MARKER_COLUMN: False,
+                    "llaneid": "LANE_002",
+                },
+                {
+                    "wkcontractdata": 24.0,
+                    "wkdatatype": "其他",
+                    "wkaddtestsremark": "普通",
+                    "wksampleid": "PHIX",
+                    "laneround": "1.1第一轮",
+                    "lorderdata": 999.0,
+                    "lai_output": 888.0,
+                    BALANCE_LIBRARY_MARKER_COLUMN: True,
+                    "llaneid": "LANE_003",
+                },
+            ]
+        ).to_csv(output_file, index=False)
+
+    monkeypatch.setattr(arrange_model6, "predict_pooling", _fake_predict_pooling)
+    monkeypatch.setattr(
+        arrange_model6,
+        "_apply_add_test_output_rate_rule_to_prediction_df",
+        lambda prediction_df, output_path=None: prediction_df,
+    )
+
+    result = _run_prediction_delivery(input_data=pd.DataFrame(), output_path=output_path)
+
+    assert round(float(result.loc[0, "lorderdata"]), 6) == 10.0
+    assert round(float(result.loc[1, "lorderdata"]), 6) == 30.0
+    assert round(float(result.loc[2, "lorderdata"]), 6) == 40.0
+    assert round(float(result.loc[3, "lorderdata"]), 6) == 50.0
+    assert round(float(result.loc[4, "lorderdata"]), 6) == 60.0
+    assert round(float(result.loc[5, "lorderdata"]), 6) == 12.0
+
+    persisted = pd.read_csv(output_path)
+    assert round(float(persisted.loc[0, "lorderdata"]), 6) == 10.0
+    assert round(float(persisted.loc[5, "lorderdata"]), 6) == 12.0
+
+
+def test_run_prediction_delivery_applies_mode_1_1_first_round_balance_rule_only_to_first_round(
+    tmp_path,
+    monkeypatch,
+):
+    output_path = tmp_path / "prediction_mode11_balance.csv"
+
+    def _fake_predict_pooling(input_data, output_file):
+        pd.DataFrame(
+            [
+                {
+                    "wkcontractdata": 24.0,
+                    "wkdatatype": "其他",
+                    "wkaddtestsremark": "普通",
+                    "wksampleid": "BALANCE_R1",
+                    "laneround": "1.1第一轮",
+                    "lorderdata": 999.0,
+                    "lai_output": 888.0,
+                    BALANCE_LIBRARY_MARKER_COLUMN: True,
+                    "llaneid": "LANE_R1",
+                },
+                {
+                    "wkcontractdata": 18.0,
+                    "wkdatatype": "其他",
+                    "wkaddtestsremark": "普通",
+                    "wksampleid": "BALANCE_R2",
+                    "laneround": "1.1第二轮",
+                    "lorderdata": 777.0,
+                    "lai_output": 666.0,
+                    BALANCE_LIBRARY_MARKER_COLUMN: True,
+                    "llaneid": "LANE_R2",
+                },
+                {
+                    "wkcontractdata": 20.0,
+                    "wkdatatype": "其他",
+                    "wkaddtestsremark": "普通",
+                    "wksampleid": "BALANCE_36T",
+                    "laneround": "",
+                    "lorderdata": 555.0,
+                    "lai_output": 444.0,
+                    BALANCE_LIBRARY_MARKER_COLUMN: True,
+                    "llaneid": "LANE_36T",
+                },
+            ]
+        ).to_csv(output_file, index=False)
+
+    monkeypatch.setattr(arrange_model6, "predict_pooling", _fake_predict_pooling)
+    monkeypatch.setattr(
+        arrange_model6,
+        "_apply_add_test_output_rate_rule_to_prediction_df",
+        lambda prediction_df, output_path=None: prediction_df,
+    )
+
+    result = _run_prediction_delivery(input_data=pd.DataFrame(), output_path=output_path)
+
+    assert round(float(result.loc[0, "wkcontractdata"]), 6) == 24.0
+    assert round(float(result.loc[0, "lorderdata"]), 6) == 12.0
+    assert pd.isna(result.loc[0, "lai_output"])
+
+    assert round(float(result.loc[1, "wkcontractdata"]), 6) == 18.0
+    assert round(float(result.loc[1, "lorderdata"]), 6) == 18.0
+    assert pd.isna(result.loc[1, "lai_output"])
+
+    assert round(float(result.loc[2, "wkcontractdata"]), 6) == 20.0
+    assert round(float(result.loc[2, "lorderdata"]), 6) == 20.0
+    assert pd.isna(result.loc[2, "lai_output"])
+
+    persisted = pd.read_csv(output_path)
+    assert round(float(persisted.loc[0, "lorderdata"]), 6) == 12.0
+    assert round(float(persisted.loc[1, "lorderdata"]), 6) == 18.0
+    assert round(float(persisted.loc[2, "lorderdata"]), 6) == 20.0
