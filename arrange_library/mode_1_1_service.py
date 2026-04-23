@@ -24,6 +24,7 @@ from arrange_library.arrange_library_model6 import (
     _collect_lanes_with_split,
     _collect_prediction_rows,
     _is_machine_supported_for_arrangement,
+    _materialize_balance_libraries_for_solution,
     _read_csv_with_encoding_fallback,
     _resolve_machine_type_enum_simple,
     _run_prediction_delivery,
@@ -358,6 +359,17 @@ def _merge_round2_export_rows(
             target_mask, "_mode11_round2_merge_key"
         ].map(target_by_key[column_name])
 
+    source_keys = set(merged["_mode11_round2_merge_key"].astype(str).tolist())
+    appended_rows = target_copy.loc[
+        ~target_copy["_mode11_round2_merge_key"].astype(str).isin(source_keys)
+    ].copy()
+    if not appended_rows.empty:
+        for column_name in merged.columns:
+            if column_name not in appended_rows.columns:
+                appended_rows[column_name] = pd.NA
+        appended_rows = appended_rows[merged.columns]
+        merged = pd.concat([merged, appended_rows], ignore_index=True, sort=False)
+
     merged = merged.drop(columns=["_mode11_round2_merge_key"], errors="ignore")
     return merged
 
@@ -669,9 +681,20 @@ def run_mode_1_1_round2_export(
 
     exported_lanes = list(getattr(scheduling_result, "lanes", []) or [])
     exported_lane_count = len(exported_lanes)
-    exported_libraries = _collect_detail_output_libraries(
-        SimpleNamespace(lane_assignments=exported_lanes, unassigned_libraries=[])
+    solution_for_export = SimpleNamespace(
+        lane_assignments=exported_lanes,
+        unassigned_libraries=[],
     )
+    if exported_lanes:
+        balance_materialize_stats = _materialize_balance_libraries_for_solution(solution_for_export)
+        logger.info(
+            "1.1第二轮轻量导出平衡文库物化完成: 需补Lane={}, 成功Lane={}",
+            int(balance_materialize_stats.get("required_lanes", 0) or 0),
+            int(balance_materialize_stats.get("success_lanes", 0) or 0),
+        )
+        exported_lanes = list(getattr(solution_for_export, "lane_assignments", []) or [])
+        exported_lane_count = len(exported_lanes)
+    exported_libraries = _collect_detail_output_libraries(solution_for_export)
     exported_library_count = len(exported_libraries)
 
     if not exported_lanes:

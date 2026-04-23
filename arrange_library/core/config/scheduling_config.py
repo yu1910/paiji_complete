@@ -1414,6 +1414,9 @@ class SchedulingConfigManager:
         if strategy_keyword and seq_strategy != strategy_keyword:
             return False
 
+        if not target_sample_types:
+            return True
+
         return any(
             self._get_library_sample_type(lib) in target_sample_types for lib in libraries
         )

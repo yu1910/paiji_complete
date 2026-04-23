@@ -204,10 +204,6 @@ class ModeAllocator:
         if baleno or bagfcno:
             return "has_package_lane_or_fc"
 
-        special_splits = str(getattr(lib, "special_splits", "") or "").strip()
-        if special_splits and special_splits.lower() not in ("", "nan", "none"):
-            return "has_special_split"
-
         return ""
 
     def _is_priority_for_36t(self, lib: EnhancedLibraryInfo) -> bool:

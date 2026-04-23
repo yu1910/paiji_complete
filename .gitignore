@@ -7,6 +7,7 @@ test/pooling/paiji_complete/*.log
 *.pyc
 *.pyo
 *.egg-info/
+build/
 
 # 编辑器/IDE
 .vscode/

@@ -33,6 +33,7 @@
   ],
   "priority_36t_preconsume_borrow_fillers_from_1_1": true,
   "priority_36t_preconsume_max_filler_gb_per_lane": 250,
+  "first_round_priority_max_gb_per_lane": 150,
   "priority_data_types_to_1_1_overflow": {
     "enabled": true,
     "trigger_min_pool_gb": 1850,

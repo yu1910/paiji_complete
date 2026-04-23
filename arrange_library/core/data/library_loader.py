@@ -1,7 +1,7 @@
 """
 从真实CSV数据加载文库信息
 创建时间：2025-12-08 17:02:11
-更新时间：2025-12-08 17:02:11
+更新时间：2026-04-22 18:24:20
 """
 
 from __future__ import annotations
@@ -144,6 +144,7 @@ CSV_TO_MODEL_MAPPING: Dict[str, str] = {
     "wksampleid": "SAMPLE_ID",
     "wkserialnumber": "SERIAL_NUMBER",
     "wktubenums": "TUBE_NUMS",
+    "wklastphix": "LAST_PHIX",
     # bi_m_merged历史数据表输出字段（带l前缀，Lane相关）
     "llaneid": "LANEID",
     "llaneorder": "LANE_ORDER",
@@ -224,6 +225,7 @@ FLOAT_FIELDS = {
     "POOLING",
     "ZSCLCV",
     "AVERAGE_Q30",
+    "LAST_PHIX",
 }
 
 INT_FIELDS = {
@@ -373,6 +375,12 @@ def load_libraries_from_csv(
             library._wkdept_raw = dept_value
             library.wkdept = dept_value
             library.dept = dept_value
+
+        last_phix_value = _normalize_numeric(row.get("wklastphix"))
+        if last_phix_value is not None:
+            library._last_phix_raw = float(last_phix_value)
+            library.last_phix = float(last_phix_value)
+            library.wklastphix = float(last_phix_value)
 
         libraries.append(library)
 

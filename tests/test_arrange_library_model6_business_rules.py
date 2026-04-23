@@ -26,6 +26,8 @@ from arrange_library.arrange_library_model6 import (
     _attempt_build_rescue_lane_from_pool,
     _build_detail_output,
     _collect_prediction_rows,
+    _consume_mode_1_1_priority_from_unassigned,
+    _enforce_mode_1_1_priority_cap_per_lane,
     _enforce_global_priority_hard_constraint,
     _ensure_unique_lane_ids,
     _filter_valid_lanes,
@@ -2896,6 +2898,7 @@ def test_rescue_failed_lanes_recovers_libraries_even_if_failed_lane_already_remo
         serial_start,
         match_fn=None,
         extra_metadata=None,
+        lane_validation_cache=None,
     ):
         return [], list(primary_pool), list(secondary_pool), serial_start
 
@@ -2927,3 +2930,105 @@ def test_rescue_failed_lanes_recovers_libraries_even_if_failed_lane_already_remo
         "recovered_libraries": 1,
         "remaining_unassigned": 2,
     }
+
+
+def test_enforce_mode_1_1_priority_cap_per_lane_moves_overflow_priority_to_unassigned() -> None:
+    allocator = arrange_model6.ModeAllocator(
+        {"priority_data_types_for_36t": ["临检", "YC", "SJ"]}
+    )
+
+    clin_110 = _build_library(origrec="CLIN_110", data_type="临检", contract_data=110.0)
+    yc_90 = _build_library(origrec="YC_90", data_type="YC", contract_data=90.0)
+    other_800 = _build_library(origrec="OTHER_800", data_type="其他", contract_data=800.0)
+    normal_lane = _build_lane_assignment("L1", [clin_110, yc_90, other_800])
+
+    sj_120 = _build_library(origrec="SJ_120", data_type="SJ", contract_data=120.0)
+    other_700 = _build_library(origrec="OTHER_700", data_type="其他", contract_data=700.0)
+    untouched_lane = _build_lane_assignment("L2", [sj_120, other_700])
+
+    existing_unassigned = _build_library(origrec="UNASSIGNED_50", data_type="其他", contract_data=50.0)
+    solution = SchedulingSolution(
+        lane_assignments=[normal_lane, untouched_lane],
+        unassigned_libraries=[existing_unassigned],
+    )
+
+    stats = _enforce_mode_1_1_priority_cap_per_lane(
+        solution,
+        allocator=allocator,
+        max_priority_gb_per_lane=150.0,
+    )
+
+    assert stats == {
+        "adjusted_lanes": 1,
+        "overflow_libraries": 1,
+        "kept_priority_gb": 230.0,
+        "removed_priority_gb": 90.0,
+    }
+    assert [lib.origrec for lib in solution.lane_assignments[0].libraries] == [
+        "CLIN_110",
+        "OTHER_800",
+    ]
+    assert [lib.origrec for lib in solution.lane_assignments[1].libraries] == [
+        "SJ_120",
+        "OTHER_700",
+    ]
+    assert [lib.origrec for lib in solution.unassigned_libraries] == [
+        "UNASSIGNED_50",
+        "YC_90",
+    ]
+
+
+def test_consume_mode_1_1_priority_from_unassigned_fills_existing_lanes(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    allocator = arrange_model6.ModeAllocator(
+        {"priority_data_types_for_36t": ["临检", "YC", "SJ"]}
+    )
+
+    lane1 = _build_lane_assignment(
+        "L1",
+        [_build_library(origrec="NORMAL_2000", data_type="其他", contract_data=2000.0)],
+    )
+    lane2 = _build_lane_assignment(
+        "L2",
+        [_build_library(origrec="NORMAL_2140", data_type="其他", contract_data=2140.0)],
+    )
+    clin_60 = _build_library(origrec="CLIN_60", data_type="临检", contract_data=60.0)
+    yc_40 = _build_library(origrec="YC_40", data_type="YC", contract_data=40.0)
+    sj_30 = _build_library(origrec="SJ_30", data_type="SJ", contract_data=30.0)
+    other_20 = _build_library(origrec="OTHER_20", data_type="其他", contract_data=20.0)
+    solution = SchedulingSolution(
+        lane_assignments=[lane1, lane2],
+        unassigned_libraries=[clin_60, yc_40, sj_30, other_20],
+    )
+
+    def _fake_validate_lane_state(validator, lane, libraries, **kwargs):
+        total = sum(lib.get_data_amount_gb() for lib in libraries)
+        return types.SimpleNamespace(is_valid=total <= 2205.0, errors=[], warnings=[])
+
+    monkeypatch.setattr(arrange_model6, "_validate_lane_state", _fake_validate_lane_state)
+
+    stats = _consume_mode_1_1_priority_from_unassigned(
+        solution,
+        allocator=allocator,
+        max_priority_gb_per_lane=100.0,
+    )
+
+    assert stats == {
+        "consumed_libraries": 3,
+        "consumed_gb": 130.0,
+        "changed_lanes": 2,
+        "remaining_priority_libraries": 0,
+    }
+    assert [lib.origrec for lib in solution.lane_assignments[0].libraries] == [
+        "NORMAL_2000",
+        "YC_40",
+        "SJ_30",
+    ]
+    assert [lib.origrec for lib in solution.lane_assignments[1].libraries] == [
+        "NORMAL_2140",
+        "CLIN_60",
+    ]
+    assert [lib.origrec for lib in solution.unassigned_libraries] == [
+        "OTHER_20",
+    ]

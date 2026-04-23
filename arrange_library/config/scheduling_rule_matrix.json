@@ -215,19 +215,11 @@
           "project_types": ["其他"]
         },
         {
-          "condition_type": "library_sample_type_contains_any",
-          "keywords": ["10X HD VISIUM空间转录组文库(新)"]
-        },
-        {
           "condition_type": "has_package_lane_or_fc"
         },
         {
           "condition_type": "seq_strategy_and_sample_type",
-          "seq_strategy_keyword": "10+24",
-          "sample_type_group_code": "atac_10_24_targets"
-        },
-        {
-          "condition_type": "has_special_split"
+          "seq_strategy_keyword": "10+24"
         }
       ]
     }

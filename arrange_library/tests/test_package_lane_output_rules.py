@@ -209,5 +209,5 @@ def test_build_detail_output_keeps_package_lane_fields_when_57_recheck_runs(tmp_
     assert set(package_rows["llaneid"]) == {"LANE_0001"}
     assert set(package_rows["lrunid"]) == {"RUN_001"}
     assert set(package_rows["lanecreatetype"]) == {"AI"}
-    assert set(package_rows["lcxms"]) == {"LANE SEQ"}
+    assert set(package_rows["lcxms"]) == {"Lane seq"}
     assert set(package_rows["lsjfs"]) == {"25B"}
