@@ -6,7 +6,7 @@
 测试覆盖：
 - 单文库>500G禁排
 - 包Lane/包FC禁排
-- 特殊拆分方式禁排
+- 特殊拆分方式不再作为1.1禁排条件
 - 临检/YC/SJ优先走3.6T-NEW
 - 规则11的FDHE/加测/混合条件仅用于高优先级少量溢出到1.1
 - 非高优先级文库默认进入1.1首轮池，除非命中禁排规则
@@ -175,12 +175,12 @@ class TestForbiddenRules:
         assert len(result.pool_1_1_forbidden) == 0
         assert len(result.pool_36t_priority) == 1
 
-    def test_special_split_forbidden(self):
+    def test_special_split_not_forbidden(self):
         lib = _make_lib(data_type="其他", special_splits="10x_cellranger", add_tests_remark="加测")
         allocator = ModeAllocator(_SAMPLE_CONFIG)
         result = allocator.allocate([lib])
-        assert len(result.pool_1_1_forbidden) == 1
-        assert "special_split" in result.dispatch_reasons.get(lib.origrec, "")
+        assert len(result.pool_1_1_forbidden) == 0
+        assert len(result.pool_1_1_quality_other) == 1
 
     def test_priority_special_split_still_goes_to_36t_priority(self):
         lib = _make_lib(data_type="临检", special_splits="10x_cellranger")
@@ -188,8 +188,7 @@ class TestForbiddenRules:
         result = allocator.allocate([lib])
         assert len(result.pool_36t_priority) == 1
         assert len(result.pool_1_1_forbidden) == 0
-        assert "priority_data_type_for_36t" in result.dispatch_reasons.get(lib.origrec, "")
-        assert "special_split" in result.dispatch_reasons.get(lib.origrec, "")
+        assert result.dispatch_reasons.get(lib.origrec, "") == "priority_data_type_for_36t"
 
 
 class TestPriorityDispatch:
@@ -241,6 +240,25 @@ class TestEligibilityConditions:
             metadata={"selected_seq_mode": "1.1", "lcxms": "1.1"},
         )
         assert "命中1.1模式禁止条件，不允许按1.1模式排机" not in messages
+
+    def test_special_split_not_blocked_by_1_1_rule_matrix(self):
+        lib = _make_lib(data_type="其他", special_splits="10x_cellranger")
+        messages = get_scheduling_config().validate_lane_constraints(
+            libraries=[lib],
+            machine_type="Nova X-25B",
+            metadata={"selected_seq_mode": "1.1", "lcxms": "1.1"},
+        )
+        assert "命中1.1模式禁止条件，不允许按1.1模式排机" not in messages
+
+    def test_10_plus_24_blocked_by_1_1_rule_matrix(self):
+        lib = _make_lib(data_type="其他")
+        lib.seq_scheme = "151+10+24+151"
+        messages = get_scheduling_config().validate_lane_constraints(
+            libraries=[lib],
+            machine_type="Nova X-25B",
+            metadata={"selected_seq_mode": "1.1", "lcxms": "1.1"},
+        )
+        assert "命中1.1模式禁止条件，不允许按1.1模式排机" in messages
 
     def test_non_priority_library_defaults_to_1_1_when_not_forbidden(self):
         lib = _make_lib(data_type="其他", add_tests_remark="-")

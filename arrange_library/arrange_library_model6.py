@@ -1,7 +1,7 @@
 """
 端到端排机流程测试 - 排机与 Pooling 预测
 创建时间：2026-04-10 16:06:41
-更新时间：2026-04-14 13:10:00
+更新时间：2026-04-23 11:04:15
 
 功能：
 - 支持完整排机流程（GreedyLaneScheduler）
@@ -172,6 +172,11 @@ RM_SCATTERED_MIX_VARIANT_ATTEMPTS = 4
 INDEX_RULE_CONFIG_PATH = Path(__file__).resolve().parents[2] / "merge_deal" / "config"
 BALANCE_LIBRARY_CONFIG_PATH = Path(__file__).resolve().parent / "AI排机-平衡文库.csv"
 BALANCE_LIBRARY_MARKER_COLUMN = "_is_ai_balance_library"
+REDUNDANT_OUTPUT_COLUMNS: Tuple[str, ...] = (
+    "predicted_lorderdata",
+    "ai_predicted_lorderdata",
+    "ai_predicted_loutput",
+)
 PACKAGE_LANE_TARGET_GB = 1000.0
 PACKAGE_LANE_TOLERANCE_GB = 0.01
 PACKAGE_LANE_MIN_GB = PACKAGE_LANE_TARGET_GB - PACKAGE_LANE_TOLERANCE_GB
@@ -209,6 +214,11 @@ def _machine_type_to_text(machine_type: Any, default: str = "") -> str:
 def _reset_auto_lane_serial_counters() -> None:
     """重置自动Lane编号计数器。"""
     _AUTO_LANE_SERIAL_COUNTERS.clear()
+
+
+def _drop_redundant_output_columns(df: pd.DataFrame) -> pd.DataFrame:
+    """移除不再对外输出的预测中间列。"""
+    return df.drop(columns=list(REDUNDANT_OUTPUT_COLUMNS), errors="ignore")
 
 
 def _reserve_auto_lane_serial(
@@ -2275,6 +2285,237 @@ def _cap_priority_for_1_1_first_round_pool(
     return selected_pool, overflow_priority, selected_total_gb
 
 
+def _enforce_mode_1_1_priority_cap_per_lane(
+    solution: Any,
+    *,
+    allocator: ModeAllocator,
+    max_priority_gb_per_lane: float,
+) -> Dict[str, float]:
+    """限制1.1首轮单条Lane可承载的高优文库总量，超出部分回退到未分配池。"""
+    lanes = list(getattr(solution, "lane_assignments", []) or [])
+    if not lanes:
+        return {
+            "adjusted_lanes": 0,
+            "overflow_libraries": 0,
+            "kept_priority_gb": 0.0,
+            "removed_priority_gb": 0.0,
+        }
+
+    unassigned = list(getattr(solution, "unassigned_libraries", []) or [])
+    adjusted_lanes = 0
+    overflow_libraries = 0
+    kept_priority_gb = 0.0
+    removed_priority_gb = 0.0
+
+    for lane in lanes:
+        lane_libraries = list(getattr(lane, "libraries", []) or [])
+        if not lane_libraries:
+            continue
+
+        priority_libraries = [
+            lib for lib in lane_libraries
+            if allocator._is_priority_for_36t(lib)
+        ]
+        if not priority_libraries:
+            continue
+
+        selected_priority_ids: Set[int] = set()
+        selected_priority_gb = 0.0
+        if max_priority_gb_per_lane > 0:
+            sorted_desc = sorted(
+                priority_libraries,
+                key=lambda lib: float(getattr(lib, "contract_data_raw", 0.0) or 0.0),
+                reverse=True,
+            )
+            for lib in sorted_desc:
+                lib_data = float(getattr(lib, "contract_data_raw", 0.0) or 0.0)
+                if lib_data <= 0:
+                    continue
+                if selected_priority_gb + lib_data <= max_priority_gb_per_lane + 1e-6:
+                    selected_priority_ids.add(id(lib))
+                    selected_priority_gb += lib_data
+
+            remaining_budget = max_priority_gb_per_lane - selected_priority_gb
+            if remaining_budget > 1e-6:
+                sorted_asc = sorted(
+                    priority_libraries,
+                    key=lambda lib: float(getattr(lib, "contract_data_raw", 0.0) or 0.0),
+                )
+                for lib in sorted_asc:
+                    lib_id = id(lib)
+                    if lib_id in selected_priority_ids:
+                        continue
+                    lib_data = float(getattr(lib, "contract_data_raw", 0.0) or 0.0)
+                    if lib_data <= 0:
+                        continue
+                    if selected_priority_gb + lib_data <= max_priority_gb_per_lane + 1e-6:
+                        selected_priority_ids.add(lib_id)
+                        selected_priority_gb += lib_data
+                        remaining_budget = max_priority_gb_per_lane - selected_priority_gb
+                        if remaining_budget <= 1e-6:
+                            break
+
+        kept_libraries: List[EnhancedLibraryInfo] = []
+        overflow_for_lane: List[EnhancedLibraryInfo] = []
+        for lib in lane_libraries:
+            if not allocator._is_priority_for_36t(lib):
+                kept_libraries.append(lib)
+                continue
+            if id(lib) in selected_priority_ids:
+                kept_libraries.append(lib)
+            else:
+                overflow_for_lane.append(lib)
+
+        kept_priority_gb += selected_priority_gb
+        removed_priority_gb += _total_lane_data(overflow_for_lane)
+        if not overflow_for_lane:
+            continue
+
+        adjusted_lanes += 1
+        overflow_libraries += len(overflow_for_lane)
+        lane.libraries = kept_libraries
+        lane.total_data_gb = _total_lane_data(kept_libraries)
+        lane.calculate_metrics()
+        unassigned.extend(overflow_for_lane)
+
+        logger.info(
+            "1.1首轮Lane高优封顶生效: lane={}, 保留高优{:.1f}G, 回退{}个/{:.1f}G到未分配池 (单Lane上限{:.1f}G)",
+            getattr(lane, "lane_id", ""),
+            selected_priority_gb,
+            len(overflow_for_lane),
+            _total_lane_data(overflow_for_lane),
+            max_priority_gb_per_lane,
+        )
+
+    solution.lane_assignments = lanes
+    solution.unassigned_libraries = unassigned
+    return {
+        "adjusted_lanes": adjusted_lanes,
+        "overflow_libraries": overflow_libraries,
+        "kept_priority_gb": kept_priority_gb,
+        "removed_priority_gb": removed_priority_gb,
+    }
+
+
+def _consume_mode_1_1_priority_from_unassigned(
+    solution: Any,
+    *,
+    allocator: ModeAllocator,
+    max_priority_gb_per_lane: float,
+) -> Dict[str, float]:
+    """尝试将1.1首轮未分配池中的高优文库回填到已有1.1 Lane。"""
+    if max_priority_gb_per_lane <= 0:
+        return {
+            "consumed_libraries": 0,
+            "consumed_gb": 0.0,
+            "changed_lanes": 0,
+            "remaining_priority_libraries": 0,
+        }
+
+    lanes = list(getattr(solution, "lane_assignments", []) or [])
+    unassigned = list(getattr(solution, "unassigned_libraries", []) or [])
+    if not lanes or not unassigned:
+        return {
+            "consumed_libraries": 0,
+            "consumed_gb": 0.0,
+            "changed_lanes": 0,
+            "remaining_priority_libraries": len(
+                [lib for lib in unassigned if allocator._is_priority_for_36t(lib)]
+            ),
+        }
+
+    validator = LaneValidator(strict_mode=True)
+    priority_candidates = [
+        lib for lib in unassigned
+        if allocator._is_priority_for_36t(lib)
+    ]
+    if not priority_candidates:
+        return {
+            "consumed_libraries": 0,
+            "consumed_gb": 0.0,
+            "changed_lanes": 0,
+            "remaining_priority_libraries": 0,
+        }
+
+    priority_candidates = sorted(
+        priority_candidates,
+        key=lambda lib: float(getattr(lib, "contract_data_raw", 0.0) or 0.0),
+        reverse=True,
+    )
+    consumed_ids: Set[int] = set()
+    changed_lane_ids: Set[str] = set()
+    consumed_gb = 0.0
+
+    def _current_priority_gb(lane: LaneAssignment) -> float:
+        return _total_lane_data(
+            [
+                lib for lib in list(getattr(lane, "libraries", []) or [])
+                if allocator._is_priority_for_36t(lib)
+            ]
+        )
+
+    for lib in priority_candidates:
+        lib_data = float(getattr(lib, "contract_data_raw", 0.0) or 0.0)
+        if lib_data <= 0:
+            continue
+
+        candidate_lanes = sorted(
+            lanes,
+            key=lambda lane: (
+                _current_priority_gb(lane),
+                -float(getattr(lane, "total_data_gb", 0.0) or 0.0),
+            ),
+        )
+        for lane in candidate_lanes:
+            lane_priority_gb = _current_priority_gb(lane)
+            if lane_priority_gb + lib_data > max_priority_gb_per_lane + 1e-6:
+                continue
+
+            trial_libraries = list(getattr(lane, "libraries", []) or []) + [lib]
+            validation_result = _validate_lane_state(
+                validator,
+                lane,
+                trial_libraries,
+            )
+            if not getattr(validation_result, "is_valid", False):
+                continue
+
+            lane.libraries = trial_libraries
+            lane.total_data_gb = _total_lane_data(trial_libraries)
+            lane.calculate_metrics()
+            consumed_ids.add(id(lib))
+            consumed_gb += lib_data
+            changed_lane_ids.add(getattr(lane, "lane_id", ""))
+            logger.info(
+                "1.1首轮高优回填成功: lane={}, 文库={}, 数据量{:.1f}G, lane内高优累计{:.1f}G",
+                getattr(lane, "lane_id", ""),
+                getattr(lib, "origrec", "") or getattr(lib, "_origrec_key", ""),
+                lib_data,
+                _current_priority_gb(lane),
+            )
+            break
+
+    if consumed_ids:
+        solution.lane_assignments = lanes
+        solution.unassigned_libraries = [
+            lib for lib in unassigned
+            if id(lib) not in consumed_ids
+        ]
+
+    remaining_priority_libraries = len(
+        [
+            lib for lib in list(getattr(solution, "unassigned_libraries", []) or [])
+            if allocator._is_priority_for_36t(lib)
+        ]
+    )
+    return {
+        "consumed_libraries": len(consumed_ids),
+        "consumed_gb": consumed_gb,
+        "changed_lanes": len([lane_id for lane_id in changed_lane_ids if lane_id]),
+        "remaining_priority_libraries": remaining_priority_libraries,
+    }
+
+
 def _should_skip_expensive_rescue_stage(
     solution: Any,
     *,
@@ -4187,11 +4428,111 @@ def _resolve_lane_balance_ratio(lane: LaneAssignment) -> float:
     return _resolve_lane_balance_ratio_from_libraries(list(getattr(lane, "libraries", []) or []))
 
 
+def _is_mode_1_1_second_round_lane(lane: LaneAssignment) -> bool:
+    """判断是否为1.1第二轮直出lane。"""
+    metadata = getattr(lane, "metadata", None)
+    if not isinstance(metadata, dict):
+        return False
+    second_round_label = str(
+        get_scheduling_config().get_mode_1_1_config().get("second_round_label", "1.1第二轮")
+    )
+    return str(metadata.get("selected_round_label", "") or "").strip() == second_round_label
+
+
+def _resolve_mode_1_1_round2_last_phix_ratio(lane: LaneAssignment) -> float:
+    """读取1.1第二轮lane的历史平衡文库占比。
+
+    `wklastphix` 为历史lane的平衡文库占比（小数），业务口径按“占最终总量比例”解释。
+    """
+    ratios: List[float] = []
+    for lib in list(getattr(lane, "libraries", []) or []):
+        for attr_name in ("_last_phix_raw", "last_phix", "wklastphix"):
+            value = _safe_float(getattr(lib, attr_name, None), default=None)
+            if value is None:
+                continue
+            if 0.0 < float(value) < 1.0:
+                ratios.append(float(value))
+                break
+
+    if not ratios:
+        return 0.0
+
+    resolved_ratio = max(ratios)
+    if len({round(item, 6) for item in ratios}) > 1:
+        logger.warning(
+            "1.1第二轮lane {} 的 wklastphix 存在多个取值，按最大值使用: {} -> {:.6f}",
+            getattr(lane, "lane_id", ""),
+            sorted({round(item, 6) for item in ratios}),
+            resolved_ratio,
+        )
+    return resolved_ratio
+
+
+def _resolve_mode_1_1_round2_order_for_balance_library(
+    lib: EnhancedLibraryInfo,
+    lane: Optional[LaneAssignment] = None,
+) -> Optional[float]:
+    """为1.1第二轮平衡文库补量解析普通文库的下单量。"""
+    contract_data = _get_lib_attr_float(lib, ["contract_data_raw", "contractdata"])
+    if contract_data is None or contract_data <= 0:
+        return None
+
+    pooling_factor = None
+    lane_meta = getattr(lane, "metadata", None)
+    if isinstance(lane_meta, dict):
+        low_output_origrecs = {
+            str(item).strip()
+            for item in (lane_meta.get("mode_1_1_round2_low_output_origrecs") or [])
+            if str(item).strip()
+        }
+        origrec = str(getattr(lib, "origrec", "") or "").strip()
+        if origrec and origrec in low_output_origrecs:
+            pooling_factor = _safe_float(
+                lane_meta.get("mode_1_1_round2_pooling_factor"),
+                default=None,
+            )
+    if pooling_factor is not None and pooling_factor > 0:
+        return round(float(contract_data) * float(pooling_factor), 6)
+
+    add_test_output_rate = _normalize_rate_to_decimal(
+        _get_lib_attr_float(lib, ["output_rate", "outputrate", "wkoutputrate"])
+    )
+    if add_test_output_rate is not None and add_test_output_rate > 0:
+        return round(float(contract_data) / float(add_test_output_rate), 6)
+
+    current_order = _get_lib_attr_float(
+        lib,
+        ["split_order_amount", "order_data_amount", "orderdata", "lorderdata"],
+    )
+    if current_order is not None and current_order > 0:
+        return round(float(current_order), 6)
+
+    return None
+
+
 def _resolve_lane_balance_data_gb(lane: LaneAssignment) -> float:
     """确定lane需要补充的平衡文库量。"""
     explicit_value = _get_lane_explicit_balance_data(lane)
     if _is_package_lane_assignment(lane):
         return round(explicit_value, 3) if explicit_value > 0 else 0.0
+    if _is_mode_1_1_second_round_lane(lane):
+        history_ratio = _resolve_mode_1_1_round2_last_phix_ratio(lane)
+        if history_ratio <= 0:
+            return 0.0
+        non_balance_order = 0.0
+        for lib in list(getattr(lane, "libraries", []) or []):
+            if _is_ai_balance_library(lib):
+                continue
+            resolved_order = _resolve_mode_1_1_round2_order_for_balance_library(lib, lane)
+            if resolved_order is None or resolved_order <= 0:
+                continue
+            non_balance_order += float(resolved_order)
+        if non_balance_order <= 0:
+            return 0.0
+        if explicit_value > 0:
+            return round(explicit_value, 3)
+        denominator = max(1.0 - history_ratio, 1e-9)
+        return round(non_balance_order * history_ratio / denominator, 3)
     if not _is_explicit_dedicated_imbalance_lane(lane):
         return 0.0
     ratio = _resolve_lane_balance_ratio(lane)
@@ -4336,17 +4677,78 @@ def _find_conflicting_lane_libraries(
     candidate: EnhancedLibraryInfo,
 ) -> List[EnhancedLibraryInfo]:
     """返回与候选平衡文库产生最新index冲突的lane内普通文库。"""
-    conflict_ids: Set[str] = set()
-    for conflict in _validate_index_conflicts_latest(list(lane_libraries) + [candidate]):
-        if conflict.record_id_1 == candidate.origrec:
-            conflict_ids.add(conflict.record_id_2)
-        elif conflict.record_id_2 == candidate.origrec:
-            conflict_ids.add(conflict.record_id_1)
+    conflict_ids = _collect_candidate_balance_index_conflict_ids(lane_libraries, candidate)
     return [
         lib
         for lib in lane_libraries
         if getattr(lib, "origrec", "") in conflict_ids and _is_replaceable_normal_library(lib)
     ]
+
+
+def _collect_candidate_balance_index_conflict_ids(
+    lane_libraries: List[EnhancedLibraryInfo],
+    candidate: EnhancedLibraryInfo,
+) -> Set[str]:
+    """收集候选平衡文库与lane内文库的latest index冲突记录ID。"""
+    candidate_origrec = str(getattr(candidate, "origrec", "") or "").strip()
+    if not candidate_origrec:
+        return set()
+
+    conflict_ids: Set[str] = set()
+    for conflict in _validate_index_conflicts_latest(list(lane_libraries) + [candidate]):
+        if conflict.record_id_1 == candidate_origrec:
+            conflict_ids.add(str(conflict.record_id_2))
+        elif conflict.record_id_2 == candidate_origrec:
+            conflict_ids.add(str(conflict.record_id_1))
+    return conflict_ids
+
+
+def _validate_balance_injection_lane_state(
+    validator: Any,
+    lane: LaneAssignment,
+    libraries: List[EnhancedLibraryInfo],
+    candidate_balance_lib: EnhancedLibraryInfo,
+    balance_already_in_libs: bool = False,
+    skip_peak_size: bool = False,
+) -> LaneValidationResult:
+    """平衡文库注入时，额外补做候选平衡文库的latest index冲突校验。"""
+    result = _validate_lane_state(
+        validator,
+        lane,
+        libraries,
+        balance_already_in_libs=balance_already_in_libs,
+        skip_peak_size=skip_peak_size,
+    )
+    if not result.is_valid:
+        return result
+
+    candidate_origrec = str(getattr(candidate_balance_lib, "origrec", "") or "").strip()
+    other_libs = [
+        lib
+        for lib in libraries
+        if str(getattr(lib, "origrec", "") or "").strip() != candidate_origrec
+    ]
+    conflict_ids = sorted(_collect_candidate_balance_index_conflict_ids(other_libs, candidate_balance_lib))
+    if not conflict_ids:
+        return result
+
+    candidate_sample_id = str(getattr(candidate_balance_lib, "sample_id", "") or "").strip() or candidate_origrec
+    return LaneValidationResult(
+        lane_id=lane.lane_id,
+        is_valid=False,
+        errors=[
+            ValidationError(
+                rule_type=ValidationRuleType.INDEX_CONFLICT,
+                severity=ValidationSeverity.ERROR,
+                message=(
+                    f"候选平衡文库 {candidate_sample_id} 与lane内文库存在latest index冲突，"
+                    f"冲突记录: {', '.join(conflict_ids)}"
+                ),
+                affected_libraries=conflict_ids,
+            )
+        ],
+        warnings=list(getattr(result, "warnings", []) or []),
+    )
 
 
 def _pick_replacement_from_pool(
@@ -4374,8 +4776,9 @@ def _pick_replacement_from_pool(
         if data <= 0 or data > removed_total + 1e-6:
             continue
         trial_libs = working_libs + [lib, candidate_balance_lib]
-        result = _validate_lane_state(
+        result = _validate_balance_injection_lane_state(
             validator, lane, trial_libs,
+            candidate_balance_lib=candidate_balance_lib,
             balance_already_in_libs=True,
             skip_peak_size=_is_explicit_dedicated_imbalance_lane(lane),
         )
@@ -4411,8 +4814,9 @@ def _pick_replacement_from_other_lanes(
             if data <= 0 or data > removed_total + 1e-6:
                 continue
             current_trial_libs = working_libs + [other_lib, candidate_balance_lib]
-            if not _validate_lane_state(
+            if not _validate_balance_injection_lane_state(
                 validator, current_lane, current_trial_libs,
+                candidate_balance_lib=candidate_balance_lib,
                 balance_already_in_libs=True,
                 skip_peak_size=_is_explicit_dedicated_imbalance_lane(current_lane),
             ).is_valid:
@@ -4439,11 +4843,15 @@ def _trim_lane_for_balance_capacity(
     is_dedicated = _is_explicit_dedicated_imbalance_lane(lane)
 
     def _check(libs: List[EnhancedLibraryInfo]) -> Any:
-        return _validate_lane_state(
+        return _validate_balance_injection_lane_state(
             validator, lane, libs,
+            candidate_balance_lib=candidate_balance_lib,
             balance_already_in_libs=True,
             skip_peak_size=is_dedicated,
         )
+
+    if _collect_candidate_balance_index_conflict_ids(working_libs, candidate_balance_lib):
+        return None
 
     trial_libs = list(working_libs) + [candidate_balance_lib]
     if _check(trial_libs).is_valid:
@@ -6635,6 +7043,37 @@ def _apply_mode_1_1_round2_pooling_rule_to_prediction_df(
     return df
 
 
+def _resolve_mode_1_1_round2_order_for_balance_row(row: pd.Series) -> Optional[float]:
+    """为第二轮平衡文库占比计算解析普通文库的下单量。
+
+    计算优先级：
+    1. 命中第二轮默认 pooling 系数时，按 `合同量 * pooling系数`
+    2. 存在加测产出率时，按 `合同量 / (加测产出率 / 100)`
+    3. 否则回退到当前 `lorderdata`
+
+    这里的值只用于得到 lane 级总下单量，不直接覆盖普通文库展示字段。
+    """
+    contract_data = _get_row_attr_float(row, ["wkcontractdata", "contractdata"])
+    if contract_data is None or contract_data <= 0:
+        return None
+
+    pooling_factor = _get_row_attr_float(row, ["resolved_round2_pooling_factor"])
+    if pooling_factor is not None and pooling_factor > 0:
+        return round(float(contract_data) * float(pooling_factor), 6)
+
+    add_test_output_rate = _normalize_rate_to_decimal(
+        _get_row_attr_float(row, ["wkoutputrate", "outputrate", "output_rate"])
+    )
+    if add_test_output_rate is not None and add_test_output_rate > 0:
+        return round(float(contract_data) / float(add_test_output_rate), 6)
+
+    current_order = _get_row_attr_float(row, ["lorderdata", "predicted_lorderdata"])
+    if current_order is not None and current_order > 0:
+        return round(float(current_order), 6)
+
+    return None
+
+
 def _apply_mode_1_1_round2_balance_rule_to_prediction_df(
     prediction_df: pd.DataFrame,
     output_path: Optional[Path] = None,
@@ -6690,13 +7129,22 @@ def _apply_mode_1_1_round2_balance_rule_to_prediction_df(
         if balance_ratio <= 0:
             continue
 
-        non_balance_order_sum = float(
-            pd.to_numeric(df.loc[lane_mask & (~marker), "lorderdata"], errors="coerce").fillna(0.0).sum()
-        )
+        non_balance_order_sum = 0.0
+        non_balance_rows = df.loc[lane_mask & (~marker)]
+        for _, non_balance_row in non_balance_rows.iterrows():
+            resolved_order = _resolve_mode_1_1_round2_order_for_balance_row(non_balance_row)
+            if resolved_order is None or resolved_order <= 0:
+                continue
+            non_balance_order_sum += float(resolved_order)
         if non_balance_order_sum <= 0:
             continue
 
-        balance_amount = round(non_balance_order_sum * balance_ratio, 6)
+        denominator = 1.0 - balance_ratio
+        if denominator <= 0:
+            continue
+
+        lane_total_order = non_balance_order_sum / denominator
+        balance_amount = round(lane_total_order * balance_ratio, 6)
         balance_row_count = int(balance_mask.sum())
         if balance_row_count <= 0:
             continue
@@ -7610,6 +8058,7 @@ def _collect_prediction_rows(
             last_qpcr = _get_lib_attr_float(lib, ["_last_qpcr_raw", "last_qpcr", "wklastqpcr", "wklistqpcr"])
             last_order = _get_lib_attr_float(lib, ["_last_order_data_raw", "last_order_data", "wklastorderdata"])
             last_output = _get_lib_attr_float(lib, ["_last_output_raw", "last_output", "wklastoutput"])
+            last_phix = _get_lib_attr_float(lib, ["_last_phix_raw", "last_phix", "wklastphix"])
             last_outrate = _resolve_historical_outrate(
                 last_outrate=_get_lib_attr_float(lib, ["_last_outrate_raw", "last_outrate", "wklastoutrate"]),
                 last_output=last_output,
@@ -7658,6 +8107,7 @@ def _collect_prediction_rows(
                     "wklastorderdata": last_order,
                     "wklastoutput": last_output,
                     "wklastoutrate": last_outrate,
+                    "wklastphix": last_phix,
                     "loutput": loutput,
                     "resolved_seq_mode": lane_selected_seq_mode or lane_sequencing_mode or None,
                     "resolved_round_label": lane_selected_round_label or None,
@@ -7850,6 +8300,16 @@ def _build_detail_output(
         if column_name in df.columns:
             df[column_name] = df[column_name].astype(object)
 
+    def _normalize_output_seq_mode(value: Any) -> Any:
+        """统一输出口径中的测序模式展示值。"""
+        text = str(value).strip()
+        if not text:
+            return value
+        normalized_keyword = "".join(text.upper().split())
+        if normalized_keyword == "LANESEQ":
+            return "Lane seq"
+        return value
+
     def _fill_balance_rows_from_lane_context(df: pd.DataFrame) -> None:
         """让平衡文库行继承同Lane其他文库的Lane级输出字段。"""
         if (
@@ -7944,6 +8404,7 @@ def _build_detail_output(
             "wklastoutrate",
             "wklastoutput",
             "wklastorderdata",
+            "wklastphix",
             "wkbalancedata",
             BALANCE_LIBRARY_MARKER_COLUMN,
             "predicted_lorderdata",
@@ -7968,6 +8429,7 @@ def _build_detail_output(
                 "wklastoutrate",
                 "wklastoutput",
                 "wklastorderdata",
+                "wklastphix",
                 "wkbalancedata",
                 BALANCE_LIBRARY_MARKER_COLUMN,
                 "predicted_lorderdata",
@@ -8031,6 +8493,7 @@ def _build_detail_output(
         | merged["lcxms"].astype(str).str.strip().isin({"", "nan", "None", "NONE", "null", "NULL"})
     )
     merged.loc[lane_assigned_mask & still_missing_mask, "lcxms"] = "3.6T-NEW"
+    merged["lcxms"] = merged["lcxms"].map(_normalize_output_seq_mode)
 
     # 1.1排机轮数：从 resolved_round_label（编排器注入）回填到 laneround 输出列
     if "laneround" not in merged.columns:
@@ -8047,6 +8510,23 @@ def _build_detail_output(
         merged.loc[lane_assigned_mask & resolved_round_mask, "laneround"] = merged.loc[
             lane_assigned_mask & resolved_round_mask, "resolved_round_label"
         ]
+    # 兜底：若已明确成Lane且测序模式属于1.1，但上游遗漏了轮次标签，
+    # 则按业务口径回填为1.1第一轮。第二轮会显式写 selected_round_label，不会走到这里。
+    missing_round_mask = (
+        merged["laneround"].isna()
+        | merged["laneround"].astype(str).str.strip().isin({"", "nan", "None", "NONE", "null", "NULL"})
+    )
+    seq_mode_source = (
+        merged["resolved_seq_mode"]
+        if "resolved_seq_mode" in merged.columns
+        else merged["lcxms"]
+    )
+    normalized_seq_mode = seq_mode_source.map(_normalize_mode_1_1_alias)
+    first_round_label = str(
+        get_scheduling_config().get_mode_1_1_config().get("first_round_label", "1.1第一轮")
+    )
+    inferred_first_round_mask = lane_assigned_mask & missing_round_mask & normalized_seq_mode.eq("1.1")
+    merged.loc[inferred_first_round_mask, "laneround"] = first_round_label
 
     # 成Lane(有laneid)的文库，标记lanecreatetype为AI
     if "lanecreatetype" not in merged.columns:
@@ -8181,6 +8661,7 @@ def _build_detail_output(
         merged = merged.drop(columns=["origrec_key"], errors="ignore")
     if "origrec" not in df_raw.columns:
         merged = merged.drop(columns=["origrec"], errors="ignore")
+    merged = _drop_redundant_output_columns(merged)
 
     if output_path.exists():
         logger.info(f"明细文件已存在，将覆盖: {output_path}")
@@ -8273,6 +8754,7 @@ def load_standardized_csv(data_file: str, limit: int | None = None) -> List[Enha
             )
             lib._last_output_raw = _safe_float(row_dict.get("wklastoutput"), default=None)
             lib._last_outrate_raw = _safe_float(row_dict.get("wklastoutrate"), default=None)
+            lib._last_phix_raw = _safe_float(row_dict.get("wklastphix"), default=None)
             lib._delete_date_raw = row_dict.get("delete_date", row_dict.get("扣减时间"))
             lib._wkdept_raw = _safe_str(row_dict.get("wkdept"), default="")
             raw_task_group_name = _safe_str(
@@ -8816,72 +9298,33 @@ def _build_output_path(data_path: Path, output_dir: Path, mode: str) -> Path:
 
 
 def _run_prediction_delivery(input_data: Union[Path, pd.DataFrame], output_path: Path) -> pd.DataFrame:
-    """统一调用 prediction_delivery 执行 Pooling 预测。"""
-    if output_path.exists():
-        logger.info(f"预测输出文件已存在，将覆盖: {output_path}")
-    logger.info(f"调用 prediction_delivery，模型目录: {MODELS_DIR}")
-    predict_pooling(input_data=input_data, output_file=output_path)
-    prediction_df = _read_csv_with_encoding_fallback(output_path)
-    prediction_df = _apply_add_test_output_rate_rule_to_prediction_df(
-        prediction_df=prediction_df,
-        output_path=output_path,
-    )
-    prediction_df = _apply_mode_1_1_round2_historical_order_rule_to_prediction_df(
-        prediction_df=prediction_df,
-        output_path=output_path,
-    )
-    prediction_df = _apply_mode_1_1_round2_pooling_rule_to_prediction_df(
-        prediction_df=prediction_df,
-        output_path=output_path,
-    )
-    prediction_df = _apply_mode_1_1_first_round_balance_rule_to_prediction_df(
-        prediction_df=prediction_df,
-        output_path=output_path,
-    )
-    prediction_df = _apply_mode_1_1_round2_balance_rule_to_prediction_df(
-        prediction_df=prediction_df,
-        output_path=output_path,
-    )
-    prediction_df = _apply_mode_1_1_first_round_order_halving_to_prediction_df(
-        prediction_df=prediction_df,
-        output_path=output_path,
-    )
-    if BALANCE_LIBRARY_MARKER_COLUMN in prediction_df.columns:
-        marker = prediction_df[BALANCE_LIBRARY_MARKER_COLUMN].fillna(False)
-        marker = marker.astype(str).str.lower().isin({"true", "1", "yes"})
-        if marker.any():
-            lane_round_series = (
-                prediction_df["laneround"].fillna("").astype(str).str.strip()
-                if "laneround" in prediction_df.columns
-                else pd.Series("", index=prediction_df.index)
-            )
-            first_round_label = str(
-                get_scheduling_config().get_mode_1_1_config().get("first_round_label", "1.1第一轮")
-            )
-            first_round_balance_mask = marker & lane_round_series.eq(first_round_label)
-            other_balance_mask = marker & (~first_round_balance_mask)
+    """跳过预测，仅保留下单量/预测产出字段为空的稳定输出。"""
+    if isinstance(input_data, pd.DataFrame):
+        prediction_df = input_data.copy()
+    else:
+        prediction_df = _read_csv_with_encoding_fallback(Path(input_data))
 
-            prediction_df.loc[other_balance_mask, "lorderdata"] = pd.to_numeric(
-                prediction_df.loc[other_balance_mask, "wkcontractdata"], errors="coerce"
-            )
-            prediction_df.loc[first_round_balance_mask, "lorderdata"] = (
-                pd.to_numeric(prediction_df.loc[first_round_balance_mask, "wkcontractdata"], errors="coerce") / 2.0
-            )
-            if "predicted_lorderdata" in prediction_df.columns:
-                prediction_df.loc[other_balance_mask, "predicted_lorderdata"] = pd.to_numeric(
-                    prediction_df.loc[other_balance_mask, "wkcontractdata"], errors="coerce"
-                )
-                prediction_df.loc[first_round_balance_mask, "predicted_lorderdata"] = (
-                    pd.to_numeric(
-                        prediction_df.loc[first_round_balance_mask, "wkcontractdata"],
-                        errors="coerce",
-                    )
-                    / 2.0
-                )
-            prediction_df.loc[marker, "lai_output"] = pd.NA
-        prediction_df = prediction_df.drop(columns=[BALANCE_LIBRARY_MARKER_COLUMN], errors="ignore")
-        output_path.parent.mkdir(parents=True, exist_ok=True)
-        prediction_df.to_csv(output_path, index=False)
+    for column_name in ["lorderdata", "lai_output", "predicted_lorderdata", "ai_predicted_lorderdata", "ai_predicted_loutput"]:
+        if column_name not in prediction_df.columns:
+            prediction_df[column_name] = pd.NA
+        prediction_df[column_name] = pd.NA
+
+    prediction_df = prediction_df.drop(
+        columns=[
+            BALANCE_LIBRARY_MARKER_COLUMN,
+            "resolved_round2_pooling_factor",
+            "resolved_round2_balance_ratio",
+        ],
+        errors="ignore",
+    )
+    prediction_df = _drop_redundant_output_columns(prediction_df)
+
+    output_path.parent.mkdir(parents=True, exist_ok=True)
+    prediction_df.to_csv(output_path, index=False)
+    logger.info(
+        "已跳过 prediction_delivery 模型预测，输出保留下单量/预测产出字段空值: {}",
+        output_path,
+    )
     return prediction_df
 
 
@@ -8934,10 +9377,10 @@ def arrange_library(
     # 仅执行 Pooling 预测
     if mode == "pooling":
         logger.info("\n" + "=" * 80)
-        logger.info("arrange_library: 仅执行 Pooling 预测")
+        logger.info("arrange_library: 跳过 Pooling 预测，仅保留空字段输出")
         logger.info("=" * 80)
         _run_prediction_delivery(input_data=data_path, output_path=output_path)
-        logger.info(f"Pooling 预测完成，输出文件: {output_path}")
+        logger.info(f"输出后处理完成，输出文件: {output_path}")
         return output_path
 
     # ===== 全流程排机模式 =====
@@ -9175,26 +9618,6 @@ def arrange_library(
                     carryback_max_gb,
                 )
 
-        first_round_priority_total_cap_gb = float(
-            mode_1_1_config.get("first_round_priority_total_cap_gb", 150.0) or 0.0
-        )
-        pool_1_1_all, overflow_priority_from_1_1_pool, priority_total_in_1_1_pool_gb = (
-            _cap_priority_for_1_1_first_round_pool(
-                pool_1_1_all,
-                allocator=allocator,
-                max_total_gb=first_round_priority_total_cap_gb,
-            )
-        )
-        if overflow_priority_from_1_1_pool:
-            normal_libs_for_36t.extend(overflow_priority_from_1_1_pool)
-            logger.info(
-                "1.1首轮池高优封顶生效: 保留{}个/{:.1f}G, 剔除{}个高优回后续3.6T池 (上限{:.1f}G)",
-                len([lib for lib in pool_1_1_all if allocator._is_priority_for_36t(lib)]),
-                priority_total_in_1_1_pool_gb,
-                len(overflow_priority_from_1_1_pool),
-                first_round_priority_total_cap_gb,
-            )
-
         if pool_1_1_all:
             logger.info("1.1首轮池共{}个文库，进入1.1模式排机", len(pool_1_1_all))
             # 为1.1池文库注入模式标记，供后续规则矩阵命中1.1 profile
@@ -9238,6 +9661,9 @@ def arrange_library(
                     enable_peak_window_mixed_lanes=first_round_enable_peak_window,
                     enable_post_fill_optimization=first_round_enable_post_fill_optimization,
                 )
+                first_round_priority_max_gb_per_lane = float(
+                    mode_1_1_config.get("first_round_priority_max_gb_per_lane", 150.0) or 0.0
+                )
                 # 给1.1产出的lane注入模式和轮次元数据
                 first_round_label = mode_1_1_config.get("first_round_label", "1.1第一轮")
                 for lane in _1_1_solution.lane_assignments:
@@ -9248,6 +9674,31 @@ def arrange_library(
                     lane.metadata["selected_round_label"] = first_round_label
                     for lib in list(lane.libraries or []):
                         lib._current_seq_mode_raw = "1.1"
+                first_round_priority_consume_stats = _consume_mode_1_1_priority_from_unassigned(
+                    _1_1_solution,
+                    allocator=allocator,
+                    max_priority_gb_per_lane=first_round_priority_max_gb_per_lane,
+                )
+                if first_round_priority_consume_stats["consumed_libraries"] > 0:
+                    logger.info(
+                        "1.1首轮高优回填完成: 消耗高优文库={}个/{:.1f}G, 变更Lane={}, 剩余高优未分配={}",
+                        int(first_round_priority_consume_stats["consumed_libraries"]),
+                        first_round_priority_consume_stats["consumed_gb"],
+                        int(first_round_priority_consume_stats["changed_lanes"]),
+                        int(first_round_priority_consume_stats["remaining_priority_libraries"]),
+                    )
+                first_round_priority_cap_stats = _enforce_mode_1_1_priority_cap_per_lane(
+                    _1_1_solution,
+                    allocator=allocator,
+                    max_priority_gb_per_lane=first_round_priority_max_gb_per_lane,
+                )
+                if first_round_priority_cap_stats["adjusted_lanes"] > 0:
+                    logger.info(
+                        "1.1首轮单Lane高优封顶完成: 调整Lane={}, 回退高优文库={}个/{:.1f}G",
+                        int(first_round_priority_cap_stats["adjusted_lanes"]),
+                        int(first_round_priority_cap_stats["overflow_libraries"]),
+                        first_round_priority_cap_stats["removed_priority_gb"],
+                    )
                 mode_1_1_lanes = list(_1_1_solution.lane_assignments)
                 # 1.1首轮排不走的普通文库保留为未分配，避免被普通3.6T-NEW继续扩Lane。
                 fallback_libs = list(_1_1_solution.unassigned_libraries or [])
@@ -9446,11 +9897,11 @@ def arrange_library(
     )
 
     logger.info("\n" + "=" * 80)
-    logger.info("步骤3: 调用 prediction_delivery 执行 Pooling 预测")
+    logger.info("步骤3: 跳过 prediction_delivery，保留下单量/预测产出空字段")
     logger.info("=" * 80)
     prediction_df = _run_prediction_delivery(input_data=output_path, output_path=output_path)
     logger.info(
-        "prediction_delivery 预测完成: 记录数={}, 平均下单量={:.3f}G, 平均产出量={:.3f}G".format(
+        "输出后处理完成: 记录数={}, 平均下单量={:.3f}G, 平均产出量={:.3f}G".format(
             len(prediction_df),
             float(pd.to_numeric(prediction_df["lorderdata"], errors="coerce").mean(skipna=True)),
             float(pd.to_numeric(prediction_df["lai_output"], errors="coerce").mean(skipna=True)),
