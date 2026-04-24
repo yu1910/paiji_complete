@@ -283,6 +283,11 @@ class GreedyLaneScheduler:
             validation_metadata.setdefault('process_code', getattr(first_lib, 'process_code', None))
             validation_metadata.setdefault('test_code', getattr(first_lib, 'test_code', None))
             validation_metadata.setdefault('test_no', getattr(first_lib, 'test_no', ''))
+        if validation_metadata.get('is_package_lane') and not any(
+            str(getattr(lib, 'package_lane_number', None) or getattr(lib, 'baleno', None) or '').strip()
+            for lib in (libraries or [])
+        ):
+            validation_metadata.pop('is_package_lane', None)
         return self._get_scheduling_lane_capacity_range(
             libraries=libraries or [],
             machine_type=machine_type,

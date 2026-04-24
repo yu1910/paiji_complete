@@ -1,7 +1,7 @@
 """
 端到端排机流程测试 - 排机与 Pooling 预测
 创建时间：2026-04-10 16:06:41
-更新时间：2026-04-23 11:04:15
+更新时间：2026-04-24 12:37:46
 
 功能：
 - 支持完整排机流程（GreedyLaneScheduler）
@@ -693,7 +693,7 @@ def _validate_index_conflicts_latest(libraries: List[EnhancedLibraryInfo]) -> Li
 
     parsed_records: List[Tuple[EnhancedLibraryInfo, str, List[Tuple[str, Optional[str]]]]] = []
     for lib in libraries:
-        record_id = str(getattr(lib, "origrec", "") or str(id(lib)))
+        record_id = _get_library_identity_key(lib)
         index_seq = str(getattr(lib, "index_seq", "") or "")
         pairs = _parse_index_pairs_latest(index_seq)
         if pairs:
@@ -704,10 +704,6 @@ def _validate_index_conflicts_latest(libraries: List[EnhancedLibraryInfo]) -> Li
         lib_1, record_id_1, pairs_1 = parsed_records[i]
         for j in range(i + 1, len(parsed_records)):
             lib_2, record_id_2, pairs_2 = parsed_records[j]
-            if str(getattr(lib_1, "origrec", "") or "").strip() == str(
-                getattr(lib_2, "origrec", "") or ""
-            ).strip():
-                continue
             for left_1, right_1 in pairs_1:
                 for left_2, right_2 in pairs_2:
                     is_repeat, conflict_type, same_left, same_right = _check_index_pair_repeat_latest(
@@ -3312,6 +3308,8 @@ def _attempt_build_lane_from_pool(
                 )
                 added_candidate = False
                 for lib in candidates:
+                    if _shares_split_family_with_selected(selected, lib):
+                        continue
                     candidate_is_imbalance = _is_imbalance_library_candidate(lib)
                     projected_special_data = _project_lane_special_data(
                         selected,
@@ -3374,6 +3372,8 @@ def _attempt_build_lane_from_pool(
             candidates = list(active_pool)
             random.shuffle(candidates)
             for lib in candidates:
+                if _shares_split_family_with_selected(selected, lib):
+                    continue
                 data = lib.get_data_amount_gb()
                 trial_libs = selected + [lib]
                 trial_min_allowed, trial_max_allowed = _resolve_lane_capacity_limits(
@@ -4052,14 +4052,8 @@ def _validate_new_lib_quick_with_result_cache(
         cached_valid, cached_indices = cached
         return cached_valid, list(cached_indices)
 
-    same_identity_filtered_cache = [
-        indices
-        for lib, indices in zip(selected_libraries, selected_indices_cache)
-        if str(getattr(lib, "origrec", "") or "").strip()
-        != str(getattr(new_lib, "origrec", "") or "").strip()
-    ]
     idx_valid, parsed_indices = idx_validator.validate_new_lib_quick_with_cache(
-        same_identity_filtered_cache,
+        selected_indices_cache,
         new_lib,
     )
     _QUICK_INDEX_VALIDATION_RESULT_CACHE[cache_key] = (
@@ -4119,6 +4113,31 @@ def _get_library_source_origrec_key(lib: EnhancedLibraryInfo) -> str:
     if source_key:
         return source_key
     return _safe_str(getattr(lib, "origrec", ""), default="")
+
+
+def _get_split_family_id_for_lane_build(lib: EnhancedLibraryInfo) -> str:
+    """提取拆分家族标识，用于补Lane阶段禁止同家族片段进入同一Lane。"""
+    explicit_family_id = _safe_str(getattr(lib, "original_library_id", None), default="")
+    if explicit_family_id:
+        return explicit_family_id
+
+    if _is_split_library(lib) or int(getattr(lib, "total_fragments", 0) or 0) > 1:
+        return _safe_str(getattr(lib, "origrec", None), default="")
+    return ""
+
+
+def _shares_split_family_with_selected(
+    selected: List[EnhancedLibraryInfo],
+    candidate: EnhancedLibraryInfo,
+) -> bool:
+    """判断候选文库是否与当前Lane已选文库属于同一拆分家族。"""
+    candidate_family_id = _get_split_family_id_for_lane_build(candidate)
+    if not candidate_family_id:
+        return False
+    for existing_lib in selected:
+        if _get_split_family_id_for_lane_build(existing_lib) == candidate_family_id:
+            return True
+    return False
 
 
 def _get_library_detail_output_key(lib: EnhancedLibraryInfo) -> str:
@@ -4286,8 +4305,6 @@ def _is_package_lane_context(
     lane_metadata: Optional[Dict[str, Any]] = None,
 ) -> bool:
     """在无 LaneAssignment 上下文时判断是否属于包 lane。"""
-    if isinstance(lane_metadata, dict) and bool(lane_metadata.get("is_package_lane")):
-        return True
     for lib in libraries:
         package_lane_number = _safe_str(
             getattr(lib, "package_lane_number", None) or getattr(lib, "baleno", None),
@@ -4295,6 +4312,15 @@ def _is_package_lane_context(
         )
         if package_lane_number:
             return True
+    if isinstance(lane_metadata, dict) and bool(lane_metadata.get("is_package_lane")):
+        return bool(
+            _safe_str(
+                lane_metadata.get("package_id")
+                or lane_metadata.get("package_lane_number")
+                or lane_metadata.get("baleno"),
+                default="",
+            )
+        )
     return False
 
 
@@ -4913,9 +4939,9 @@ def _materialize_balance_library_for_lane(
             validator=validator,
         )
         if trimmed_result is not None:
-            trimmed_libs, removed_libs = trimmed_result
+            trial_libs, removed_libs = trimmed_result
             unassigned_pool.extend(removed_libs)
-            lane.libraries = trimmed_libs
+            lane.libraries = list(trial_libs)
             lane.total_data_gb = sum(lib.get_data_amount_gb() for lib in lane.libraries)
             lane.calculate_metrics()
             lane.metadata["wkbalancedata"] = round(balance_amount, 3)

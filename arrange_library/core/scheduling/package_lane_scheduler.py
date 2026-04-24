@@ -117,7 +117,7 @@ class PackageLaneScheduler:
     
     依据《排机流程规划》实现包Lane、包FC的固定分组排机：
     1. 根据包Lane编号/Lane ID/FC/RunCycle进行固定分组
-    2. 容量校验：包Lane数据量1000G±5G（995G-1005G）
+    2. 容量校验：包Lane数据量1000G±0.01G（999.99G-1000.01G）
     3. Index校验：校验Lane内Index冲突
     4. 生成Lane分配结果
     """
@@ -663,9 +663,9 @@ class PackageLaneScheduler:
             # 包Lane容量校验：优先使用统一规则配置
             if effective_total_data < lane_rule.effective_min_gb or effective_total_data > lane_rule.effective_max_gb:
                 failed_packages[f"package_lane_{pkg_id}"] = (
-                    f"有效数据量{effective_total_data:.1f}G(合同{total_data:.1f}G+平衡{explicit_balance_data:.1f}G)"
-                    f"不在允许范围{lane_rule.effective_min_gb:.1f}G-"
-                    f"{lane_rule.effective_max_gb:.1f}G内，规则={lane_rule.rule_code}"
+                    f"有效数据量{effective_total_data:.2f}G(合同{total_data:.2f}G+平衡{explicit_balance_data:.2f}G)"
+                    f"不在允许范围{lane_rule.effective_min_gb:.2f}G-"
+                    f"{lane_rule.effective_max_gb:.2f}G内，规则={lane_rule.rule_code}"
                 )
                 unprocessed.extend(libs)
                 continue
