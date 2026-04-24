@@ -71,14 +71,19 @@ class IndexValidatorVerified:
         logger.info("Index校验器初始化完成（真实数据验证版本）")
 
     @staticmethod
-    def _same_library_identity(
-        lib_a: EnhancedLibraryInfo,
-        lib_b: EnhancedLibraryInfo,
-    ) -> bool:
-        """相同 origrec 的重复明细视为同一文库，不参与自冲突判定。"""
-        identity_a = str(getattr(lib_a, "origrec", "") or "").strip()
-        identity_b = str(getattr(lib_b, "origrec", "") or "").strip()
-        return bool(identity_a) and identity_a == identity_b
+    def _get_library_id(lib: EnhancedLibraryInfo) -> str:
+        """返回Index冲突输出使用的稳定文库标识，不依赖origrec。"""
+        for attr_name in (
+            "_detail_output_key",
+            "fragment_id",
+            "wkaidbid",
+            "aidbid",
+            "sample_id",
+        ):
+            value = str(getattr(lib, attr_name, "") or "").strip()
+            if value:
+                return value
+        return str(id(lib))
     
     def validate_lane(self, libraries: List[EnhancedLibraryInfo], silent: bool = False) -> ValidationResult:
         """
@@ -109,7 +114,7 @@ class IndexValidatorVerified:
             if indices:
                 lib_indices.append({
                     'library': lib,
-                    'library_id': getattr(lib, 'origrec', '') or str(id(lib)),
+                    'library_id': self._get_library_id(lib),
                     'indices': indices
                 })
         
@@ -118,9 +123,6 @@ class IndexValidatorVerified:
             for j in range(i + 1, len(lib_indices)):
                 lib_a = lib_indices[i]
                 lib_b = lib_indices[j]
-                if self._same_library_identity(lib_a["library"], lib_b["library"]):
-                    continue
-                
                 # 比较两个文库的所有Index组合
                 for left1, right1 in lib_a['indices']:
                     for left2, right2 in lib_b['indices']:
@@ -184,8 +186,6 @@ class IndexValidatorVerified:
             for j in range(i + 1, len(lib_indices)):
                 lib_a, indices_a = lib_indices[i]
                 lib_b, indices_b = lib_indices[j]
-                if self._same_library_identity(lib_a, lib_b):
-                    continue
                 for left1, right1 in indices_a:
                     for left2, right2 in indices_b:
                         is_repeat, _, _, _ = self._check_index_pair_repeat(
@@ -224,8 +224,6 @@ class IndexValidatorVerified:
             return True
 
         for existing_lib in existing_libs:
-            if self._same_library_identity(existing_lib, new_lib):
-                continue
             existing_indices = self._parse_library_indices(existing_lib)
             if not existing_indices:
                 continue

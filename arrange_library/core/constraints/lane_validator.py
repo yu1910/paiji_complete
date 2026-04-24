@@ -1,7 +1,7 @@
 """
 成Lane校验程序
 创建时间：2025-12-02 18:00:00
-更新时间：2026-04-12 10:00:00
+更新时间：2026-04-24 13:24:49
 
 变更记录：
 - 2026-03-06: 移除类内LANE_CAPACITY/LANE_MIN_DATA/LANE_MAX_DATA死代码常量，
@@ -341,11 +341,13 @@ class LaneValidator:
         if total_data == 0:
             return None
         
-        # 统计客户文库数据量（使用is_customer_library方法或sampletype字段）
+        # 统计客户文库数据量（AI平衡文库不参与客户占比计算）
         customer_data = 0.0
         customer_libs = []
         
         for lib in libraries:
+            if bool(getattr(lib, "_is_ai_balance_library", False)):
+                continue
             # 客户识别策略（尽量兼容不同数据源/不同字段口径）：
             # 1) 显式字段：customer_library / sampletype（更可信）
             # 2) 样本编号前缀：FKDL*（历史习惯）
@@ -368,8 +370,13 @@ class LaneValidator:
                 customer_data += lib_data
                 customer_libs.append(lib.origrec)
         
-        # 计算客户占比（按数据量计算）
-        customer_ratio = customer_data / total_data if total_data > 0 else 0.0
+        # 计算客户占比（按非平衡文库数据量计算）
+        base_total_data = sum(
+            float(getattr(lib, 'contract_data_raw', 0) or 0)
+            for lib in libraries
+            if not bool(getattr(lib, "_is_ai_balance_library", False))
+        )
+        customer_ratio = customer_data / base_total_data if base_total_data > 0 else 0.0
         
         # 规则：<=50% 或 =100% 都通过；仅当 >50% 且 不等于100% 时违规
         if customer_ratio > self.customer_ratio_limit and customer_ratio != 1.0:
@@ -393,12 +400,14 @@ class LaneValidator:
         if total_data == 0:
             return None
         
-        # 检测是否存在10bp和非10bp混排
+        # 检测是否存在10bp和非10bp混排（AI平衡文库不参与10bp占比计算）
         data_10bp = 0.0
         data_non_10bp = 0.0
         libs_10bp = []
         
         for lib in libraries:
+            if bool(getattr(lib, "_is_ai_balance_library", False)):
+                continue
             lib_data = float(lib.contract_data_raw or 0)
             is_10bp = False
             
@@ -421,7 +430,8 @@ class LaneValidator:
         if data_10bp == 0 or data_non_10bp == 0:
             return None
         
-        ratio_10bp = data_10bp / total_data
+        base_total_data = data_10bp + data_non_10bp
+        ratio_10bp = data_10bp / base_total_data if base_total_data > 0 else 0.0
         
         if ratio_10bp < self.index_10bp_ratio_min:
             return ValidationError(

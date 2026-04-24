@@ -548,6 +548,66 @@ def test_attempt_build_lane_from_pool_caches_equivalent_quick_index_checks(
     assert quick_check_calls["count"] == 2
 
 
+def test_attempt_build_lane_from_pool_skips_split_fragments_from_same_family(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    frag1 = _build_library(origrec="SPLIT_FAM", contract_data=60.0, index_seq="AAAA;TTTT")
+    frag1.original_library_id = "SPLIT_FAMILY_001"
+    frag1.wkissplit = "yes"
+    frag1.fragment_id = "SPLIT_FAMILY_001_F001"
+    frag1.wkaidbid = "SPLIT_A"
+    frag1.aidbid = "SPLIT_A"
+    frag1._detail_output_key = "SPLIT_A"
+
+    frag2 = _build_library(origrec="SPLIT_FAM", contract_data=60.0, index_seq="CCCC;GGGG")
+    frag2.original_library_id = "SPLIT_FAMILY_001"
+    frag2.wkissplit = "yes"
+    frag2.fragment_id = "SPLIT_FAMILY_001_F002"
+    frag2.wkaidbid = "SPLIT_B"
+    frag2.aidbid = "SPLIT_B"
+    frag2._detail_output_key = "SPLIT_B"
+
+    filler = _build_library(origrec="FILLER", contract_data=50.0, index_seq="ACGT;TGCA")
+
+    arrange_model6._clear_imbalance_helper_caches()
+    monkeypatch.setattr(arrange_model6, "_filter_libraries_by_hard_priority", lambda libs, **kwargs: list(libs))
+    monkeypatch.setattr(
+        arrange_model6,
+        "_resolve_lane_capacity_limits",
+        lambda libraries, machine_type, lane_id="", lane_metadata=None: (100.0, 200.0),
+    )
+    monkeypatch.setattr(arrange_model6, "_validate_lane_special_split_rule", lambda libraries: (True, set(), ""))
+    monkeypatch.setattr(
+        arrange_model6,
+        "_validate_lane_57_mix_rules",
+        lambda libraries, enforce_total_limit=False, lane_id="", lane_metadata=None: (True, ""),
+    )
+    monkeypatch.setattr(
+        arrange_model6._MODULE_IDX_VALIDATOR,
+        "validate_new_lib_quick_with_cache",
+        lambda selected_idx_cache, lib: (True, [(lib.origrec, None)]),
+    )
+    monkeypatch.setattr(
+        arrange_model6,
+        "_validate_lane_with_latest_index",
+        lambda **kwargs: types.SimpleNamespace(is_valid=True, errors=[], warnings=[]),
+    )
+    monkeypatch.setattr(arrange_model6.random, "shuffle", lambda libs: None)
+
+    lane, used = _attempt_build_lane_from_pool(
+        pool=[frag1, frag2, filler],
+        validator=LaneValidator(strict_mode=True),
+        machine_type=MachineType.NOVA_X_25B,
+        lane_id_prefix="MX",
+    )
+
+    assert lane is not None
+    used_detail_keys = {getattr(lib, "_detail_output_key", "") for lib in used}
+    assert "SPLIT_A" in used_detail_keys
+    assert "SPLIT_B" not in used_detail_keys
+    assert "FILLER" in {getattr(lib, "origrec", "") for lib in used}
+
+
 def test_validate_completed_lane_caches_equivalent_library_sets(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
@@ -696,6 +756,46 @@ def test_resolve_lane_capacity_selection_caches_equivalent_library_sets(
     assert sel1.effective_min_gb == 995.0
     assert sel2.effective_max_gb == 1005.0
     assert calls["count"] == 1
+
+
+def test_resolve_lane_capacity_selection_cache_respects_seq_mode_context() -> None:
+    scheduling_config = get_scheduling_config()
+    scheduling_config._clear_runtime_caches()
+    arrange_model6._clear_imbalance_helper_caches()
+
+    lib = _build_library(
+        origrec="CAP_CACHE_SEQ_MODE",
+        sample_type="10X转录组-3'文库",
+        data_type="其他",
+        contract_data=100.0,
+        seq_scheme="PE150",
+        machine_note="PE150",
+        jjbj="是",
+    )
+    lane_metadata = {"is_dedicated_imbalance_lane": True}
+
+    lib._current_seq_mode_raw = "1.1"
+    mode_11_selection = arrange_model6._resolve_lane_capacity_selection(
+        [lib],
+        MachineType.NOVA_X_25B,
+        lane_id="DL_Nova X-25B_001",
+        lane_metadata=lane_metadata,
+    )
+
+    lib._current_seq_mode_raw = ""
+    lib.seq_mode = ""
+    lib.lcxms = ""
+    mode_36t_selection = arrange_model6._resolve_lane_capacity_selection(
+        [lib],
+        MachineType.NOVA_X_25B,
+        lane_id="DL_Nova X-25B_001",
+        lane_metadata=lane_metadata,
+    )
+
+    assert mode_11_selection.rule_code == "tj_1595_mode_1_1_special_combo"
+    assert mode_11_selection.effective_min_gb == 1845.0
+    assert mode_36t_selection.rule_code == "tj_1595_special_combo_36t"
+    assert mode_36t_selection.effective_min_gb == 915.0
 
 
 def test_scheduling_config_resolve_seq_strategy_caches_same_candidate_signature(

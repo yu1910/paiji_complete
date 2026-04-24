@@ -54,9 +54,9 @@ class LaneCapacityConfig:
     
     # 包Lane容量
     package_lane_target: float = 1000.0
-    package_lane_tolerance: float = 5.0
-    package_lane_min: float = 995.0
-    package_lane_max: float = 1005.0
+    package_lane_tolerance: float = 0.01
+    package_lane_min: float = 999.99
+    package_lane_max: float = 1000.01
     
     # 不同机器类型的容量（fallback值，优先由规则矩阵决定）
     machine_capacities: Dict[str, float] = field(default_factory=lambda: {
@@ -1230,6 +1230,33 @@ class SchedulingConfigManager:
         )
         return context_features
 
+    def get_lane_rule_context_signature(
+        self,
+        libraries: List[Any],
+        machine_type: str,
+        metadata: Optional[Dict[str, Any]] = None,
+    ) -> Tuple[Any, ...]:
+        """返回容量/规则选择所依赖的标准化上下文签名。"""
+        metadata = metadata or {}
+        normalized_machine_type = self._normalize_text(machine_type)
+        process_code = self._resolve_process_code(libraries, metadata)
+        test_no = self._resolve_test_no(libraries, metadata)
+        seq_mode = self._resolve_seq_mode(libraries, metadata)
+        seq_strategy = self._resolve_seq_strategy(libraries, metadata)
+        project_type, lane_sample_types, quality_risk_signature = self._resolve_lane_context_features(
+            libraries
+        )
+        return (
+            normalized_machine_type,
+            process_code,
+            test_no,
+            seq_mode,
+            seq_strategy,
+            project_type,
+            lane_sample_types,
+            quality_risk_signature,
+        )
+
     def resolve_lane_rule_selection(
         self,
         libraries: List[Any],
@@ -1241,13 +1268,8 @@ class SchedulingConfigManager:
             return None
 
         metadata = metadata or {}
-        normalized_machine_type = self._normalize_text(machine_type)
-        process_code = self._resolve_process_code(libraries, metadata)
-        test_no = self._resolve_test_no(libraries, metadata)
-        seq_mode = self._resolve_seq_mode(libraries, metadata)
-        seq_strategy = self._resolve_seq_strategy(libraries, metadata)
-        project_type, lane_sample_types, quality_risk_signature = self._resolve_lane_context_features(libraries)
-        cache_key = (
+        cache_key = self.get_lane_rule_context_signature(libraries, machine_type, metadata)
+        (
             normalized_machine_type,
             process_code,
             test_no,
@@ -1256,7 +1278,7 @@ class SchedulingConfigManager:
             project_type,
             lane_sample_types,
             quality_risk_signature,
-        )
+        ) = cache_key
         if cache_key in self._lane_rule_selection_cache:
             cached_selection = self._lane_rule_selection_cache[cache_key]
             return deepcopy(cached_selection) if cached_selection is not None else None

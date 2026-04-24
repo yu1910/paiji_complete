@@ -2,7 +2,7 @@
   "_meta": {
     "description": "1.1模式专属业务规则配置",
     "created": "2026-04-14 13:15:00",
-    "updated": "2026-04-14 13:15:00",
+    "updated": "2026-04-23 17:29:52",
     "note": "排机程序中1.1模式的文库级筛选、首轮分流、第二轮组织和pooling特例参数。lane容量由scheduling_rule_matrix.json负责。"
   },
   "single_library_contract_limit_gb": 500,
