@@ -1,7 +1,7 @@
 {
   "description": "统一排机规则总配置表",
   "created_at": "2026-03-06 13:55:15",
-  "updated_at": "2026-04-23 00:00:00",
+  "updated_at": "2026-04-28 19:44:06",
   "sample_type_groups": {
     "special_combo_group_a": {
       "description": "10X 5端和VDJ组合",
@@ -156,9 +156,9 @@
       "seq_strategy_keywords_any": ["10+24"],
       "seq_modes": ["Lane seq"],
       "project_types": [],
-      "soft_target_gb": 950.0,
-      "min_target_gb": 950.0,
-      "max_target_gb": 950.0,
+      "soft_target_gb": 1000.0,
+      "min_target_gb": 1000.0,
+      "max_target_gb": 1000.0,
       "tolerance_gb": 5.0,
       "lane_count": 8,
       "loading_method": "25B",
@@ -250,9 +250,9 @@
       "concentration": 2.5
     },
     {
-      "rule_code": "medical_commission_over_100g_2_3",
-      "reason": "medical_commission_over_100g_2_3",
-      "rule_type": "medical_commission_threshold",
+      "rule_code": "clinical_data_over_100g_2_3",
+      "reason": "clinical_data_over_100g_2_3",
+      "rule_type": "clinical_data_threshold",
       "priority": 200,
       "process_codes": [1595],
       "test_nos": ["Novaseq X Plus-PE150"],

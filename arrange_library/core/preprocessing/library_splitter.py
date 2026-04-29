@@ -1,7 +1,7 @@
 """
 文库拆分器
 创建时间：2025-11-20 10:00:00
-更新时间：2026-03-05 10:48:32
+更新时间：2026-04-28 18:49:51
 功能：严格按照《排机规则文档》执行文库拆分，支持多级拆分
 """
 
@@ -297,15 +297,15 @@ class LibrarySplitter:
         """执行拆分操作 - 支持多级拆分
 
         规则：
-        - 优先对半拆分（拆成2份）
-        - 拆分后每个子文库应尽量满足当前拆分规则阈值
+        - 按阈值计算最小拆分份数
+        - 拆分后每个子文库应满足当前拆分规则阈值
         - 确保每个子文库数据量在合理范围内
         """
         data_amount = float(lib.contract_data_raw)
 
         rule_label, max_data_per_fragment = self._resolve_split_rule(lib)
 
-        # 计算需要拆分成多少份（优先对半，份数为2的幂次）
+        # 计算需要拆分成多少份（按阈值取最小份数）
         split_count = self._calculate_split_count(
             data_amount=data_amount,
             max_data_per_fragment=max_data_per_fragment,
@@ -363,7 +363,7 @@ class LibrarySplitter:
         data_amount: float,
         max_data_per_fragment: float,
     ) -> int:
-        """计算拆分份数（优先对半拆分，份数为2的幂次）
+        """计算拆分份数（按阈值取最小份数）
 
         Args:
             data_amount: 原始数据量（G）
@@ -375,16 +375,11 @@ class LibrarySplitter:
         if data_amount <= max_data_per_fragment:
             return 1
 
-        # 计算最小需要的份数，使得每份满足单index阈值约束
-        min_parts = math.ceil(data_amount / max_data_per_fragment)
+        # 计算最小需要的份数，使每份合同量不超过当前阈值。
+        split_count = math.ceil(data_amount / max_data_per_fragment)
 
-        # 向上取整到2的幂次（优先对半拆分原则）
-        # 例如：需要3份 -> 取4份（2²）；需要5份 -> 取8份（2³）
-        power = math.ceil(math.log2(min_parts))
-        split_count = 2 ** power
-
-        # 但如果拆分后每份太小（< min_split_size），则减少拆分份数
+        # 若极小阈值或异常输入导致拆分后每份过小，则回退到能满足最小保留量的最大份数。
         while split_count > 2 and (data_amount / split_count) < self.min_split_size:
-            split_count = split_count // 2
+            split_count -= 1
 
-        return max(2, split_count)  # 至少拆成2份
+        return max(2, split_count)

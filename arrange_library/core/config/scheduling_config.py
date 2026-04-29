@@ -1,7 +1,7 @@
 """
 排机系统统一配置管理模块
 创建时间：2025-12-03 14:00:00
-更新时间：2026-04-17 14:30:00
+更新时间：2026-04-28 15:50:00
 
 集中管理所有排机相关的配置常量，避免硬编码分散在各个模块中。
 配置来源：docs/排机规则文档.md、config/business_rules.yaml
@@ -1650,18 +1650,14 @@ class SchedulingConfigManager:
                     return float(rule.get('concentration', 0.0) or 0.0), str(
                         rule.get('reason', rule.get('rule_code', 'matched_rule'))
                     )
-            elif rule_type == 'medical_commission_threshold':
+            elif rule_type == 'clinical_data_threshold':
                 threshold = float(rule.get('data_threshold_gb', 0.0) or 0.0)
-                medical_data = sum(
+                clinical_data = sum(
                     float(getattr(lib, 'contract_data_raw', 0.0) or 0.0)
                     for lib in libraries
-                    if (
-                        ('医学' in self._normalize_text(getattr(lib, 'sub_project_name', '')))
-                        or ('医检所' in self._normalize_text(getattr(lib, 'sub_project_name', '')))
-                    )
-                    and ('委托' in self._normalize_text(getattr(lib, 'sub_project_name', '')))
+                    if self._get_library_project_data_type(lib) == '临检'
                 )
-                if medical_data > threshold:
+                if clinical_data > threshold:
                     return float(rule.get('concentration', 0.0) or 0.0), str(
                         rule.get('reason', rule.get('rule_code', 'matched_rule'))
                     )

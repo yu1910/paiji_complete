@@ -1,7 +1,7 @@
 """
 成Lane校验程序
 创建时间：2025-12-02 18:00:00
-更新时间：2026-04-24 13:24:49
+更新时间：2026-04-28 19:47:35
 
 变更记录：
 - 2026-03-06: 移除类内LANE_CAPACITY/LANE_MIN_DATA/LANE_MAX_DATA死代码常量，
@@ -198,6 +198,35 @@ class LaneValidator:
                 )]
             )
         
+        # 10+24 Lane seq 专项校验：只检查Index重复、Index对数、容量范围。
+        is_lane_seq_10_plus_24_lane = bool(metadata.get('is_lane_seq_10_plus_24_lane', False))
+        if is_lane_seq_10_plus_24_lane:
+            index_errors = self._validate_index_conflicts(libraries)
+            errors.extend(index_errors)
+
+            total_index_pairs = sum(self._count_index_pairs(lib) for lib in libraries)
+            if total_index_pairs < 5:
+                errors.append(
+                    ValidationError(
+                        rule_type=ValidationRuleType.INDEX_CONFLICT,
+                        severity=ValidationSeverity.ERROR,
+                        message=f"10+24 Lane seq Index对数{total_index_pairs}小于5对",
+                        current_value=float(total_index_pairs),
+                        threshold_value=5.0,
+                    )
+                )
+
+            capacity_result = self._validate_capacity(libraries, machine_type, metadata)
+            if capacity_result:
+                errors.append(capacity_result)
+
+            return LaneValidationResult(
+                lane_id=lane_id,
+                is_valid=len(errors) == 0,
+                errors=errors,
+                warnings=warnings,
+            )
+        
         # 1. Index重复校验
         index_errors = self._validate_index_conflicts(libraries)
         errors.extend(index_errors)
@@ -305,6 +334,13 @@ class LaneValidator:
             errors=errors,
             warnings=warnings
         )
+    
+    def _count_index_pairs(self, lib: EnhancedLibraryInfo) -> int:
+        """统计文库Index对数。"""
+        index_seq = str(getattr(lib, "index_seq", "") or "").strip()
+        if not index_seq:
+            return 0
+        return len([part for part in index_seq.split(",") if part.strip()])
     
     def _validate_index_conflicts(self, libraries: List[EnhancedLibraryInfo]) -> List[ValidationError]:
         """校验Index冲突，复用类内已初始化的 _index_validator 实例"""
@@ -830,6 +866,8 @@ class LaneValidator:
             if heavy_novo_error:
                 errors.append(heavy_novo_error)
         
+        elif lane_mode == "lane_seq":
+            pass
         elif lane_mode == "mode_36t":
             # 3.6T模式特定规则：碱基不均衡比例使用3.6T专用上限
             imbalance_error = self._validate_base_imbalance_ratio(
