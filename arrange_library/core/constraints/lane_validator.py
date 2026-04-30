@@ -50,6 +50,7 @@ class ValidationRuleType(Enum):
     """校验规则类型"""
     INDEX_CONFLICT = "index_conflict"
     CUSTOMER_RATIO = "customer_ratio"
+    CUSTOMER_PRODUCTION_MIX_RATIO = "customer_production_mix_ratio"
     INDEX_10BP_RATIO = "index_10bp_ratio"
     SINGLE_END_RATIO = "single_end_ratio"
     BASE_IMBALANCE_RATIO = "base_imbalance_ratio"
@@ -238,7 +239,15 @@ class LaneValidator:
                 errors.append(customer_result)
             else:
                 warnings.append(customer_result)
-        
+
+        # 2.5 手工/客户侧与产线混合占比校验
+        mix_ratio_result = self._validate_customer_production_mix_ratio(libraries)
+        if mix_ratio_result:
+            if mix_ratio_result.severity == ValidationSeverity.ERROR:
+                errors.append(mix_ratio_result)
+            else:
+                warnings.append(mix_ratio_result)
+
         # 3. 10bp Index占比校验
         # [2025-12-25] 如果是纯非10bp Lane，跳过此检查（规则4b）
         is_pure_non_10bp_lane = metadata.get('is_pure_non_10bp_lane', False)
@@ -362,13 +371,7 @@ class LaneValidator:
         return []
     
     def _validate_customer_ratio(self, libraries: List[EnhancedLibraryInfo]) -> Optional[ValidationError]:
-        """校验客户占比
-        
-        [2025-12-31 修复] 改为按数据量计算，与排机逻辑保持一致
-        规则：客户文库占比 <=50% 或 =100% 都通过
-        - 使用sampletype字段以"客户"开头来识别客户文库
-        - 或者使用is_customer_library()方法
-        """
+        """校验客户占比（仅基于wkjkhj字段识别客户自建）。"""
         if len(libraries) == 0:
             return None
         
@@ -384,24 +387,7 @@ class LaneValidator:
         for lib in libraries:
             if bool(getattr(lib, "_is_ai_balance_library", False)):
                 continue
-            # 客户识别策略（尽量兼容不同数据源/不同字段口径）：
-            # 1) 显式字段：customer_library / sampletype（更可信）
-            # 2) 样本编号前缀：FKDL*（历史习惯）
-            # 3) 回退：对象自带 is_customer_library()（避免被"customer_library=否"误导）
-            customer_flag = str(getattr(lib, "customer_library", "") or "").strip()
-            if customer_flag in {"是", "Y", "YES", "TRUE", "客户"}:
-                is_customer = True
-            else:
-                sampletype = getattr(lib, "sampletype", "") or getattr(lib, "sample_type_code", "") or ""
-                sample_id = getattr(lib, "sample_id", "") or ""
-                if str(sampletype).startswith("客户") or str(sample_id).startswith("FKDL"):
-                    is_customer = True
-                elif hasattr(lib, "is_customer_library") and callable(lib.is_customer_library):
-                    is_customer = bool(lib.is_customer_library())
-                else:
-                    is_customer = False
-            
-            if is_customer:
+            if self._is_customer_side_library(lib):
                 lib_data = float(getattr(lib, 'contract_data_raw', 0) or 0)
                 customer_data += lib_data
                 customer_libs.append(lib.origrec)
@@ -426,7 +412,79 @@ class LaneValidator:
             )
         
         return None
-    
+
+    def _validate_customer_production_mix_ratio(self, libraries: List[EnhancedLibraryInfo]) -> Optional[ValidationError]:
+        """校验手工/客户侧与产线混合Lane中少数侧占比下限。"""
+        if not libraries:
+            return None
+
+        base_libraries = [
+            lib for lib in libraries
+            if not bool(getattr(lib, "_is_ai_balance_library", False))
+        ]
+        if not base_libraries:
+            return None
+
+        total_data = sum(float(getattr(lib, "contract_data_raw", 0) or 0) for lib in base_libraries)
+        if total_data <= 0:
+            return None
+
+        manual_or_customer_data = 0.0
+        production_data = 0.0
+
+        for lib in base_libraries:
+            lib_data = float(getattr(lib, "contract_data_raw", 0) or 0)
+            if self._is_production_side_library(lib):
+                production_data += lib_data
+            if self._is_manual_or_customer_side_library(lib):
+                manual_or_customer_data += lib_data
+
+        # 纯手工/客户侧 或 纯产线 不限制
+        if production_data <= 0 or manual_or_customer_data <= 0:
+            return None
+
+        minority_ratio = min(manual_or_customer_data, production_data) / total_data
+        min_ratio_limit = 0.05
+        if minority_ratio + 1e-12 < min_ratio_limit:
+            return ValidationError(
+                rule_type=ValidationRuleType.CUSTOMER_PRODUCTION_MIX_RATIO,
+                severity=ValidationSeverity.ERROR,
+                message=(
+                    f"手工/客户侧与产线混合Lane少数侧占比{minority_ratio:.1%}不符合规则"
+                    f"(应>={min_ratio_limit:.0%})"
+                ),
+                current_value=minority_ratio,
+                threshold_value=min_ratio_limit,
+            )
+
+        return None
+
+    @staticmethod
+    def _normalize_profile_text(value: object) -> str:
+        """统一文本口径。"""
+        if value is None:
+            return ""
+        return str(value).strip().replace("＋", "+").replace("×", "X").upper()
+
+    def _is_customer_side_library(self, lib: EnhancedLibraryInfo) -> bool:
+        """仅基于wkjkhj识别客户侧文库。"""
+        wkjkhj = self._normalize_profile_text(getattr(lib, "wkjkhj", "") or "")
+        return wkjkhj == "客户自建"
+
+    def _is_manual_side_library(self, lib: EnhancedLibraryInfo) -> bool:
+        """仅基于wkjkhj识别手工侧文库。"""
+        wkjkhj = self._normalize_profile_text(getattr(lib, "wkjkhj", "") or "")
+        return wkjkhj == "诺禾手工"
+
+    def _is_production_side_library(self, lib: EnhancedLibraryInfo) -> bool:
+        """仅基于wkjkhj识别产线侧文库。"""
+        wkjkhj = self._normalize_profile_text(getattr(lib, "wkjkhj", "") or "")
+        return wkjkhj == "诺禾自动"
+
+    def _is_manual_or_customer_side_library(self, lib: EnhancedLibraryInfo) -> bool:
+        """仅基于wkjkhj识别手工/客户侧文库。"""
+        return self._is_customer_side_library(lib) or self._is_manual_side_library(lib)
+
     def _validate_10bp_index_ratio(self, libraries: List[EnhancedLibraryInfo]) -> Optional[ValidationError]:
         """校验10bp Index占比
         

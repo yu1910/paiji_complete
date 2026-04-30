@@ -1,7 +1,7 @@
 """
 碱基不均衡处理器
 创建时间：2025-11-20 00:00:00
-更新时间：2026-04-07 15:21:20
+更新时间：2026-04-29 15:20:00
 功能：处理碱基不均衡文库的分组映射、混排限制和包Lane规则
 变更记录：
 - 2025-12-24: 补充分组21-26（10X全基因组、10xATAC、HD Visium、FixedRNA等）
@@ -11,11 +11,10 @@
   - 其他分组（G1-G26）必须"同类型排整条Lane"，不可与其他碱基不均衡文库混排
   - 恢复碱基不均衡总量限制为240G（统一口径）
   - G29规则：文库类型≤3种，G27占比≤20%
-- 2026-04-07: 按“1-57分组表”升级规则口径
-  - 分组1-52：默认不可与其他碱基不均衡分组混排
-  - 分组53/54：分别支持组内混排
-  - 分组55：高PhiX（>=20%）碱基不均衡类型可混排
-  - 分组56/57：碱基均衡+不均衡组合按30%+15%模板校验
+- 2026-04-29: 更新碱基不均衡分组比例与分组55规则
+  - G3/G10调整为95%+5%，G22/G31调整为88%+12%，G35调整为99%+1%，G36调整为70%+30%
+  - 删除G21/G30 small RNA分组，新增G58 10x HD Visium空间转录组文库(新)
+  - 分组55支持除56/57外的碱基不均组合混排，高PhiX类型占Lane合同量不超过30%
 """
 
 from typing import List, Dict, Set, Optional, Tuple
@@ -105,7 +104,15 @@ class BaseImbalanceHandler:
             for gid, group in self.groups.items()
             if gid.startswith("G")
             and gid[1:].isdigit()
-            and 1 <= int(gid[1:]) <= 52
+            and gid not in {"G56", "G57"}
+            for lib_type in group.library_types
+        }
+        self.group55_high_phix_types = {
+            self._normalize_type_name(lib_type)
+            for gid, group in self.groups.items()
+            if gid.startswith("G")
+            and gid[1:].isdigit()
+            and gid not in {"G56", "G57"}
             and float(getattr(group, "phix_ratio", 0.0) or 0.0) >= 0.20
             for lib_type in group.library_types
         }
@@ -171,14 +178,14 @@ class BaseImbalanceHandler:
         base_group_specs = [
             ("G1", "10X Visium空间转录组文库", {"10X Visium空间转录组文库"}, 1.0, 0.0),
             ("G2", "10xATAC-seq文库", {"10xATAC-seq文库"}, 0.95, 0.05),
-            ("G3", "10X全基因组文库", {"10X全基因组文库"}, 1.0, 0.0),
+            ("G3", "10X全基因组文库", {"10X全基因组文库"}, 0.95, 0.05),
             ("G4", "10X转录组-3'文库", {"10X转录组-3'文库"}, 1.0, 0.0),
             ("G5", "10X转录组-5'文库", {"10X转录组-5'文库"}, 1.0, 0.0),
             ("G6", "10X转录组V(D)J-BCR文库", {"10X转录组V(D)J-BCR文库"}, 1.0, 0.0),
             ("G7", "10X转录组V(D)J-TCR文库", {"10X转录组V(D)J-TCR文库"}, 1.0, 0.0),
             ("G8", "客户-10X ATAC文库", {"客户-10X ATAC文库"}, 0.95, 0.05),
             ("G9", "客户-10X VDJ文库", {"客户-10X VDJ文库"}, 1.0, 0.0),
-            ("G10", "客户-10X全基因组文库", {"客户-10X全基因组文库"}, 1.0, 0.0),
+            ("G10", "客户-10X全基因组文库", {"客户-10X全基因组文库"}, 0.95, 0.05),
             ("G11", "客户-10X转录组V(D)J-BCR文库", {"客户-10X转录组V(D)J-BCR文库"}, 1.0, 0.0),
             ("G12", "客户-10X转录组V(D)J-TCR文库", {"客户-10X转录组V(D)J-TCR文库"}, 1.0, 0.0),
             ("G13", "客户-10X转录组文库", {"客户-10X转录组文库"}, 1.0, 0.0),
@@ -189,8 +196,7 @@ class BaseImbalanceHandler:
             ("G18", "CUT Tag文库（细胞）", {"CUT Tag文库（细胞）"}, 0.8, 0.2),
             ("G19", "EM-Seq文库", {"EM-Seq文库"}, 0.99, 0.01),
             ("G20", "Methylation文库", {"Methylation文库"}, 0.95, 0.05),
-            ("G21", "small RNA文库", {"small RNA文库"}, 0.9, 0.1),
-            ("G22", "单细胞文库", {"单细胞文库"}, 0.8, 0.2),
+            ("G22", "单细胞文库", {"单细胞文库"}, 0.88, 0.12),
             ("G23", "动植物简化基因组文库(GBS亲代)", {"动植物简化基因组文库(GBS亲代)"}, 0.8, 0.2),
             ("G24", "动植物简化基因组文库(GBS子代)", {"动植物简化基因组文库(GBS子代)"}, 0.8, 0.2),
             ("G25", "客户-ATAC-seq文库", {"客户-ATAC-seq文库"}, 0.8, 0.2),
@@ -198,13 +204,12 @@ class BaseImbalanceHandler:
             ("G27", "客户-Methylation文库", {"客户-Methylation文库"}, 0.99, 0.01),
             ("G28", "客户-NanoString DSP文库", {"客户-NanoString DSP文库"}, 0.8, 0.2),
             ("G29", "客户-PCR产物", {"客户-PCR产物"}, 0.6, 0.4),
-            ("G30", "客户-small RNA文库", {"客户-small RNA文库"}, 0.95, 0.05),
-            ("G31", "客户-单细胞文库", {"客户-单细胞文库"}, 0.8, 0.2),
+            ("G31", "客户-单细胞文库", {"客户-单细胞文库"}, 0.88, 0.12),
             ("G32", "客户-简化基因组", {"客户-简化基因组"}, 0.8, 0.2),
             ("G33", "客户-其他碱基不均衡文库", {"客户-其他碱基不均衡文库"}, 0.8, 0.2),
             ("G34", "墨卓转录组-3端文库", {"墨卓转录组-3端文库"}, 1.0, 0.0),
-            ("G35", "微量 (Methylation文库)", {"微量 (Methylation文库)"}, 0.95, 0.05),
-            ("G36", "客户-扩增子文库", {"客户-扩增子文库"}, 0.65, 0.35),
+            ("G35", "微量 (Methylation文库)", {"微量 (Methylation文库)"}, 0.99, 0.01),
+            ("G36", "客户-扩增子文库", {"客户-扩增子文库"}, 0.70, 0.30),
             ("G37", "客户-10X ATAC (Multiome)文库", {"客户-10X ATAC (Multiome)文库"}, 0.95, 0.05),
             ("G38", "客户-10X 5 Feature Barcode文库", {"客户-10X 5 Feature Barcode文库"}, 1.0, 0.0),
             ("G39", "客户-10X 3 Feature Barcode文库", {"客户-10X 3 Feature Barcode文库"}, 1.0, 0.0),
@@ -221,6 +226,7 @@ class BaseImbalanceHandler:
             ("G50", "客户-PCR产物/CRISPR", {"客户-PCR产物/CRISPR"}, 0.65, 0.35),
             ("G51", "客户-CUT-RUN文库", {"客户-CUT-RUN文库"}, 0.8, 0.2),
             ("G52", "RRBS文库", {"RRBS文库"}, 0.85, 0.15),
+            ("G58", "10x HD Visium空间转录组文库(新)", {"10x HD Visium空间转录组文库(新)"}, 0.95, 0.05),
         ]
 
         for gid, desc, types, ratio, phix in base_group_specs:
@@ -298,14 +304,14 @@ class BaseImbalanceHandler:
         return {
             "G1": 1.0,
             "G2": 0.95,
-            "G3": 1.0,
+            "G3": 0.95,
             "G4": 1.0,
             "G5": 1.0,
             "G6": 1.0,
             "G7": 1.0,
             "G8": 0.95,
             "G9": 1.0,
-            "G10": 1.0,
+            "G10": 0.95,
             "G11": 1.0,
             "G12": 1.0,
             "G13": 1.0,
@@ -316,8 +322,7 @@ class BaseImbalanceHandler:
             "G18": 0.8,
             "G19": 0.99,
             "G20": 0.95,
-            "G21": 0.9,
-            "G22": 0.8,
+            "G22": 0.88,
             "G23": 0.8,
             "G24": 0.8,
             "G25": 0.8,
@@ -325,13 +330,12 @@ class BaseImbalanceHandler:
             "G27": 0.99,
             "G28": 0.8,
             "G29": 0.6,
-            "G30": 0.95,
-            "G31": 0.8,
+            "G31": 0.88,
             "G32": 0.8,
             "G33": 0.8,
             "G34": 1.0,
-            "G35": 0.95,
-            "G36": 0.65,
+            "G35": 0.99,
+            "G36": 0.70,
             "G37": 0.95,
             "G38": 1.0,
             "G39": 1.0,
@@ -350,6 +354,7 @@ class BaseImbalanceHandler:
             "G52": 0.85,
             "G53": 1.0,
             "G54": 1.0,
+            "G58": 0.95,
         }
 
     def _build_type_map(self) -> Dict[str, str]:
@@ -565,16 +570,23 @@ class BaseImbalanceHandler:
                 ratio = self._customer_ratio(imbalance_libs)
                 if ratio > 0.5:
                     return False, f"分组54客户占比{ratio:.1%}超过50%"
-            elif group_ids.issubset({f"G{i}" for i in range(1, 53)}):
+            elif group_ids.issubset({gid for gid in self.groups if gid not in {"G56", "G57"}}):
                 if len(group_ids) == 1:
                     gid = next(iter(group_ids))
                     group_def = self.groups.get(gid)
                     if group_def and len(types) > group_def.max_types_in_lane:
                         return False, f"{gid}同Lane类型超过{group_def.max_types_in_lane}种(当前{len(types)}种)"
                 else:
-                    # 分组55：仅允许高PhiX（>=20%）类型参与混排
                     if not all(lib_type in self.group55_candidate_types for lib_type in types):
-                        return False, "仅高PhiX类型可按分组55混排"
+                        return False, "仅碱基不均衡类型可按分组55混排"
+                    total_lane_data = sum(float(getattr(lib, "contract_data_raw", 0.0) or 0.0) for lib in imbalance_libs)
+                    high_phix_data = sum(
+                        float(getattr(lib, "contract_data_raw", 0.0) or 0.0)
+                        for lib in imbalance_libs
+                        if self._get_library_type(lib) in self.group55_high_phix_types
+                    )
+                    if total_lane_data > 0 and high_phix_data / total_lane_data > 0.30 + 1e-6:
+                        return False, f"分组55高PhiX类型占比{high_phix_data / total_lane_data:.1%}超过30%"
                     ratio = self._customer_ratio(imbalance_libs)
                     if ratio > 0.5:
                         return False, f"分组55客户占比{ratio:.1%}超过50%"

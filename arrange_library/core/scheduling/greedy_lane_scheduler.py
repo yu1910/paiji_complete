@@ -1760,20 +1760,9 @@ class GreedyLaneScheduler:
         return str(value).strip().replace("＋", "+").replace("×", "X").upper()
 
     def _is_customer_library(self, lib: EnhancedLibraryInfo) -> bool:
-        """判断文库是否为客户文库。"""
-        checker = getattr(lib, "is_customer_library", None)
-        if callable(checker):
-            try:
-                return bool(checker())
-            except Exception:
-                pass
-        customer_flag = self._normalize_profile_text(getattr(lib, "customer_library", "") or "")
-        if customer_flag in {"是", "客户", "Y", "YES", "TRUE", "1"}:
-            return True
-        if customer_flag in {"否", "N", "NO", "FALSE", "0"}:
-            return False
-        lab_type = self._normalize_profile_text(getattr(lib, "lab_type", "") or "")
-        return "客户" in lab_type
+        """仅基于wkjkhj判断是否为客户文库。"""
+        wkjkhj = self._normalize_profile_text(getattr(lib, "wkjkhj", "") or "")
+        return wkjkhj == "客户自建"
 
     def _is_soft_single_lane_target_library(
         self,
@@ -2148,42 +2137,72 @@ class GreedyLaneScheduler:
     def _check_customer_ratio_compatible_by_data(self, libraries: List[EnhancedLibraryInfo]) -> bool:
         """
         检查文库列表的客户占比是否满足约束（按数据量计算）
-        
-        [2025-12-31 新增] 按数据量计算客户占比，与验证规则保持一致
+
         规则：客户占比 <=50% 或 =100% 都通过
         - 客户占比 <= 50% → 通过（混排Lane）
         - 客户占比 = 100% → 通过（客户专用Lane）
         - 50% < 客户占比 < 100% → 不通过（中间比例不允许）
-        
+
+        同时约束手工/客户侧与产线混合：
+        - 纯手工/客户侧不限制
+        - 纯产线不限制
+        - 混合时少数侧合同量占比必须 >=5%
+
         Args:
             libraries: 待检查的文库列表
-            
+
         Returns:
             True表示满足客户占比约束，False表示不满足
         """
         if len(libraries) < 1:
             return True
-        
+
         # 使用contract_data_raw字段，与验证器保持一致
         total_data = sum(float(getattr(lib, 'contract_data_raw', 0) or 0) for lib in libraries)
         if total_data == 0:
             return True
-        
+
+        base_libraries = [
+            lib for lib in libraries
+            if not bool(getattr(lib, '_is_ai_balance_library', False))
+        ]
+        if not base_libraries:
+            return True
+
+        base_total_data = sum(float(getattr(lib, 'contract_data_raw', 0) or 0) for lib in base_libraries)
+        if base_total_data <= 0:
+            return True
+
         # 统计客户文库数据量（使用is_customer_library方法）
         customer_data = 0.0
-        for lib in libraries:
-            if lib.is_customer_library():
-                lib_data = float(getattr(lib, 'contract_data_raw', 0) or 0)
+        manual_or_customer_data = 0.0
+        production_data = 0.0
+        for lib in base_libraries:
+            lib_data = float(getattr(lib, 'contract_data_raw', 0) or 0)
+            if self._is_customer_library(lib):
                 customer_data += lib_data
-        
+
+            product_line = self._normalize_profile_text(getattr(lib, 'product_line', '') or '')
+            if product_line in {'Z', 'ZS'}:
+                production_data += lib_data
+            if self._is_customer_library(lib) or product_line == 'S':
+                manual_or_customer_data += lib_data
+
         # 计算客户占比（按数据量）
-        customer_ratio = customer_data / total_data if total_data > 0 else 0.0
-        
+        customer_ratio = customer_data / base_total_data if base_total_data > 0 else 0.0
+
         # 规则：<=50% 或 =100% 都通过
         # 只有在 >50% 且 !=100% 时才不通过
-        if customer_ratio <= 0.50 or customer_ratio == 1.0:
-            return True
-        return False
+        if not (customer_ratio <= 0.50 or customer_ratio == 1.0):
+            return False
+
+        # 手工/客户侧 + 产线混合时，少数侧占比>=5%
+        if production_data > 0 and manual_or_customer_data > 0:
+            minority_ratio = min(production_data, manual_or_customer_data) / base_total_data
+            if minority_ratio + 1e-12 < 0.05:
+                return False
+
+        return True
     
     def _check_customer_ratio_near_limit(self, lane: LaneAssignment, lib: EnhancedLibraryInfo, threshold: float = 0.50) -> bool:
         """
