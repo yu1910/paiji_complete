@@ -163,11 +163,11 @@ DEFAULT_INDEX_CONFLICT_ATTEMPTS = 10
 DEFAULT_OTHER_FAILURE_ATTEMPTS = 20
 DEFAULT_EX_RESCUE_MAX_NEW_LANES = 2
 DEFAULT_RB_RESCUE_MAX_NEW_LANES = 1
-ZERO_LANE_RESCUE_SKIP_LIB_THRESHOLD = 200
+ZERO_LANE_RESCUE_SKIP_LIB_THRESHOLD = 300
 LARGE_POOL_RESCUE_SKIP_LIB_THRESHOLD = 1500
-LARGE_POOL_RESCUE_SKIP_DATA_GB = 15000.0
-MODE_1_1_POST_RESCUE_SKIP_LIB_THRESHOLD = 700
-MODE_1_1_POST_RESCUE_SKIP_DATA_GB = 3000.0
+LARGE_POOL_RESCUE_SKIP_DATA_GB = 18000.0
+MODE_1_1_POST_RESCUE_SKIP_LIB_THRESHOLD = 1000
+MODE_1_1_POST_RESCUE_SKIP_DATA_GB = 4000.0
 SCATTERED_MIX_IMBALANCE_TARGET_RATIO = 0.35
 SCATTERED_MIX_IMBALANCE_TARGET_EPSILON = 1e-6
 SPECIAL_LIBRARY_LIMIT_EPSILON = 1e-6
@@ -9410,7 +9410,7 @@ def load_test_libraries(data_file: str, limit: int | None = None) -> List[Enhanc
         return load_standardized_csv(data_file, limit=limit)
     except Exception as e:
         logger.warning(f"标准化CSV加载失败: {e}，尝试通用加载")
-        return load_libraries_from_csv(data_path, limit=limit, enable_remark_recognition=False)
+        return load_libraries_from_csv(data_path, limit=limit)
 
 
 # ==================== 排机方案分析 ====================

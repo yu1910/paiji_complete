@@ -7,19 +7,13 @@
 from __future__ import annotations
 
 import math
-import asyncio
-import concurrent.futures
-import traceback
 from pathlib import Path
-from typing import Dict, Iterable, List, Optional, Tuple
+from typing import Dict, Iterable, List, Optional
 
 import pandas as pd
 from loguru import logger
 
 from arrange_library.models.library_info import EnhancedLibraryInfo
-
-# 配置常量
-REMARK_RECOGNITION_TIMEOUT: int = 300  # 备注识别超时时间（秒）
 
 # ==========================================================
 # 辅助函数
@@ -322,7 +316,6 @@ def load_libraries_from_csv(
     csv_path: str | Path,
     limit: Optional[int] = None,
     drop_invalid: bool = True,
-    enable_remark_recognition: bool = True,
     allow_missing: bool = True,
 ) -> List[EnhancedLibraryInfo]:
     """从CSV文件加载文库列表。
@@ -331,11 +324,10 @@ def load_libraries_from_csv(
         csv_path: CSV 文件路径。
         limit: 最多加载的文库数量；None 表示全部加载。
         drop_invalid: 是否忽略无效行；若为 False，将在遇到无效数据时抛出异常。
-        enable_remark_recognition: 是否启用备注识别（默认False）
         allow_missing: 缺少文件或无有效数据时是否降级为返回空列表（默认True）
 
     Returns:
-        List[EnhancedLibraryInfo]: 文库对象列表（已过滤未识别退回的文库）。
+        List[EnhancedLibraryInfo]: 文库对象列表。
     """
 
     path = Path(csv_path)
@@ -399,79 +391,4 @@ def load_libraries_from_csv(
             return []
         raise ValueError(f"在文件 {path} 中未找到有效的文库数据")
 
-    # 如果启用备注识别，进行识别并过滤未识别的数据
-    if enable_remark_recognition:
-        logger.info("启用备注识别，开始识别上机备注...")
-        try:
-            # 检查是否在事件循环中
-            try:
-                loop = asyncio.get_running_loop()
-                # 如果已经在事件循环中，需要在新线程中运行
-                with concurrent.futures.ThreadPoolExecutor() as executor:
-                    future = executor.submit(
-                        lambda: asyncio.run(_recognize_and_apply_remarks(libraries, csv_path))
-                    )
-                    valid_libs, unrecognized_libs = future.result(timeout=REMARK_RECOGNITION_TIMEOUT)
-            except RuntimeError:
-                # 没有运行的事件循环，直接使用asyncio.run
-                valid_libs, unrecognized_libs = asyncio.run(
-                    _recognize_and_apply_remarks(libraries, csv_path)
-                )
-            
-            logger.info(
-                f"备注识别完成 - 有效: {len(valid_libs)}, 未识别退回: {len(unrecognized_libs)}"
-            )
-            return valid_libs
-        except Exception as e:
-            logger.error(f"备注识别失败，返回所有文库: {e}")
-            logger.debug(traceback.format_exc())
-            return libraries
-
     return libraries
-
-
-async def _recognize_and_apply_remarks(
-    libraries: List[EnhancedLibraryInfo],
-    csv_path: str | Path
-) -> Tuple[List[EnhancedLibraryInfo], List[EnhancedLibraryInfo]]:
-    """
-    识别备注并应用结果
-    
-    Args:
-        libraries: 文库列表
-        csv_path: CSV文件路径（用于提取备注）
-    
-    Returns:
-        tuple: (有效文库列表, 未识别退回的文库列表)
-    """
-    from arrange_library.core.data.remark_processor import extract_remarks_from_libraries
-    from arrange_library.core.ai.remark_recognizer import RemarkRecognizer
-    from arrange_library.core.preprocessing.remark_intent_applier import RemarkIntentApplier
-    import os
-    
-    # 提取备注
-    remarks = extract_remarks_from_libraries(libraries)
-    
-    if not remarks:
-        logger.info("未找到有效备注，跳过识别")
-        return libraries, []
-    
-    # 初始化识别器
-    recognizer = RemarkRecognizer(
-        api_key=os.getenv('AZURE_OPENAI_API_KEY'),
-        endpoint=os.getenv('AZURE_OPENAI_ENDPOINT'),
-        api_version=os.getenv('OPENAI_API_VERSION', '2024-08-01-preview'),
-        model="gpt-4o",
-        confidence_threshold=0.3
-    )
-    
-    # 批量识别
-    recognition_results = await recognizer.recognize_remarks_batch(remarks, libraries)
-    
-    # 应用结果
-    applier = RemarkIntentApplier()
-    valid_libs, unrecognized_libs = applier.apply_recognition_results(
-        libraries, recognition_results
-    )
-    
-    return valid_libs, unrecognized_libs

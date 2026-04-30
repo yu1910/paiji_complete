@@ -1,7 +1,7 @@
 """
 碱基不均衡处理器
 创建时间：2025-11-20 00:00:00
-更新时间：2026-04-29 15:20:00
+更新时间：2026-04-30 00:00:00
 功能：处理碱基不均衡文库的分组映射、混排限制和包Lane规则
 变更记录：
 - 2025-12-24: 补充分组21-26（10X全基因组、10xATAC、HD Visium、FixedRNA等）
@@ -15,6 +15,9 @@
   - G3/G10调整为95%+5%，G22/G31调整为88%+12%，G35调整为99%+1%，G36调整为70%+30%
   - 删除G21/G30 small RNA分组，新增G58 10x HD Visium空间转录组文库(新)
   - 分组55支持除56/57外的碱基不均组合混排，高PhiX类型占Lane合同量不超过30%
+- 2026-04-30: 分组56/57改为比例区间校验
+  - 分组56：主组合25%-35%，额外组合10%-20%
+  - 分组57：主组合25%-35%，额外组合10%-20%
 """
 
 from typing import List, Dict, Set, Optional, Tuple
@@ -477,10 +480,15 @@ class BaseImbalanceHandler:
         general_excluded_types: Set[str],
         extra_allowed_types: Set[str],
         template_name: str,
+        general_ratio_range: Tuple[float, float],
+        extra_ratio_range: Tuple[float, float],
     ) -> Tuple[bool, str]:
-        """校验分组56/57的“30%主体+15%额外”模板。"""
+        """校验分组56/57的“主组合+额外组合”比例区间模板。"""
         if total_lane_data <= 0:
             return True, ""
+
+        general_ratio_min, general_ratio_max = general_ratio_range
+        extra_ratio_min, extra_ratio_max = extra_ratio_range
 
         normalized_excluded = {
             self._normalize_type_name(item) for item in general_excluded_types
@@ -507,12 +515,16 @@ class BaseImbalanceHandler:
             return False, f"{template_name}不允许包含: {', '.join(sorted(unsupported_types))}"
 
         general_ratio = general_data / total_lane_data
-        if general_ratio > 0.30 + 1e-6:
-            return False, f"{template_name}主组合占比{general_ratio:.1%}超过30%"
+        if general_ratio < general_ratio_min - 1e-6:
+            return False, f"{template_name}主组合占比{general_ratio:.1%}低于{general_ratio_min:.0%}"
+        if general_ratio > general_ratio_max + 1e-6:
+            return False, f"{template_name}主组合占比{general_ratio:.1%}超过{general_ratio_max:.0%}"
 
         extra_ratio = extra_data / total_lane_data
-        if extra_ratio > 0.15 + 1e-6:
-            return False, f"{template_name}额外组合占比{extra_ratio:.1%}超过15%"
+        if extra_ratio < extra_ratio_min - 1e-6:
+            return False, f"{template_name}额外组合占比{extra_ratio:.1%}低于{extra_ratio_min:.0%}"
+        if extra_ratio > extra_ratio_max + 1e-6:
+            return False, f"{template_name}额外组合占比{extra_ratio:.1%}超过{extra_ratio_max:.0%}"
 
         return True, ""
 
@@ -604,6 +616,8 @@ class BaseImbalanceHandler:
                 general_excluded_types=self.group56_general_excluded_types,
                 extra_allowed_types=self.group56_extra_types,
                 template_name="分组56",
+                general_ratio_range=(0.25, 0.35),
+                extra_ratio_range=(0.10, 0.20),
             )
             rule57_ok, rule57_reason = self._check_balanced_mix_template(
                 imbalance_libs=imbalance_libs,
@@ -611,12 +625,14 @@ class BaseImbalanceHandler:
                 general_excluded_types=self.group57_general_excluded_types,
                 extra_allowed_types=self.group57_extra_types,
                 template_name="分组57",
+                general_ratio_range=(0.25, 0.35),
+                extra_ratio_range=(0.10, 0.20),
             )
             if not (rule56_ok or rule57_ok):
                 reasons = "；".join(reason for reason in (rule56_reason, rule57_reason) if reason)
                 if reasons:
-                    return False, f"混排未满足分组56/57约束（30%+15%）: {reasons}"
-                return False, "混排未满足分组56/57约束（30%+15%）"
+                    return False, f"混排未满足分组56/57约束（主组合25%-35%，额外组合10%-20%）: {reasons}"
+                return False, "混排未满足分组56/57约束（主组合25%-35%，额外组合10%-20%）"
             if imbalance_total_data / total_lane_data > 0.95:
                 return False, f"混排场景碱基不均衡占比{imbalance_total_data / total_lane_data:.1%}超过95%"
 
