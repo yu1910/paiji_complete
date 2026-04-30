@@ -1027,31 +1027,39 @@ class GreedyLaneScheduler:
                     removal_needed = False
                     to_remove = []
                     
-                    # 1. 检查客户占比，计算需要踢出的客户文库数据量
-                    # 注意：对于NB Lane，如果已有内部文库，已在前面禁止添加客户文库，这里不会执行
+                    # 1. 检查客户占比与混合少数侧占比，优先执行严格修复策略
                     test_libs_for_customer = lane.libraries + [lib]
                     if not self._check_customer_ratio_compatible_by_data(test_libs_for_customer):
-                        required_customer_removal = self._calculate_required_removal_for_customer_ratio(lane, lib, max_ratio=0.50)
-                        logger.info(f"填充阶段: Lane {lane.lane_id} 添加文库 {lib.origrec} 会导致客户占比超过50%，需要踢出{required_customer_removal:.1f}GB客户文库")
-                        
-                        if required_customer_removal > 0:
-                            # 尝试踢出足够的客户文库
-                            customer_libs_to_remove = []
-                            removal_data = 0.0
-                            for l in lane.libraries:
-                                if l.is_customer_library() and removal_data < required_customer_removal:
-                                    lib_data = float(getattr(l, 'contract_data_raw', 0) or 0)
-                                    if removal_data + lib_data <= required_customer_removal * 1.1:  # 允许10%的误差
-                                        customer_libs_to_remove.append(l)
-                                        removal_data += lib_data
-                            
-                            if removal_data >= required_customer_removal * 0.9:  # 至少踢出90%的所需数据量
-                                to_remove.extend(customer_libs_to_remove)
-                                removal_needed = True
-                                logger.info(f"填充阶段: Lane {lane.lane_id} 可以踢出{removal_data:.1f}GB客户文库，满足要求，将执行踢出操作")
-                            else:
-                                logger.warning(f"填充阶段: Lane {lane.lane_id} 只能踢出{removal_data:.1f}GB客户文库，不足要求{required_customer_removal:.1f}GB，拒绝添加")
-                                continue  # 无法踢出足够的客户文库，拒绝添加
+                        # 严格版：当混合少数侧<5%时，先补少数侧+剔多数侧（最多2次），不满足则转纯并回流少数侧
+                        repaired, repaired_libs = self._repair_lane_for_mix_minority_ratio_strict(
+                            lane=lane,
+                            candidate_lib=lib,
+                            unassigned_pool=still_unassigned,
+                            removed_libs=removed_libs,
+                            max_iterations=2,
+                        )
+                        if not repaired:
+                            continue
+
+                        # 修复后仍需满足客户占比规则
+                        if not self._check_customer_ratio_compatible_by_data(repaired_libs):
+                            continue
+
+                        # 按修复结果重建当前Lane
+                        original_libs = list(lane.libraries)
+                        for old_lib in original_libs:
+                            lane.remove_library(old_lib)
+                        for new_lib in repaired_libs:
+                            lane.add_library(new_lib)
+
+                        # 当前lib已经在修复结果中时，不再走后续“添加lib”流程
+                        if lib in lane.libraries:
+                            placed = True
+                            filled_count += 1
+                            break
+
+                        # 若修复后未包含当前lib，则本次尝试失败
+                        continue
                     
                     # 2. 检查碱基不均衡占比，计算需要踢出的碱基不均衡文库数据量
                     test_libs_for_imbalance = lane.libraries + [lib]
@@ -2182,10 +2190,9 @@ class GreedyLaneScheduler:
             if self._is_customer_library(lib):
                 customer_data += lib_data
 
-            product_line = self._normalize_profile_text(getattr(lib, 'product_line', '') or '')
-            if product_line in {'Z', 'ZS'}:
+            if self._is_production_side_library_by_wkjkhj(lib):
                 production_data += lib_data
-            if self._is_customer_library(lib) or product_line == 'S':
+            if self._is_manual_or_customer_side_library_by_wkjkhj(lib):
                 manual_or_customer_data += lib_data
 
         # 计算客户占比（按数据量）
@@ -2203,6 +2210,168 @@ class GreedyLaneScheduler:
                 return False
 
         return True
+
+    def _normalize_side_text(self, value: Any) -> str:
+        """统一侧别字段文本（wkjkhj）口径。"""
+        if value is None:
+            return ""
+        return str(value).strip()
+
+    def _is_production_side_library_by_wkjkhj(self, lib: EnhancedLibraryInfo) -> bool:
+        """仅基于wkjkhj识别产线侧。"""
+        return self._normalize_side_text(getattr(lib, 'wkjkhj', '')) == '诺禾自动'
+
+    def _is_manual_or_customer_side_library_by_wkjkhj(self, lib: EnhancedLibraryInfo) -> bool:
+        """仅基于wkjkhj识别手工/客户侧。"""
+        side = self._normalize_side_text(getattr(lib, 'wkjkhj', ''))
+        return side in {'诺禾手工', '客户自建'}
+
+    def _get_mix_minority_ratio(self, libraries: List[EnhancedLibraryInfo]) -> float:
+        """计算手工/客户侧与产线混合时少数侧占比；非混合返回1.0。"""
+        base_libraries = [
+            lib for lib in libraries
+            if not bool(getattr(lib, '_is_ai_balance_library', False))
+        ]
+        if not base_libraries:
+            return 1.0
+
+        total_data = sum(float(getattr(lib, 'contract_data_raw', 0) or 0) for lib in base_libraries)
+        if total_data <= 0:
+            return 1.0
+
+        manual_or_customer_data = 0.0
+        production_data = 0.0
+        for lib in base_libraries:
+            lib_data = float(getattr(lib, 'contract_data_raw', 0) or 0)
+            if self._is_production_side_library_by_wkjkhj(lib):
+                production_data += lib_data
+            if self._is_manual_or_customer_side_library_by_wkjkhj(lib):
+                manual_or_customer_data += lib_data
+
+        if production_data <= 0 or manual_or_customer_data <= 0:
+            return 1.0
+
+        return min(production_data, manual_or_customer_data) / total_data
+
+    def _repair_lane_for_mix_minority_ratio_strict(
+        self,
+        lane: LaneAssignment,
+        candidate_lib: EnhancedLibraryInfo,
+        unassigned_pool: List[EnhancedLibraryInfo],
+        removed_libs: List[EnhancedLibraryInfo],
+        max_iterations: int = 2,
+    ) -> Tuple[bool, List[EnhancedLibraryInfo]]:
+        """严格修复混合少数侧<5%：优先补少数侧+剔多数侧，失败则转纯并回流少数侧。"""
+        working_lane_libs = list(lane.libraries) + [candidate_lib]
+
+        # 先判断是否混合且<5%
+        minority_ratio = self._get_mix_minority_ratio(working_lane_libs)
+        if minority_ratio + 1e-12 >= 0.05:
+            return True, working_lane_libs
+
+        # 方案1：最多两轮，补少数侧并剔多数侧
+        for _ in range(max_iterations):
+            base_libraries = [
+                lib for lib in working_lane_libs
+                if not bool(getattr(lib, '_is_ai_balance_library', False))
+            ]
+            total_data = sum(float(getattr(lib, 'contract_data_raw', 0) or 0) for lib in base_libraries)
+            if total_data <= 0:
+                break
+
+            production_data = sum(
+                float(getattr(lib, 'contract_data_raw', 0) or 0)
+                for lib in base_libraries
+                if self._is_production_side_library_by_wkjkhj(lib)
+            )
+            manual_customer_data = sum(
+                float(getattr(lib, 'contract_data_raw', 0) or 0)
+                for lib in base_libraries
+                if self._is_manual_or_customer_side_library_by_wkjkhj(lib)
+            )
+
+            if production_data <= 0 or manual_customer_data <= 0:
+                break
+
+            minority_is_production = production_data < manual_customer_data
+
+            # 1) 从未分配池补一个少数侧文库（优先大数据量）
+            minority_candidates = [
+                lib for lib in unassigned_pool
+                if (
+                    self._is_production_side_library_by_wkjkhj(lib)
+                    if minority_is_production
+                    else self._is_manual_or_customer_side_library_by_wkjkhj(lib)
+                )
+            ]
+            minority_candidates.sort(key=lambda x: x.get_data_amount_gb(), reverse=True)
+
+            if minority_candidates:
+                picked = minority_candidates[0]
+                if picked in unassigned_pool:
+                    unassigned_pool.remove(picked)
+                working_lane_libs.append(picked)
+
+            # 2) 若仍<5%，剔除一个多数侧文库（优先大数据量）
+            if self._get_mix_minority_ratio(working_lane_libs) + 1e-12 < 0.05:
+                majority_libs = [
+                    lib for lib in working_lane_libs
+                    if (
+                        self._is_manual_or_customer_side_library_by_wkjkhj(lib)
+                        if minority_is_production
+                        else self._is_production_side_library_by_wkjkhj(lib)
+                    )
+                ]
+                majority_libs.sort(key=lambda x: x.get_data_amount_gb(), reverse=True)
+                if majority_libs:
+                    removed = majority_libs[0]
+                    if removed is candidate_lib:
+                        # 不删除当前尝试加入的文库，避免流程歧义
+                        if len(majority_libs) > 1:
+                            removed = majority_libs[1]
+                        else:
+                            removed = None
+                    if removed is not None:
+                        working_lane_libs.remove(removed)
+                        removed_libs.append(removed)
+
+            # 本轮后已满足则结束
+            if self._get_mix_minority_ratio(working_lane_libs) + 1e-12 >= 0.05:
+                return True, working_lane_libs
+
+        # 方案2：仍不满足，剔除全部少数侧，转纯；剔除文库回未分配池
+        base_libraries = [
+            lib for lib in working_lane_libs
+            if not bool(getattr(lib, '_is_ai_balance_library', False))
+        ]
+        production_data = sum(
+            float(getattr(lib, 'contract_data_raw', 0) or 0)
+            for lib in base_libraries
+            if self._is_production_side_library_by_wkjkhj(lib)
+        )
+        manual_customer_data = sum(
+            float(getattr(lib, 'contract_data_raw', 0) or 0)
+            for lib in base_libraries
+            if self._is_manual_or_customer_side_library_by_wkjkhj(lib)
+        )
+
+        if production_data > 0 and manual_customer_data > 0:
+            remove_minority_production = production_data <= manual_customer_data
+            minority_libs = [
+                lib for lib in working_lane_libs
+                if (
+                    self._is_production_side_library_by_wkjkhj(lib)
+                    if remove_minority_production
+                    else self._is_manual_or_customer_side_library_by_wkjkhj(lib)
+                )
+            ]
+            for lib in minority_libs:
+                if lib in working_lane_libs:
+                    working_lane_libs.remove(lib)
+                removed_libs.append(lib)
+
+        # 转纯后视为修复完成
+        return True, working_lane_libs
     
     def _check_customer_ratio_near_limit(self, lane: LaneAssignment, lib: EnhancedLibraryInfo, threshold: float = 0.50) -> bool:
         """
