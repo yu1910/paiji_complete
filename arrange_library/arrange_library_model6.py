@@ -6665,11 +6665,12 @@ def _resolve_explicit_lane_loading_concentration(
         _matches_lane_seq_strategy_keyword(lib, "10+24")
         for lib in libraries
     )
-    if has_10_plus_24 and any(
+    has_atac_sample_type = any(
         _library_sample_type_matches_rule(lib, LANE_LOADING_10_PLUS_24_ATAC_TYPES)
         for lib in libraries
-    ):
-        return 2.0, "10_plus_24_atac_2_0"
+    )
+    if has_10_plus_24 or has_atac_sample_type:
+        return 1.9, "10_plus_24_or_atac_1_9"
 
     if lane_sample_types and lane_sample_types.issubset(LANE_LOADING_COMBO_GROUP_A):
         if _lane_contains_customer_prefixed_sample_type(lane_sample_types):
