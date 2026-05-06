@@ -1,7 +1,7 @@
 """
 从真实CSV数据加载文库信息
 创建时间：2025-12-08 17:02:11
-更新时间：2026-04-22 18:24:20
+更新时间：2026-05-06 17:15:24
 """
 
 from __future__ import annotations
@@ -97,6 +97,7 @@ CSV_TO_MODEL_MAPPING: Dict[str, str] = {
     "wksamplename": "SAMPLE_NAME",
     "wksampletype": "SAMPLETYPECODE",
     "wkdatatype": "DATATYPE",
+    "wkjkhj": "WKJKHJ",
     "wkspecies": "SPECIES",
     "wkindexseq": "INDEXSEQ",
     "wkindexcode": "INDEX_NUMBER",

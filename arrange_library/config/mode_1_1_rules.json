@@ -2,7 +2,7 @@
   "_meta": {
     "description": "1.1模式专属业务规则配置",
     "created": "2026-04-14 13:15:00",
-    "updated": "2026-04-23 17:29:52",
+    "updated": "2026-05-06 12:21:39",
     "note": "排机程序中1.1模式的文库级筛选、首轮分流、第二轮组织和pooling特例参数。lane容量由scheduling_rule_matrix.json负责。"
   },
   "single_library_contract_limit_gb": 500,
@@ -115,56 +115,7 @@
         "seed_rank": 2
       }
     ],
-    "prefer_36t": [
-      {
-        "name": "internal_wgs_strong_36t",
-        "task_group_keywords": [
-          "（生产内部自动化）WGS建库-库检-Novaseq X Plus-PE150"
-        ]
-      },
-      {
-        "name": "medical_commit_strong_36t",
-        "task_group_keywords": [
-          "天津医检所委托库检-天津Novaseq X Plus-PE150",
-          "天津医检所-只定量（医检所专用工序）-天津Novaseq X Plus-PE150"
-        ]
-      },
-      {
-        "name": "capture_exome_strong_36t",
-        "task_group_keywords": [
-          "捕获建库+库检-天津Novaseq X Plus-PE150"
-        ]
-      },
-      {
-        "name": "secondary_quant_strong_36t",
-        "task_group_keywords": [
-          "二次定量-天津Novaseq X Plus-PE150（运营专用）",
-          "二次稀释定量-Novaseq X Plus-PE150上机"
-        ]
-      },
-      {
-        "name": "lnc_taskgroup_strong_36t",
-        "task_group_keywords": [
-          "LncRNA文库-库检-天津Novaseq X Plus-PE150"
-        ]
-      },
-      {
-        "name": "customer_self_build_scatter_36t",
-        "task_group_keywords": [
-          "客户散样自建库库检-天津Novaseq X Plus-PE150"
-        ]
-      },
-      {
-        "name": "exome_like_sampletypes_36t",
-        "sample_types": [
-          "外显子文库",
-          "RNA真普文库",
-          "全基因组文库",
-          "动植物全基因组重测序文库",
-          "Lnc非互作文库"
-        ]
-      }
-    ]
+    "prefer_36t": []
   },
   "first_round_order_halving": {
     "enabled": true,

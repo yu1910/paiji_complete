@@ -2,7 +2,7 @@
 LibLane V2 文库信息数据模型
 基于31字段真实业务数据结构设计
 创建时间：2025-12-08 17:02:11
-更新时间：2026-04-14 13:00:00
+更新时间：2026-05-06 17:15:24
 
 变更记录：
 - 2026-04-14: 新增 last_lane_round/lane_round 字段，支持1.1模式轮次标识
@@ -129,6 +129,7 @@ class EnhancedLibraryInfo:
     lane_unique: Optional[str] = None     # lane级唯一标识（runid+laneid）
     
     # === 拆分和备注信息 ===
+    wkjkhj: Optional[str] = None           # WKJKHJ - 建库环节（诺禾自动/诺禾手工/客户自建）
     data_flag: Optional[str] = None       # DATAFLAG - 是否拆分
     add_test_note: Optional[str] = None   # 加测备注 - 加测优先级标识
     run_cycle: Optional[str] = None       # RunCycle - 测序参数备注
@@ -1652,6 +1653,7 @@ class EnhancedLibraryInfo:
             # 数据分类信息
             'data_type': pick_str(['DATATYPE', 'datatype'], '其他'),
             'customer_library': pick_str(['CUSTOMERLIBRARY', 'customerlibrary'], '否'),
+            'wkjkhj': pick_str(['WKJKHJ', 'wkjkhj'], None),
             
             # Index相关信息
             'base_type': pick_str(['BASETYPE', 'basetype'], '双'),
@@ -1818,6 +1820,7 @@ class EnhancedLibraryInfo:
             sample_type_code=pick(['wksampletype']),
             data_type=pick(['wkdatatype']),
             customer_library=pick(['CUSTOMERLIBRARY', 'customerlibrary']),  # 表中无此字段，保留兼容
+            wkjkhj=pick(['wkjkhj']),
             base_type=pick(['BASETYPE', 'basetype']),  # 表中无此字段，保留兼容
             number_of_bases=pick_int(['NUMBEROFBASES', 'numberofbases']),  # 表中无此字段，保留兼容
             index_number=pick_int(['INDEXNUMBER', 'indexnumber']),  # 表中无此字段，保留兼容

@@ -1,7 +1,7 @@
 """
 1.1模式首轮分流器
 创建时间：2026-04-14 13:30:00
-更新时间：2026-04-14 13:30:00
+更新时间：2026-05-06 14:20:03
 
 负责将AI可排文库按规则切分为 3.6T-NEW 优先池、1.1 首轮池、1.1禁排回退池。
 当前版本采用确定性规则，接口设计成将来可挂接AI决策器。
@@ -112,9 +112,9 @@ class ModeAllocator:
             if self._is_priority_for_36t(lib):
                 priority_candidates.append(lib)
                 if reason:
-                    result.dispatch_reasons[origrec] = f"priority_data_type_for_36t|{reason}"
+                    result.dispatch_reasons[origrec] = f"priority_for_36t|{reason}"
                 else:
-                    result.dispatch_reasons[origrec] = "priority_data_type_for_36t"
+                    result.dispatch_reasons[origrec] = "priority_for_36t"
                 continue
 
             if reason:
@@ -207,9 +207,11 @@ class ModeAllocator:
         return ""
 
     def _is_priority_for_36t(self, lib: EnhancedLibraryInfo) -> bool:
-        """判断文库是否属于临检/YC/SJ优先走3.6T-NEW的类型"""
+        """判断文库是否满足3.6T-NEW高优条件，数据类型条件优先于次级条件。"""
         dt = str(getattr(lib, "data_type", "") or "").strip()
-        return dt in self._priority_data_types
+        if dt in self._priority_data_types:
+            return True
+        return self._has_1_1_secondary_eligibility(lib)
 
     def _resolve_sample_prefix(self, lib: EnhancedLibraryInfo) -> str:
         """统一解析样本前缀，优先读显式字段，缺失时回退到 sample_id 前四位。"""
@@ -230,7 +232,9 @@ class ModeAllocator:
 
     def _matches_eligible_add_test_keyword(self, lib: EnhancedLibraryInfo) -> bool:
         remark = str(getattr(lib, "add_tests_remark", "") or "").strip()
-        return remark in self._eligible_add_test_kw
+        if not remark or remark in {"非加测", "无加测", "不加测"}:
+            return False
+        return any(keyword and keyword in remark for keyword in self._eligible_add_test_kw)
 
     def _has_1_1_secondary_eligibility(self, lib: EnhancedLibraryInfo) -> bool:
         """规则11次级条件：FDHE 或 加测/混合。"""
