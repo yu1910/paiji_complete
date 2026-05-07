@@ -1,7 +1,7 @@
 """
 成Lane校验程序
 创建时间：2025-12-02 18:00:00
-更新时间：2026-04-28 19:47:35
+更新时间：2026-05-07 10:21:26
 
 变更记录：
 - 2026-03-06: 移除类内LANE_CAPACITY/LANE_MIN_DATA/LANE_MAX_DATA死代码常量，
@@ -24,7 +24,7 @@
 - 单端占比：单端Index占比<30%
 - 碱基不均衡占比：碱基不均衡文库占比<=40%
 - 容量校验：Lane总数据量由规则矩阵决定，Nova X-25B标准规则effective_min=970G，effective_max=980G
-- Peak Size校验：最大-最小<=150bp 或 150bp窗口覆盖>=75%
+- Peak Size校验：1.1模式跳过；3.6T-NEW等其他模式最大-最小<=150bp 或 150bp窗口覆盖>=75%
 - 特殊文库限制：特殊文库总量<=阈值（不再限制类型数量）
 - FC最小数据量校验：Nova X-25B整个FC最小1150G
 """
@@ -284,12 +284,14 @@ class LaneValidator:
             errors.append(capacity_result)
         
         # 7. Peak Size校验
-        peak_size_result = self._validate_peak_size(libraries)
-        if peak_size_result:
-            if peak_size_result.severity == ValidationSeverity.ERROR:
-                errors.append(peak_size_result)
-            else:
-                warnings.append(peak_size_result)
+        # 1.1模式不受Peak Size限制；3.6T-NEW等其他模式仍按150bp窗口规则校验。
+        if not self._is_mode_1_1_lane(libraries, lane_mode, metadata):
+            peak_size_result = self._validate_peak_size(libraries)
+            if peak_size_result:
+                if peak_size_result.severity == ValidationSeverity.ERROR:
+                    errors.append(peak_size_result)
+                else:
+                    warnings.append(peak_size_result)
         
         # 8. 特殊文库限制校验
         # [2025-12-25] 对于专用Lane（碱基不均衡专用、非10bp专用、骨架Lane），跳过特殊文库限制
@@ -764,6 +766,44 @@ class LaneValidator:
         )
         
         return None
+    
+    def _is_mode_1_1_lane(
+        self,
+        libraries: List[EnhancedLibraryInfo],
+        lane_mode: str,
+        metadata: Optional[Dict] = None,
+    ) -> bool:
+        """判断Lane是否属于1.1模式，1.1模式不执行Peak Size限制。"""
+        mode_candidates = []
+        metadata = metadata or {}
+        for key in ("mode", "lcxms", "seq_mode", "selected_seq_mode", "current_seq_mode", "lane_sj_mode"):
+            value = metadata.get(key)
+            if value is not None:
+                mode_candidates.append(value)
+        if lane_mode:
+            mode_candidates.append(lane_mode)
+
+        for lib in libraries:
+            for attr_name in (
+                "lcxms",
+                "current_seq_mode",
+                "lane_sj_mode",
+                "seq_mode",
+                "selected_seq_mode",
+                "last_cxms",
+                "lastcxms",
+            ):
+                value = getattr(lib, attr_name, None)
+                if value is not None:
+                    mode_candidates.append(value)
+
+        for value in mode_candidates:
+            text = str(value).strip().upper().replace("模式", "")
+            if text in {"1", "1.0", "1.1"}:
+                return True
+            if text.startswith("1.1") or text.startswith("1.0"):
+                return True
+        return False
     
     def _validate_peak_size(self, libraries: List[EnhancedLibraryInfo]) -> Optional[ValidationError]:
         """校验Peak Size"""

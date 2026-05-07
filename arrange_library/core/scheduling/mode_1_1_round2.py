@@ -1,7 +1,7 @@
 """
 1.1模式第二轮候选识别与分组模块
 创建时间：2026-04-14 13:40:00
-更新时间：2026-04-16 12:25:00
+更新时间：2026-05-07 10:28:18
 
 职责：
 - 从待排文库中识别 lastlaneround == "1.1第一轮" 且历史测序模式属于 1/1.0/1.1 的第二轮候选
@@ -223,7 +223,13 @@ class Mode11Round2Handler:
             value = getattr(lib, "lastlaneid", None)
         if not value:
             value = getattr(lib, "llastlaneid", None)
-        return str(value or "").strip()
+        raw_value = str(value or "").strip()
+        if not raw_value:
+            return ""
+        tokens = [item.strip() for item in raw_value.split(",") if item and item.strip()]
+        if len(tokens) <= 1:
+            return raw_value
+        return tokens[0]
 
     def _get_last_output_rate(self, lib: EnhancedLibraryInfo) -> Optional[float]:
         """获取历史产出率，兼容 dataclass 字段与运行时透传字段。"""

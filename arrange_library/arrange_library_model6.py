@@ -1,7 +1,7 @@
 """
 端到端排机流程测试 - 排机与 Pooling 预测
 创建时间：2026-04-10 16:06:41
-更新时间：2026-05-06 18:46:49
+更新时间：2026-05-07 11:37:40
 
 功能：
 - 支持完整排机流程（GreedyLaneScheduler）
@@ -7696,6 +7696,26 @@ def _partition_remaining_package_libraries(
     return failed_package_libraries, remaining_normal_libraries
 
 
+def _infer_lane_mode_from_libraries(libraries: List[EnhancedLibraryInfo]) -> str:
+    """从Lane内文库推断测序模式，用于校验规则按1.1/3.6T-NEW分支。"""
+    for lib in libraries:
+        if _is_ai_balance_library(lib):
+            continue
+        for attr_name in (
+            "lcxms",
+            "current_seq_mode",
+            "lane_sj_mode",
+            "seq_mode",
+            "selected_seq_mode",
+            "last_cxms",
+            "lastcxms",
+        ):
+            value = _safe_str(getattr(lib, attr_name, None), default="")
+            if value:
+                return _normalize_mode_1_1_alias(value)
+    return ""
+
+
 def _build_lane_metadata_for_validator(
     lane_id: str,
     lane_metadata: Optional[Dict[str, Any]] = None,
@@ -7709,6 +7729,10 @@ def _build_lane_metadata_for_validator(
     if lane_id.startswith("BL_"):
         metadata["is_backbone_lane"] = True
     if lane_metadata:
+        for mode_key in ("mode", "lcxms", "seq_mode", "selected_seq_mode", "current_seq_mode", "lane_sj_mode"):
+            mode_value = lane_metadata.get(mode_key)
+            if mode_value is not None and _safe_str(mode_value, default=""):
+                metadata[mode_key] = mode_value
         seq_strategy = lane_metadata.get("seq_strategy")
         if _normalize_seq_strategy_keyword(seq_strategy) == _normalize_seq_strategy_keyword("10+24"):
             metadata["is_lane_seq_10_plus_24_lane"] = True
@@ -7880,6 +7904,11 @@ def _validate_lane_state(
 
     has_balance_library = any(_is_ai_balance_library(lib) for lib in libraries)
     metadata = _build_lane_metadata_for_validator(lane.lane_id, lane.metadata)
+    if "mode" not in metadata:
+        inferred_mode = _infer_lane_mode_from_libraries(libraries)
+        if inferred_mode:
+            metadata["mode"] = inferred_mode
+            metadata["lcxms"] = inferred_mode
     if balance_already_in_libs:
         metadata.pop("wkbalancedata", None)
         metadata.pop("wkadd_balance_data", None)
@@ -8753,6 +8782,21 @@ def _find_output_57_failed_lane_ids(df: pd.DataFrame) -> Set[str]:
                         ",".join(non_imbalance_original_sample_ids),
                     )
                 )
+            continue
+
+        # 1.1第二轮是按历史Lane强绑定直出，导出阶段不再叠加普通57混排复核，
+        # 避免把已复用历史组合的llaneid/lcxms清空。
+        lane_round_values = {
+            str(value).strip()
+            for value in sub.get("laneround", pd.Series(dtype=object)).tolist()
+            if str(value).strip()
+        }
+        lcxms_values = {
+            _normalize_mode_1_1_alias(value)
+            for value in sub.get("lcxms", pd.Series(dtype=object)).tolist()
+            if str(value).strip()
+        }
+        if "1.1第二轮" in lane_round_values and "1.1" in lcxms_values:
             continue
 
         libs: List[Any] = []

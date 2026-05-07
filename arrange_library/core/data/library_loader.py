@@ -1,7 +1,7 @@
 """
 从真实CSV数据加载文库信息
 创建时间：2025-12-08 17:02:11
-更新时间：2026-05-06 17:15:24
+更新时间：2026-05-07 10:28:18
 """
 
 from __future__ import annotations
@@ -140,6 +140,11 @@ CSV_TO_MODEL_MAPPING: Dict[str, str] = {
     "wkserialnumber": "SERIAL_NUMBER",
     "wktubenums": "TUBE_NUMS",
     "wklastphix": "LAST_PHIX",
+    "llastlaneid": "LASTLANEID",
+    "llastcxms": "LASTCXMS",
+    "llastlaneround": "LASTLANEROUND",
+    "lastlaneround": "LASTLANEROUND",
+    "laneround": "LANEROUND",
     # bi_m_merged历史数据表输出字段（带l前缀，Lane相关）
     "llaneid": "LANEID",
     "llaneorder": "LANE_ORDER",
@@ -166,8 +171,8 @@ CSV_TO_MODEL_MAPPING: Dict[str, str] = {
     "llables": "RUN_LABELS",
     "lsjfs": "LANE_SJ_MODE",
     "lrowingdate": "ROWING_DATE",
-    "llastlaneid": "LAST_LANEID",
-    "llastcxms": "LAST_CURRENT_SEQ_MODE",
+    "llastlaneid": "LASTLANEID",
+    "llastcxms": "LASTCXMS",
     # 中文列名
     "ORIGREC": "ORIGREC",
     "SID_文库": "SAMPLEID",
