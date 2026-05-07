@@ -2,7 +2,7 @@
 逐Lane贪心排机器 - 简化高效的排机算法
 采用逐Lane填充策略，一条Lane排满后再排下一条
 创建时间：2025-12-24 13:30:00
-更新时间：2026-04-28 18:42:49
+更新时间：2026-05-07 16:28:00
 
 核心思想：
 - 按优先级排序文库
@@ -450,12 +450,49 @@ class GreedyLaneScheduler:
         """将浮点数限制在给定区间内。"""
         return max(min_value, min(value, max_value))
 
+    @staticmethod
+    def _normalize_strict_text(value: Any) -> str:
+        """统一严格规则比较文本。"""
+        return str(value or "").strip().lower().replace(" ", "")
+
+    def _get_library_sample_type_key(self, lib: EnhancedLibraryInfo) -> str:
+        """获取文库类型键，用于专Lane过程准入。"""
+        return self._normalize_strict_text(
+            getattr(lib, "sample_type", "")
+            or getattr(lib, "sampletype", "")
+            or getattr(lib, "sample_type_code", "")
+            or getattr(lib, "data_type", "")
+            or ""
+        )
+
+    def _get_library_aidbid_key(self, lib: EnhancedLibraryInfo) -> str:
+        """获取wkaidbid明细唯一键。"""
+        return str(
+            getattr(lib, "_detail_output_key", "")
+            or getattr(lib, "aidbid", "")
+            or getattr(lib, "wkaidbid", "")
+            or id(lib)
+        ).strip()
+
+    def _is_dedicated_imbalance_library(self, lib: EnhancedLibraryInfo) -> bool:
+        """判断文库是否可进入DL碱基不均衡专Lane。"""
+        return str(getattr(lib, "jjbj", "") or getattr(lib, "wk_jjbj", "") or "").strip() == "是"
+
     def _is_valid_dedicated_imbalance_candidate(
         self,
         candidate_libs: List[EnhancedLibraryInfo],
     ) -> bool:
         """检查候选碱基不均衡专Lane子集是否满足基础约束。"""
         if not candidate_libs:
+            return False
+        if not all(self._is_dedicated_imbalance_library(lib) for lib in candidate_libs):
+            return False
+        sample_type_keys = {self._get_library_sample_type_key(lib) for lib in candidate_libs}
+        sample_type_keys.discard("")
+        if len(sample_type_keys) != 1:
+            return False
+        aidbid_keys = [self._get_library_aidbid_key(lib) for lib in candidate_libs]
+        if len(aidbid_keys) != len(set(aidbid_keys)):
             return False
         if self.config.enable_index_check and not self.index_validator.validate_lane_quick(candidate_libs):
             return False
@@ -869,7 +906,7 @@ class GreedyLaneScheduler:
                         if consecutive_failures >= 8:  # 连续8轮没有新Lane，停止
                             logger.info(f"连续{consecutive_failures}轮无新Lane，停止尝试")
                             break
-                        if stagnant_retry_rounds >= 2:
+                        if stagnant_retry_rounds >= 5:
                             logger.info(
                                 f"连续{stagnant_retry_rounds}轮无新Lane且未分配池不变，提前结束无效重试"
                             )
@@ -982,6 +1019,10 @@ class GreedyLaneScheduler:
                     if new_total > max_capacity:
                         continue
                     
+                    if lane.lane_id.startswith('DL_'):
+                        if not self._can_add_to_lane(lane, lib):
+                            continue
+
                     # [2025-12-25 新增] NB Lane类型约束：只允许非10bp文库
                     if lane.lane_id.startswith('NB_'):
                         # 检查待添加文库是否有10bp Index
@@ -1978,10 +2019,7 @@ class GreedyLaneScheduler:
                         lane.libraries,
                         lane_machine_type_str,
                         lane=lane,
-                        metadata={
-                            "is_dedicated_imbalance_lane": True,
-                            "wkbalancedata": balance_data,
-                        },
+                        metadata={"is_dedicated_imbalance_lane": True},
                     )
                     if effective_total > max_allowed + 1e-6 or effective_total < min_allowed - 1e-6:
                         remaining_all.extend(picked + next_remaining)
@@ -2038,6 +2076,22 @@ class GreedyLaneScheduler:
             balance_data = lane.metadata.get("wkadd_balance_data")
         if balance_data is not None:
             validation_metadata["wkbalancedata"] = balance_data
+        # 专Lane有效容量按原始文库+平衡文库核算，不能通过metadata放宽容量上限。
+        min_allowed, max_allowed = self._resolve_lane_capacity_limits(
+            lane.libraries,
+            machine_type_str,
+            lane=lane,
+            metadata={"is_dedicated_imbalance_lane": True},
+        )
+        effective_total = lane.total_data_gb + float(balance_data or 0.0)
+        if effective_total > max_allowed + 1e-6 or effective_total < min_allowed - 1e-6:
+            logger.info(
+                f"专用Lane {lane.lane_id} 有效容量不合规: 原始={lane.total_data_gb:.1f}G, "
+                f"平衡={float(balance_data or 0.0):.1f}G, 有效={effective_total:.1f}G, "
+                f"区间=[{min_allowed:.1f}, {max_allowed:.1f}]"
+            )
+            return False
+
         result = lenient_validator.validate_lane(
             libraries=lane.libraries,
             lane_id=lane.lane_id,
@@ -4700,6 +4754,21 @@ class GreedyLaneScheduler:
         is_sl_lane = lane.lane_id.startswith('SL_')
         machine_type_str = lane.machine_type.value if lane.machine_type else (lib.eq_type or "Nova X-25B")
         lane_metadata = self._build_lane_validation_metadata(lane)
+
+        if is_dl_lane:
+            if not self._is_dedicated_imbalance_library(lib):
+                return False
+            existing_aidbids = {self._get_library_aidbid_key(item) for item in lane.libraries}
+            if self._get_library_aidbid_key(lib) in existing_aidbids:
+                return False
+            existing_sample_types = {
+                self._get_library_sample_type_key(item)
+                for item in lane.libraries
+                if self._get_library_sample_type_key(item)
+            }
+            lib_sample_type = self._get_library_sample_type_key(lib)
+            if existing_sample_types and lib_sample_type not in existing_sample_types:
+                return False
         
         # 1. 容量上限检查
         new_total = lane.total_data_gb + lib_data

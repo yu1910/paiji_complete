@@ -1,7 +1,7 @@
 """
 端到端排机流程测试 - 排机与 Pooling 预测
 创建时间：2026-04-10 16:06:41
-更新时间：2026-05-07 11:37:40
+更新时间：2026-05-07 18:44:00
 
 功能：
 - 支持完整排机流程（GreedyLaneScheduler）
@@ -21,6 +21,7 @@ import argparse
 import json
 import math
 import random
+import re
 import signal
 import sys
 from collections import Counter
@@ -3745,6 +3746,31 @@ def _attempt_build_rescue_lane_from_pool(
     variants: List[Tuple[str, List[EnhancedLibraryInfo], bool]] = [
         ("full_priority", list(pool), True),
     ]
+
+    bucket_variants: Dict[str, List[EnhancedLibraryInfo]] = {}
+    for lib in pool:
+        bucket_key = _get_residual_regroup_cluster_key(lib)
+        if bucket_key:
+            bucket_variants.setdefault(bucket_key, []).append(lib)
+    for bucket_key, bucket_pool in sorted(
+        bucket_variants.items(),
+        key=lambda item: sum(lib.get_data_amount_gb() for lib in item[1]),
+        reverse=True,
+    )[:3]:
+        bucket_min_data, _ = _resolve_lane_capacity_limits(bucket_pool, machine_type)
+        bucket_total_data = sum(lib.get_data_amount_gb() for lib in bucket_pool)
+        if bucket_total_data + 1e-6 >= bucket_min_data:
+            variants.append((f"bucket_{bucket_key[:60]}", list(bucket_pool), False))
+
+    sorted_by_bucket_pool = sorted(
+        list(pool),
+        key=lambda lib: (
+            _get_residual_regroup_cluster_key(lib),
+            -float(getattr(lib, "contract_data_raw", 0.0) or 0.0),
+            str(getattr(lib, "origrec", "") or ""),
+        ),
+    )
+    variants.append(("bucket_ordered_priority", sorted_by_bucket_pool, True))
     if non_clinical_pool and len(non_clinical_pool) < len(pool):
         variants.append(("non_clinical_priority", list(non_clinical_pool), True))
         variants.append(("non_clinical_relaxed", list(non_clinical_pool), False))
@@ -5780,14 +5806,46 @@ def _try_increase_lane_count(
                     unassigned.append(lib)
                     pool.append(lib)
 
-            new_lane, used = _attempt_build_rescue_lane_from_pool(
-                pool=pool,
-                validator=validator,
-                machine_type=machine_type,
-                lane_id_prefix="EX",
-                index_conflict_attempts=index_conflict_attempts_per_lane,
-                other_failure_attempts=other_failure_attempts_per_lane,
-            )
+            new_lane = None
+            used: List[EnhancedLibraryInfo] = []
+            for rescue_attempt in range(1, 4):
+                attempt_pool = list(pool)
+                if rescue_attempt == 2:
+                    attempt_pool = sorted(
+                        attempt_pool,
+                        key=lambda lib: (
+                            _get_residual_regroup_cluster_key(lib),
+                            -float(getattr(lib, "contract_data_raw", 0.0) or 0.0),
+                            str(getattr(lib, "origrec", "") or ""),
+                        ),
+                    )
+                elif rescue_attempt == 3:
+                    attempt_pool = sorted(
+                        attempt_pool,
+                        key=lambda lib: (
+                            _get_scattered_mix_priority_rank(lib),
+                            _get_residual_regroup_cluster_key(lib),
+                            float(getattr(lib, "contract_data_raw", 0.0) or 0.0),
+                            str(getattr(lib, "origrec", "") or ""),
+                        ),
+                    )
+                logger.info(
+                    "Lane数量提升第{}次策略尝试: machine_type={}, pool_size={}".format(
+                        rescue_attempt,
+                        machine_type.value if isinstance(machine_type, MachineType) else machine_type,
+                        len(attempt_pool),
+                    )
+                )
+                new_lane, used = _attempt_build_rescue_lane_from_pool(
+                    pool=attempt_pool,
+                    validator=validator,
+                    machine_type=machine_type,
+                    lane_id_prefix="EX",
+                    index_conflict_attempts=index_conflict_attempts_per_lane,
+                    other_failure_attempts=other_failure_attempts_per_lane,
+                )
+                if new_lane:
+                    break
             if new_lane:
                 _remove_libraries_by_identity_in_place(unassigned, used)
                 lanes.append(new_lane)
@@ -5797,7 +5855,7 @@ def _try_increase_lane_count(
                     _remove_library_by_identity_in_place(unassigned, lib)
                     donor_lane.add_library(lib)
                 logger.info(
-                    "Lane数量提升停止: machine_type={}, 当前池首次构Lane失败，已回滚{}个捐赠文库，跳过同池重复尝试".format(
+                    "Lane数量提升停止: machine_type={}, 已完成3次多策略尝试仍未成Lane，已回滚{}个捐赠文库".format(
                         machine_type.value if isinstance(machine_type, MachineType) else machine_type,
                         len(donations),
                     )
@@ -6103,14 +6161,46 @@ def try_multi_lib_swap_rebalance(
                     if pool_data >= min_allowed:
                         break
 
-            new_lane, used = _attempt_build_rescue_lane_from_pool(
-                pool=pool,
-                validator=validator,
-                machine_type=machine_type,
-                lane_id_prefix="RB",
-                index_conflict_attempts=index_conflict_max_trials,
-                other_failure_attempts=other_failure_max_trials,
-            )
+            new_lane = None
+            used: List[EnhancedLibraryInfo] = []
+            for rescue_attempt in range(1, 4):
+                attempt_pool = list(pool)
+                if rescue_attempt == 2:
+                    attempt_pool = sorted(
+                        attempt_pool,
+                        key=lambda lib: (
+                            _get_residual_regroup_cluster_key(lib),
+                            -float(getattr(lib, "contract_data_raw", 0.0) or 0.0),
+                            str(getattr(lib, "origrec", "") or ""),
+                        ),
+                    )
+                elif rescue_attempt == 3:
+                    attempt_pool = sorted(
+                        attempt_pool,
+                        key=lambda lib: (
+                            _get_scattered_mix_priority_rank(lib),
+                            _get_residual_regroup_cluster_key(lib),
+                            float(getattr(lib, "contract_data_raw", 0.0) or 0.0),
+                            str(getattr(lib, "origrec", "") or ""),
+                        ),
+                    )
+                logger.info(
+                    "跨Lane多文库交换第{}次策略尝试: machine_type={}, pool_size={}".format(
+                        rescue_attempt,
+                        machine_type.value if isinstance(machine_type, MachineType) else machine_type,
+                        len(attempt_pool),
+                    )
+                )
+                new_lane, used = _attempt_build_rescue_lane_from_pool(
+                    pool=attempt_pool,
+                    validator=validator,
+                    machine_type=machine_type,
+                    lane_id_prefix="RB",
+                    index_conflict_attempts=index_conflict_max_trials,
+                    other_failure_attempts=other_failure_max_trials,
+                )
+                if new_lane:
+                    break
             if new_lane:
                 _remove_libraries_by_identity_in_place(unassigned, used)
                 lanes.append(new_lane)
@@ -6120,7 +6210,7 @@ def try_multi_lib_swap_rebalance(
                     _remove_library_by_identity_in_place(unassigned, lib)
                     donor_lane.add_library(lib)
                 logger.info(
-                    "跨Lane多文库交换停止: machine_type={}, 当前池首次构Lane失败，已回滚{}个捐赠文库，跳过同池重复尝试".format(
+                    "跨Lane多文库交换停止: machine_type={}, 已完成3次多策略尝试仍未成Lane，已回滚{}个捐赠文库".format(
                         machine_type.value if isinstance(machine_type, MachineType) else machine_type,
                         len(donations),
                     )
@@ -6276,7 +6366,11 @@ def try_targeted_imbalance_upgrade(
 
 
 def _get_residual_regroup_cluster_key(lib: EnhancedLibraryInfo) -> str:
-    """提取剩余文库重组搜索使用的聚簇键。"""
+    """提取剩余文库重组搜索使用的聚簇键。
+
+    使用文库类型、片段长度、10bp属性和特殊拆分标记共同分桶，
+    避免只按文库类型聚簇导致候选池过宽、重复搜索效率低。
+    """
     sample_type = (
         getattr(lib, "sample_type_code", "")
         or getattr(lib, "sampletype", "")
@@ -6284,7 +6378,30 @@ def _get_residual_regroup_cluster_key(lib: EnhancedLibraryInfo) -> str:
         or getattr(lib, "lab_type", "")
         or ""
     )
-    return _normalize_text_for_match(sample_type)
+    peak_size = (
+        getattr(lib, "peak_size", None)
+        or getattr(lib, "peaksize", None)
+        or getattr(lib, "wkpeaksize", None)
+        or ""
+    )
+    try:
+        peak_bucket = str(int(round(float(peak_size) / 20.0) * 20)) if peak_size != "" else ""
+    except (TypeError, ValueError):
+        peak_bucket = _normalize_text_for_match(peak_size)
+    index_seq = str(getattr(lib, "index_seq", "") or "")
+    ten_bp_value = float(getattr(lib, "ten_bp_data", 0.0) or 0.0)
+    is_10bp = ten_bp_value > 0 or any(len(part.strip()) == 10 for part in index_seq.replace(",", ";").split(";") if part.strip())
+    special_splits = (
+        getattr(lib, "special_splits", "")
+        or getattr(lib, "wkspecialsplits", "")
+        or ""
+    )
+    return "|".join([
+        _normalize_text_for_match(sample_type),
+        peak_bucket,
+        "10bp" if is_10bp else "non10bp",
+        _normalize_text_for_match(special_splits),
+    ])
 
 
 def _rescue_remaining_lanes_by_layered_regroup_search(
@@ -7804,7 +7921,7 @@ def _filter_dedicated_imbalance_allowed_validation_result(
     lane: LaneAssignment,
     result: LaneValidationResult,
 ) -> LaneValidationResult:
-    """DL_专用不均衡Lane只豁免碱基不均衡占比，不豁免客户/10bp等红线。"""
+    """DL_/IG 专用不均衡Lane豁免不均衡占比与特殊文库总量，不豁免容量/Index/客户/10bp等红线。"""
     metadata = getattr(lane, "metadata", {}) or {}
     is_dedicated_imbalance_lane = str(getattr(lane, "lane_id", "") or "").startswith("DL_") or bool(
         metadata.get("is_dedicated_imbalance_lane")
@@ -7814,11 +7931,17 @@ def _filter_dedicated_imbalance_allowed_validation_result(
 
     filtered_errors = [
         err for err in result.errors
-        if err.rule_type != ValidationRuleType.BASE_IMBALANCE_RATIO
+        if err.rule_type not in {
+            ValidationRuleType.BASE_IMBALANCE_RATIO,
+            ValidationRuleType.SPECIAL_LIBRARY_LIMIT,
+        }
     ]
     filtered_warnings = [
         warning for warning in result.warnings
-        if warning.rule_type != ValidationRuleType.BASE_IMBALANCE_RATIO
+        if warning.rule_type not in {
+            ValidationRuleType.BASE_IMBALANCE_RATIO,
+            ValidationRuleType.SPECIAL_LIBRARY_LIMIT,
+        }
     ]
     if len(filtered_errors) == len(result.errors) and len(filtered_warnings) == len(result.warnings):
         return result
@@ -7959,6 +8082,138 @@ def _validate_lane_state(
     return result
 
 
+def _final_strict_validate_lane_without_duplicate_origrec(
+    lane: LaneAssignment,
+    validator: Any,
+) -> LaneValidationResult:
+    """终态严格校验：保留Lane类型专用校验，并禁止同一Lane内重复wkaidbid。"""
+    skip_peak_size = _is_explicit_dedicated_imbalance_lane(lane) and bool(
+        (getattr(lane, "metadata", {}) or {}).get("materialized_balance_library")
+    )
+    result = _validate_lane_state(
+        validator,
+        lane,
+        list(lane.libraries or []),
+        skip_peak_size=skip_peak_size,
+    )
+
+    original_libs = [lib for lib in list(lane.libraries or []) if not _is_ai_balance_library(lib)]
+    seen_aidbids: Set[str] = set()
+    duplicate_aidbids: Set[str] = set()
+    for lib in original_libs:
+        key = _get_library_detail_output_key(lib) or str(
+            getattr(lib, "aidbid", "") or getattr(lib, "wkaidbid", "") or id(lib)
+        )
+        if key in seen_aidbids:
+            duplicate_aidbids.add(key)
+            continue
+        seen_aidbids.add(key)
+
+    errors = list(result.errors)
+    machine_type = lane.machine_type.value if lane.machine_type else "Nova X-25B"
+    capacity_metadata = dict(getattr(lane, "metadata", {}) or {})
+    capacity_metadata.pop("wkbalancedata", None)
+    capacity_metadata.pop("required_balance_data_gb", None)
+    capacity_metadata.pop("wkadd_balance_data", None)
+    min_allowed, max_allowed = _resolve_lane_capacity_limits(
+        libraries=original_libs,
+        machine_type=machine_type,
+        lane_id=lane.lane_id,
+        lane_metadata=capacity_metadata,
+    )
+    balance_data = _safe_float((getattr(lane, "metadata", {}) or {}).get("wkbalancedata"), default=0.0) or 0.0
+    effective_total = _total_lane_data(original_libs) + balance_data
+    if effective_total < min_allowed - 1e-6 or effective_total > max_allowed + 1e-6:
+        errors.append(
+            ValidationError(
+                rule_type=ValidationRuleType.CAPACITY,
+                severity=ValidationSeverity.ERROR,
+                message="Lane有效容量{:.1f}G(原始{:.1f}G+平衡{:.1f}G)不在规则容量区间[{:.1f}, {:.1f}]内".format(
+                    effective_total,
+                    _total_lane_data(original_libs),
+                    balance_data,
+                    min_allowed,
+                    max_allowed,
+                ),
+                current_value=effective_total,
+                threshold_value=max_allowed,
+            )
+        )
+    if str(getattr(lane, "lane_id", "") or "").startswith("DL_"):
+        sample_types = {
+            _normalize_text_for_match(
+                getattr(lib, "sample_type", "")
+                or getattr(lib, "sampletype", "")
+                or getattr(lib, "sample_type_code", "")
+                or getattr(lib, "data_type", "")
+                or ""
+            )
+            for lib in original_libs
+            if _normalize_text_for_match(
+                getattr(lib, "sample_type", "")
+                or getattr(lib, "sampletype", "")
+                or getattr(lib, "sample_type_code", "")
+                or getattr(lib, "data_type", "")
+                or ""
+            )
+        }
+        non_imbalance_aidbids = [
+            _get_library_detail_output_key(lib)
+            for lib in original_libs
+            if str(
+                getattr(lib, "base_imbalance", "")
+                or getattr(lib, "wk_jjbj", "")
+                or getattr(lib, "jjbj", "")
+                or ""
+            ).strip() != "是"
+        ]
+        if len(sample_types) > 1:
+            errors.append(
+                ValidationError(
+                    rule_type=ValidationRuleType.CAPACITY,
+                    severity=ValidationSeverity.ERROR,
+                    message="DL专Lane内存在多个文库类型，禁止混排: {}".format(
+                        ", ".join(sorted(sample_types))
+                    ),
+                    current_value=len(sample_types),
+                    threshold_value=1,
+                )
+            )
+        if non_imbalance_aidbids:
+            errors.append(
+                ValidationError(
+                    rule_type=ValidationRuleType.BASE_IMBALANCE_RATIO,
+                    severity=ValidationSeverity.ERROR,
+                    message="DL专Lane内存在非碱基不均衡文库(wk_jjbj!=是): {}".format(
+                        ", ".join(non_imbalance_aidbids[:10])
+                    ),
+                    current_value=len(non_imbalance_aidbids),
+                    threshold_value=0,
+                )
+            )
+    if duplicate_aidbids:
+        errors.append(
+            ValidationError(
+                rule_type=ValidationRuleType.INDEX_CONFLICT,
+                severity=ValidationSeverity.ERROR,
+                message="Lane内存在重复wkaidbid，禁止通过终态严格校验: {}".format(
+                    ", ".join(sorted(duplicate_aidbids)[:10])
+                ),
+                current_value=len(duplicate_aidbids),
+                threshold_value=0,
+            )
+        )
+
+    if errors:
+        return LaneValidationResult(
+            lane_id=result.lane_id,
+            is_valid=False,
+            errors=errors,
+            warnings=result.warnings,
+        )
+    return result
+
+
 def _filter_valid_lanes(
     lanes: List[LaneAssignment],
     validator: Any,
@@ -7967,15 +8222,8 @@ def _filter_valid_lanes(
     valid_lanes: List[LaneAssignment] = []
     failed_lanes: List[LaneAssignment] = []
     for lane in lanes:
-        skip_peak_size = _is_explicit_dedicated_imbalance_lane(lane) and bool(
-            (getattr(lane, "metadata", {}) or {}).get("materialized_balance_library")
-        )
-        result = _validate_lane_state(
-            validator,
-            lane,
-            list(lane.libraries or []),
-            skip_peak_size=skip_peak_size,
-        )
+        result = _final_strict_validate_lane_without_duplicate_origrec(lane, validator)
+        result = _filter_dedicated_imbalance_allowed_validation_result(lane, result)
         if result.is_valid:
             valid_lanes.append(lane)
         else:
@@ -7987,6 +8235,472 @@ def _filter_valid_lanes(
                 )
             )
     return valid_lanes, failed_lanes
+
+
+def _try_repair_dedicated_lane_unique_type(
+    lane: LaneAssignment,
+    validator: Any,
+    unassigned_pool: List[EnhancedLibraryInfo],
+) -> Tuple[bool, int, int]:
+    """修复DL专Lane混类型：保留数据量最大的文库类型，少数类型回流后只补同类型。"""
+    if not str(getattr(lane, "lane_id", "") or "").startswith("DL_"):
+        return False, 0, 0
+
+    original_libs = [lib for lib in list(lane.libraries or []) if not _is_ai_balance_library(lib)]
+    if not original_libs:
+        return False, 0, 0
+
+    def _sample_type_key(lib: EnhancedLibraryInfo) -> str:
+        return _normalize_text_for_match(
+            getattr(lib, "sample_type", "")
+            or getattr(lib, "sampletype", "")
+            or getattr(lib, "sample_type_code", "")
+            or getattr(lib, "data_type", "")
+            or ""
+        )
+
+    grouped: Dict[str, List[EnhancedLibraryInfo]] = {}
+    for lib in original_libs:
+        key = _sample_type_key(lib)
+        if key:
+            grouped.setdefault(key, []).append(lib)
+
+    if len(grouped) <= 1:
+        return False, 0, 0
+
+    keep_type = max(
+        grouped.keys(),
+        key=lambda key: sum(lib.get_data_amount_gb() for lib in grouped[key]),
+    )
+    keep_libs = list(grouped[keep_type])
+    removed_libs = [lib for key, libs in grouped.items() if key != keep_type for lib in libs]
+
+    metadata = _build_lane_metadata_for_validator(lane.lane_id, lane.metadata)
+    machine_type = lane.machine_type.value if lane.machine_type else "Nova X-25B"
+    capacity_metadata = dict(getattr(lane, "metadata", {}) or {})
+    capacity_metadata.pop("wkbalancedata", None)
+    capacity_metadata.pop("required_balance_data_gb", None)
+    capacity_metadata.pop("wkadd_balance_data", None)
+    min_allowed, max_allowed = _resolve_lane_capacity_limits(
+        libraries=keep_libs,
+        machine_type=machine_type,
+        lane_id=lane.lane_id,
+        lane_metadata=capacity_metadata,
+    )
+    working_libs = list(keep_libs)
+    working_total = _total_lane_data(working_libs)
+    balance_data = _safe_float((getattr(lane, "metadata", {}) or {}).get("wkbalancedata"), default=0.0) or 0.0
+    selected: List[EnhancedLibraryInfo] = []
+    existing_aidbids = {_get_library_detail_output_key(lib) for lib in working_libs}
+
+    candidate_libs = sorted(
+        [
+            lib for lib in unassigned_pool
+            if _sample_type_key(lib) == keep_type
+            and str(getattr(lib, "jjbj", "") or getattr(lib, "wk_jjbj", "") or "").strip() == "是"
+            and _get_library_detail_output_key(lib) not in existing_aidbids
+        ],
+        key=lambda lib: -lib.get_data_amount_gb(),
+    )
+    for candidate in candidate_libs:
+        candidate_data = candidate.get_data_amount_gb()
+        if working_total + balance_data + candidate_data > max_allowed + 1e-6:
+            continue
+        test_libs = working_libs + [candidate]
+        test_result = _validate_lane_with_latest_index(
+            validator=validator,
+            libraries=test_libs,
+            lane_id=lane.lane_id,
+            machine_type=machine_type,
+            metadata=metadata,
+        )
+        test_result = _filter_dedicated_imbalance_allowed_validation_result(lane, test_result)
+        working_libs = test_libs
+        working_total += candidate_data
+        selected.append(candidate)
+        existing_aidbids.add(_get_library_detail_output_key(candidate))
+        if working_total + balance_data + 1e-6 >= min_allowed and test_result.is_valid:
+            break
+
+    lane.libraries = working_libs
+    lane.total_data_gb = sum(lib.get_data_amount_gb() for lib in lane.libraries)
+    lane.calculate_metrics()
+    strict_result = _final_strict_validate_lane_without_duplicate_origrec(lane, validator)
+    if strict_result.is_valid:
+        _remove_libraries_by_identity_in_place(unassigned_pool, selected)
+        unassigned_pool.extend(removed_libs)
+        logger.info(
+            "DL专Lane {} 混类型修复成功: 保留类型={}, 移出{}个, 补入{}个, 数据量{:.1f}G".format(
+                lane.lane_id,
+                keep_type,
+                len(removed_libs),
+                len(selected),
+                lane.total_data_gb,
+            )
+        )
+        return True, len(selected), len(removed_libs)
+
+    lane.libraries = original_libs
+    lane.total_data_gb = sum(lib.get_data_amount_gb() for lib in lane.libraries)
+    lane.calculate_metrics()
+    return False, 0, 0
+
+
+def _get_library_index_tokens_for_final_repair(lib: EnhancedLibraryInfo) -> Set[str]:
+    """提取终态修复使用的Index token集合。"""
+    index_value = (
+        getattr(lib, "index_seq", "")
+        or getattr(lib, "index_sequence", "")
+        or getattr(lib, "wkindexseq", "")
+        or ""
+    )
+    tokens: Set[str] = set()
+    for token in re.split(r"[;,/|\\s]+", str(index_value).strip().upper()):
+        token = token.strip()
+        if token:
+            tokens.add(token)
+    return tokens
+
+
+def _find_duplicate_index_tokens_for_final_repair(
+    libraries: List[EnhancedLibraryInfo],
+) -> Set[str]:
+    """查找Lane内重复Index token。"""
+    counter: Counter[str] = Counter()
+    for lib in libraries:
+        for token in _get_library_index_tokens_for_final_repair(lib):
+            counter[token] += 1
+    return {token for token, count in counter.items() if count > 1}
+
+
+def _build_final_repair_removal_units(
+    libraries: List[EnhancedLibraryInfo],
+) -> List[List[EnhancedLibraryInfo]]:
+    """按拆分家族构造移除单元，避免只移除部分拆分子文库。"""
+    family_groups: Dict[str, List[EnhancedLibraryInfo]] = {}
+    singleton_units: List[List[EnhancedLibraryInfo]] = []
+    for lib in libraries:
+        family_id = str(getattr(lib, "original_library_id", "") or "").strip()
+        if family_id:
+            family_groups.setdefault(family_id, []).append(lib)
+        else:
+            singleton_units.append([lib])
+    return list(family_groups.values()) + singleton_units
+
+
+def _commit_final_repair_by_removal(
+    lane: LaneAssignment,
+    validator: Any,
+    removed_units: List[List[EnhancedLibraryInfo]],
+    reason: str,
+) -> Tuple[bool, List[EnhancedLibraryInfo]]:
+    """提交移除型修复；只有严格验证通过才保留。"""
+    removed_libs = [lib for unit in removed_units for lib in unit]
+    if not removed_libs:
+        return False, []
+    removed_ids = {id(lib) for lib in removed_libs}
+    original_libs = list(lane.libraries or [])
+    lane.libraries = [lib for lib in original_libs if id(lib) not in removed_ids]
+    lane.total_data_gb = sum(lib.get_data_amount_gb() for lib in lane.libraries)
+    lane.calculate_metrics()
+    strict_result = _final_strict_validate_lane_without_duplicate_origrec(lane, validator)
+    if strict_result.is_valid:
+        logger.info(
+            "终态总复核Lane {} {}修复成功: 移出{}个文库，数据量{:.1f}G".format(
+                lane.lane_id,
+                reason,
+                len(removed_libs),
+                lane.total_data_gb,
+            )
+        )
+        return True, removed_libs
+    lane.libraries = original_libs
+    lane.total_data_gb = sum(lib.get_data_amount_gb() for lib in lane.libraries)
+    lane.calculate_metrics()
+    return False, []
+
+
+def _try_repair_over_capacity_by_removal(
+    lane: LaneAssignment,
+    validator: Any,
+    unassigned_pool: List[EnhancedLibraryInfo],
+) -> Tuple[bool, int, int]:
+    """修复容量超限：移除最小影响文库单元后严格复验。"""
+    original_libs = [lib for lib in list(lane.libraries or []) if not _is_ai_balance_library(lib)]
+    if len(original_libs) <= 1:
+        return False, 0, 0
+    machine_type = lane.machine_type.value if lane.machine_type else "Nova X-25B"
+    capacity_metadata = dict(getattr(lane, "metadata", {}) or {})
+    capacity_metadata.pop("wkbalancedata", None)
+    capacity_metadata.pop("required_balance_data_gb", None)
+    capacity_metadata.pop("wkadd_balance_data", None)
+    min_allowed, max_allowed = _resolve_lane_capacity_limits(
+        libraries=original_libs,
+        machine_type=machine_type,
+        lane_id=lane.lane_id,
+        lane_metadata=capacity_metadata,
+    )
+    balance_data = _safe_float((getattr(lane, "metadata", {}) or {}).get("wkbalancedata"), default=0.0) or 0.0
+    effective_total = _total_lane_data(original_libs) + balance_data
+    if effective_total <= max_allowed + 1e-6:
+        return False, 0, 0
+
+    units = _build_final_repair_removal_units(original_libs)
+    units = sorted(
+        units,
+        key=lambda unit: (
+            sum(lib.get_data_amount_gb() for lib in unit),
+            len(unit),
+            ",".join(str(getattr(lib, "origrec", "") or "") for lib in unit),
+        ),
+    )
+    removed_units: List[List[EnhancedLibraryInfo]] = []
+    working_total = _total_lane_data(original_libs)
+    for unit in units:
+        unit_data = sum(lib.get_data_amount_gb() for lib in unit)
+        if working_total + balance_data <= max_allowed + 1e-6:
+            break
+        if working_total + balance_data - unit_data < min_allowed - 1e-6:
+            continue
+        removed_units.append(unit)
+        working_total -= unit_data
+
+    if working_total + balance_data > max_allowed + 1e-6:
+        return False, 0, 0
+    repaired, removed_libs = _commit_final_repair_by_removal(lane, validator, removed_units, "容量超限剔除")
+    if repaired:
+        unassigned_pool.extend(removed_libs)
+        return True, 0, len(removed_libs)
+    return False, 0, 0
+
+
+def _try_repair_index_duplicate_by_removal(
+    lane: LaneAssignment,
+    validator: Any,
+    unassigned_pool: List[EnhancedLibraryInfo],
+) -> Tuple[bool, int, int]:
+    """修复Index重复：移除冲突文库单元后严格复验。"""
+    original_libs = [lib for lib in list(lane.libraries or []) if not _is_ai_balance_library(lib)]
+    if len(original_libs) <= 1:
+        return False, 0, 0
+    duplicate_tokens = _find_duplicate_index_tokens_for_final_repair(original_libs)
+    if not duplicate_tokens:
+        return False, 0, 0
+
+    machine_type = lane.machine_type.value if lane.machine_type else "Nova X-25B"
+    capacity_metadata = dict(getattr(lane, "metadata", {}) or {})
+    capacity_metadata.pop("wkbalancedata", None)
+    capacity_metadata.pop("required_balance_data_gb", None)
+    capacity_metadata.pop("wkadd_balance_data", None)
+    min_allowed, _ = _resolve_lane_capacity_limits(
+        libraries=original_libs,
+        machine_type=machine_type,
+        lane_id=lane.lane_id,
+        lane_metadata=capacity_metadata,
+    )
+    balance_data = _safe_float((getattr(lane, "metadata", {}) or {}).get("wkbalancedata"), default=0.0) or 0.0
+    units = _build_final_repair_removal_units(original_libs)
+    units = sorted(
+        units,
+        key=lambda unit: (
+            -sum(len(_get_library_index_tokens_for_final_repair(lib) & duplicate_tokens) for lib in unit),
+            sum(lib.get_data_amount_gb() for lib in unit),
+            len(unit),
+        ),
+    )
+
+    removed_units: List[List[EnhancedLibraryInfo]] = []
+    working_libs = list(original_libs)
+    for unit in units:
+        unit_ids = {id(lib) for lib in unit}
+        if not any(_get_library_index_tokens_for_final_repair(lib) & duplicate_tokens for lib in unit):
+            continue
+        candidate_libs = [lib for lib in working_libs if id(lib) not in unit_ids]
+        if _total_lane_data(candidate_libs) + balance_data < min_allowed - 1e-6:
+            continue
+        removed_units.append(unit)
+        working_libs = candidate_libs
+        duplicate_tokens = _find_duplicate_index_tokens_for_final_repair(working_libs)
+        if not duplicate_tokens:
+            break
+
+    if duplicate_tokens:
+        return False, 0, 0
+    repaired, removed_libs = _commit_final_repair_by_removal(lane, validator, removed_units, "Index重复剔除")
+    if repaired:
+        unassigned_pool.extend(removed_libs)
+        return True, 0, len(removed_libs)
+    return False, 0, 0
+
+
+def _try_repair_final_failed_lane(
+    lane: LaneAssignment,
+    validator: Any,
+    unassigned_pool: List[EnhancedLibraryInfo],
+) -> Tuple[bool, int, int]:
+    """终态总复核前对失败Lane做一次受控修复。"""
+    dedicated_repaired, dedicated_added, dedicated_removed = _try_repair_dedicated_lane_unique_type(
+        lane,
+        validator,
+        unassigned_pool,
+    )
+    if dedicated_repaired:
+        return True, dedicated_added, dedicated_removed
+
+    over_capacity_repaired, over_capacity_added, over_capacity_removed = _try_repair_over_capacity_by_removal(
+        lane,
+        validator,
+        unassigned_pool,
+    )
+    if over_capacity_repaired:
+        return True, over_capacity_added, over_capacity_removed
+
+    index_repaired, index_added, index_removed = _try_repair_index_duplicate_by_removal(
+        lane,
+        validator,
+        unassigned_pool,
+    )
+    if index_repaired:
+        return True, index_added, index_removed
+
+    fixed_lane, removed_libs = _auto_fix_lane_for_customer_and_10bp(
+        lane,
+        validator,
+        unassigned_pool,
+    )
+    if fixed_lane is not None:
+        strict_result = _final_strict_validate_lane_without_duplicate_origrec(fixed_lane, validator)
+        if strict_result.is_valid:
+            unassigned_pool.extend(removed_libs)
+            return True, 0, len(removed_libs)
+        logger.info(
+            "终态总复核Lane {} 客户/10bp自动修复后仍未通过去重严格校验: {}".format(
+                lane.lane_id,
+                [err.message for err in strict_result.errors],
+            )
+        )
+
+    metadata = _build_lane_metadata_for_validator(lane.lane_id, lane.metadata)
+    machine_type = lane.machine_type.value if lane.machine_type else "Nova X-25B"
+    current_libs = list(lane.libraries or [])
+    if not current_libs:
+        return False, 0, 0
+
+    capacity_metadata = dict(getattr(lane, "metadata", {}) or {})
+    capacity_metadata.pop("wkbalancedata", None)
+    capacity_metadata.pop("required_balance_data_gb", None)
+    capacity_metadata.pop("wkadd_balance_data", None)
+    min_allowed, max_allowed = _resolve_lane_capacity_limits(
+        libraries=current_libs,
+        machine_type=machine_type,
+        lane_id=lane.lane_id,
+        lane_metadata=capacity_metadata,
+    )
+    current_total = _total_lane_data(current_libs)
+    initial_result = _validate_lane_with_latest_index(
+        validator=validator,
+        libraries=current_libs,
+        lane_id=lane.lane_id,
+        machine_type=machine_type,
+        metadata=metadata,
+    )
+    initial_result = _filter_dedicated_imbalance_allowed_validation_result(lane, initial_result)
+    error_types = {err.rule_type for err in initial_result.errors}
+    needs_10bp = ValidationRuleType.INDEX_10BP_RATIO in error_types
+
+    lane_cluster_keys = {_get_residual_regroup_cluster_key(lib) for lib in current_libs}
+    current_dl_sample_types: Set[str] = set()
+    if str(getattr(lane, "lane_id", "") or "").startswith("DL_"):
+        current_dl_sample_types = {
+            _normalize_text_for_match(
+                getattr(lib, "sample_type", "")
+                or getattr(lib, "sampletype", "")
+                or getattr(lib, "sample_type_code", "")
+                or getattr(lib, "data_type", "")
+                or ""
+            )
+            for lib in current_libs
+        }
+        current_dl_sample_types.discard("")
+
+    def _candidate_sort_key(lib: EnhancedLibraryInfo) -> Tuple[int, int, float, str]:
+        index_seq = str(getattr(lib, "index_seq", "") or "")
+        is_10bp = any(len(part.strip()) == 10 for part in index_seq.replace(",", ";").split(";") if part.strip()) or float(getattr(lib, "ten_bp_data", 0.0) or 0.0) > 0
+        return (
+            0 if (needs_10bp and is_10bp) else 1,
+            0 if _get_residual_regroup_cluster_key(lib) in lane_cluster_keys else 1,
+            -float(getattr(lib, "contract_data_raw", 0.0) or 0.0),
+            str(getattr(lib, "origrec", "") or ""),
+        )
+
+    candidate_libs = sorted(list(unassigned_pool), key=_candidate_sort_key)[:120]
+    selected: List[EnhancedLibraryInfo] = []
+    selected_ids: Set[int] = set()
+    selected_aidbid_keys: Set[str] = {
+        _get_library_detail_output_key(lib) or str(
+            getattr(lib, "aidbid", "") or getattr(lib, "wkaidbid", "") or id(lib)
+        )
+        for lib in current_libs
+    }
+    working_libs = list(current_libs)
+    working_total = _total_lane_data(current_libs)
+    balance_data = _safe_float((getattr(lane, "metadata", {}) or {}).get("wkbalancedata"), default=0.0) or 0.0
+
+    for candidate in candidate_libs:
+        if id(candidate) in selected_ids:
+            continue
+        candidate_aidbid_key = _get_library_detail_output_key(candidate) or str(
+            getattr(candidate, "aidbid", "") or getattr(candidate, "wkaidbid", "") or id(candidate)
+        )
+        if candidate_aidbid_key in selected_aidbid_keys:
+            continue
+        if current_dl_sample_types:
+            candidate_sample_type = _normalize_text_for_match(
+                getattr(candidate, "sample_type", "")
+                or getattr(candidate, "sampletype", "")
+                or getattr(candidate, "sample_type_code", "")
+                or getattr(candidate, "data_type", "")
+                or ""
+            )
+            if candidate_sample_type not in current_dl_sample_types:
+                continue
+            if str(getattr(candidate, "jjbj", "") or getattr(candidate, "wk_jjbj", "") or "").strip() != "是":
+                continue
+        candidate_data = candidate.get_data_amount_gb()
+        if working_total + balance_data + candidate_data > max_allowed + 1e-6:
+            continue
+        test_libs = working_libs + [candidate]
+        test_result = _validate_lane_with_latest_index(
+            validator=validator,
+            libraries=test_libs,
+            lane_id=lane.lane_id,
+            machine_type=machine_type,
+            metadata=metadata,
+        )
+        test_result = _filter_dedicated_imbalance_allowed_validation_result(lane, test_result)
+        working_libs = test_libs
+        working_total += candidate_data
+        selected.append(candidate)
+        selected_ids.add(id(candidate))
+        selected_aidbid_keys.add(candidate_aidbid_key)
+        if working_total + balance_data + 1e-6 >= min_allowed and test_result.is_valid:
+            _remove_libraries_by_identity_in_place(unassigned_pool, selected)
+            lane.libraries = working_libs
+            lane.total_data_gb = sum(lib.get_data_amount_gb() for lib in lane.libraries)
+            lane.calculate_metrics()
+            if not isinstance(lane.metadata, dict):
+                lane.metadata = {}
+            lane.metadata["final_cleanup_repaired"] = True
+            logger.info(
+                "终态总复核Lane {} 二次修复成功: 补入{}个文库，数据量{:.1f}G".format(
+                    lane.lane_id,
+                    len(selected),
+                    lane.total_data_gb,
+                )
+            )
+            return True, len(selected), 0
+
+    return False, 0, 0
 
 
 def _final_non_package_validation_cleanup(
@@ -8010,7 +8724,27 @@ def _final_non_package_validation_cleanup(
     if not non_package_lanes:
         return {"removed_lanes": 0, "recovered_libs": 0}
 
-    valid_lanes, failed_lanes = _filter_valid_lanes(non_package_lanes, validator)
+    valid_lanes, failed_lanes_initial = _filter_valid_lanes(non_package_lanes, validator)
+    failed_lanes: List[LaneAssignment] = []
+    repaired_lanes = 0
+    repaired_added_libs = 0
+    repaired_removed_libs = 0
+    for lane in failed_lanes_initial:
+        repaired, added_count, removed_count = _try_repair_final_failed_lane(
+            lane=lane,
+            validator=validator,
+            unassigned_pool=solution.unassigned_libraries,
+        )
+        if repaired:
+            result = _final_strict_validate_lane_without_duplicate_origrec(lane, validator)
+            if result.is_valid:
+                valid_lanes.append(lane)
+                repaired_lanes += 1
+                repaired_added_libs += added_count
+                repaired_removed_libs += removed_count
+                continue
+        failed_lanes.append(lane)
+
     recovered_libs = 0
     for lane in failed_lanes:
         # 只回收原始合同文库，AI生成的平衡文库不放回未分配池
@@ -8024,10 +8758,13 @@ def _final_non_package_validation_cleanup(
         )
 
     solution.lane_assignments = package_lanes + valid_lanes
-    if failed_lanes:
+    if failed_lanes or repaired_lanes:
         logger.info(
-            "终态总复核完成: 淘汰{}条不合规非包Lane，回收{}个文库到未分配池，"
+            "终态总复核完成: 修复{}条Lane(补入{}个, 回流{}个)，淘汰{}条不合规非包Lane，回收{}个文库到未分配池，"
             "当前有效Lane={}，未分配={}".format(
+                repaired_lanes,
+                repaired_added_libs,
+                repaired_removed_libs,
                 len(failed_lanes),
                 recovered_libs,
                 len(solution.lane_assignments),
@@ -8035,6 +8772,62 @@ def _final_non_package_validation_cleanup(
             )
         )
     return {"removed_lanes": len(failed_lanes), "recovered_libs": recovered_libs}
+
+
+def _get_library_imbalance_group_id(lib: EnhancedLibraryInfo) -> Optional[str]:
+    """返回文库所属碱基不均衡分组ID。"""
+    try:
+        group_id = _BASE_IMBALANCE_HANDLER.identify_imbalance_type(lib)
+    except Exception:
+        logger.exception("识别碱基不均衡分组失败: {}", getattr(lib, "origrec", ""))
+        return None
+    if not group_id or group_id == "G_UNKNOWN":
+        return None
+    return str(group_id)
+
+
+def _get_library_imbalance_type_name(lib: EnhancedLibraryInfo) -> str:
+    """返回碱基不均衡分组内用于限制类型数量的文库类型名。"""
+    try:
+        return _BASE_IMBALANCE_HANDLER._get_library_type(lib)
+    except Exception:
+        return _normalize_text_for_match(
+            getattr(lib, "sample_type_code", "")
+            or getattr(lib, "sampletype", "")
+            or getattr(lib, "data_type", "")
+            or ""
+        )
+
+
+def _get_library_index_token_mask(
+    lib: EnhancedLibraryInfo,
+    token_to_bit: Dict[str, int],
+) -> int:
+    """按输出前Index复核口径构建P7/P5 token位图。"""
+    index_text = str(getattr(lib, "index_seq", "") or getattr(lib, "indexseq", "") or "").strip().upper()
+    mask = 0
+    for token in re.split(r"[;,/|\\s]+", index_text):
+        token = token.strip()
+        if not token:
+            continue
+        bit = token_to_bit.setdefault(token, len(token_to_bit))
+        mask |= 1 << bit
+    return mask
+
+
+def _has_output_index_token_duplicates(libraries: List[EnhancedLibraryInfo]) -> bool:
+    """按输出前Index复核口径判断Lane内P7/P5 token是否重复。"""
+    seen_tokens: Set[str] = set()
+    for lib in libraries:
+        index_text = str(getattr(lib, "index_seq", "") or getattr(lib, "indexseq", "") or "").strip().upper()
+        for token in re.split(r"[;,/|\\s]+", index_text):
+            token = token.strip()
+            if not token:
+                continue
+            if token in seen_tokens:
+                return True
+            seen_tokens.add(token)
+    return False
 
 
 def _rescue_failed_lanes_by_57_rules(
@@ -8641,8 +9434,22 @@ def _collect_prediction_rows(
             if resolved_ratio > 0:
                 round2_balance_ratio = resolved_ratio
 
-        # 排机阶段不做下单/产出预测，统一在 prediction_delivery 阶段落地。
+        seen_lane_aidbid_keys: Set[str] = set()
+        # 排机输出按 wkaidbid 去重，同一Lane内同一明细文库不得重复贡献容量。
         for lib in libs:
+            is_balance_lib = _is_ai_balance_library(lib)
+            detail_aidbid_key = _get_library_detail_output_key(lib)
+            if not is_balance_lib and detail_aidbid_key in seen_lane_aidbid_keys:
+                logger.warning(
+                    "输出收集跳过Lane内重复wkaidbid: lane={}, wkaidbid={}".format(
+                        lane.lane_id,
+                        detail_aidbid_key,
+                    )
+                )
+                continue
+            if not is_balance_lib:
+                seen_lane_aidbid_keys.add(detail_aidbid_key)
+
             contract = float(lib.contract_data_raw or 0.0)
             loutput = loutput_by_origrec.get(lib.origrec)
             last_qpcr = _get_lib_attr_float(lib, ["_last_qpcr_raw", "last_qpcr", "wklastqpcr", "wklistqpcr"])
@@ -8654,8 +9461,6 @@ def _collect_prediction_rows(
                 last_output=last_output,
                 last_order=last_order,
             )
-            is_balance_lib = _is_ai_balance_library(lib)
-
             rows.append(
                 {
                     "origrec": lib.origrec,
@@ -9344,6 +10149,305 @@ def _build_detail_output(
             if column_name in merged.columns:
                 merged.loc[failed_57_mask, column_name] = pd.NA
         lane_assigned_mask = lane_assigned_mask & (~failed_57_mask)
+
+    # 导出最终保险：同一Lane内同一wkaidbid只允许保留一条成Lane明细，避免重复行虚增Lane容量。
+    if "llaneid" in merged.columns and "detail_row_key" in merged.columns:
+        lane_id_text_for_dedup = merged["llaneid"].astype(str).str.strip()
+        assigned_for_dedup = (
+            merged["llaneid"].notna()
+            & ~lane_id_text_for_dedup.isin({"", "nan", "None", "NONE", "null", "NULL"})
+        )
+        duplicate_assigned_mask = assigned_for_dedup & merged.duplicated(
+            subset=["llaneid", "detail_row_key"],
+            keep="first",
+        )
+        if duplicate_assigned_mask.any():
+            duplicate_count = int(duplicate_assigned_mask.sum())
+            duplicate_lane_ids = sorted(
+                lane_id_text_for_dedup.loc[duplicate_assigned_mask].dropna().unique().tolist()
+            )
+            logger.warning(
+                "输出前去除Lane内重复wkaidbid成Lane标记: 重复行={}，涉及Lane={}".format(
+                    duplicate_count,
+                    duplicate_lane_ids,
+                )
+            )
+            for column_name in [
+                "lrunid",
+                "llaneid",
+                "lcxms",
+                "lsjfs",
+                "lanecreatetype",
+                "排机规则",
+                "index查重规则",
+            ]:
+                if column_name in merged.columns:
+                    merged.loc[duplicate_assigned_mask, column_name] = ""
+
+    # 输出最终保险：拆分家族必须原子提交；任一子文库未成Lane，则整组回滚为未成Lane状态。
+    if {"wkorigrec", "llaneid"}.issubset(set(merged.columns)):
+        raw_family_counts = (
+            df_raw["wkorigrec"].astype(str).str.strip().value_counts().to_dict()
+            if "wkorigrec" in df_raw.columns
+            else {}
+        )
+        lane_text_for_split = merged["llaneid"].astype(str).str.strip()
+        assigned_for_split = (
+            merged["llaneid"].notna()
+            & ~lane_text_for_split.isin({"", "nan", "None", "NONE", "null", "NULL"})
+        )
+        rollback_origrecs: Set[str] = set()
+        for origrec, sub in merged.groupby(merged["wkorigrec"].astype(str).str.strip(), sort=False):
+            if not origrec or origrec.lower() in {"nan", "none", "null"}:
+                continue
+            raw_count = int(raw_family_counts.get(origrec, 0) or 0)
+            if len(sub) <= raw_count:
+                continue
+            assigned_count = int(assigned_for_split.loc[sub.index].sum())
+            if 0 < assigned_count < len(sub):
+                rollback_origrecs.add(origrec)
+        if rollback_origrecs:
+            rollback_mask = merged["wkorigrec"].astype(str).str.strip().isin(rollback_origrecs)
+            logger.warning(
+                "输出前拆分家族原子性复核回滚{}个原始文库: {}".format(
+                    len(rollback_origrecs),
+                    sorted(rollback_origrecs)[:20],
+                )
+            )
+            for column_name in [
+                "lrunid",
+                "llaneid",
+                "lcxms",
+                "lsjfs",
+                "lanecreatetype",
+                "排机规则",
+                "index查重规则",
+            ]:
+                if column_name in merged.columns:
+                    merged.loc[rollback_mask, column_name] = ""
+            for column_name in ["runid", "laneid"]:
+                if column_name in merged.columns:
+                    merged.loc[rollback_mask, column_name] = pd.NA
+            lane_assigned_mask = lane_assigned_mask & (~rollback_mask)
+
+    # 输出最终保险：同一Lane内Index序列不能重复，按输出wkindexseq再次复核；先尝试最小移除冲突明细，失败才淘汰整Lane。
+    if {"llaneid", "wkindexseq"}.issubset(set(merged.columns)):
+        lane_text_for_index = merged["llaneid"].astype(str).str.strip()
+        assigned_for_index = (
+            merged["llaneid"].notna()
+            & ~lane_text_for_index.isin({"", "nan", "None", "NONE", "null", "NULL"})
+        )
+        failed_index_lane_ids: Set[str] = set()
+        repaired_index_row_indices: Set[int] = set()
+
+        def _row_index_tokens(row: pd.Series) -> Set[str]:
+            tokens: Set[str] = set()
+            for token in re.split(r"[;,/|\\s]+", str(row.get("wkindexseq", "") or "").strip().upper()):
+                token = token.strip()
+                if token:
+                    tokens.add(token)
+            return tokens
+
+        def _duplicate_tokens_for_rows(sub_df: pd.DataFrame) -> Set[str]:
+            token_counter: Counter[str] = Counter()
+            for _, row_item in sub_df.iterrows():
+                for token_item in _row_index_tokens(row_item):
+                    token_counter[token_item] += 1
+            return {token_item for token_item, count in token_counter.items() if count > 1}
+
+        def _lane_capacity_bounds_from_rows(sub_df: pd.DataFrame) -> Tuple[float, float]:
+            mode_values = {
+                str(value).strip()
+                for value in sub_df.get("lcxms", pd.Series(dtype=object)).dropna().tolist()
+                if str(value).strip()
+            }
+            normalized_modes = {_normalize_mode_1_1_alias(value) for value in mode_values}
+            has_lane_seq = any(_normalize_text_for_match(value) == "LANESEQ" for value in mode_values)
+            if "1.1" in normalized_modes:
+                return 1912.5, 2125.0
+            if has_lane_seq:
+                return 950.0, 1050.0
+            return 915.0, 1105.0
+
+        def _is_output_balance_series(row: pd.Series) -> bool:
+            return (
+                str(row.get("origrec_key", "") or "").startswith("AI_BALANCE")
+                or str(row.get("wksampleid", "") or "").strip().lower() == "phix"
+                or str(row.get(BALANCE_LIBRARY_MARKER_COLUMN, "") or "").strip().lower() in {"true", "1", "yes", "是"}
+            )
+
+        def _effective_output_capacity(sub_df: pd.DataFrame) -> float:
+            if sub_df.empty:
+                return 0.0
+            balance_mask = sub_df.apply(_is_output_balance_series, axis=1)
+            contract_series = pd.to_numeric(sub_df["wkcontractdata"], errors="coerce").fillna(0.0)
+            return float(contract_series.loc[~balance_mask].sum() + contract_series.loc[balance_mask].sum())
+
+        clear_columns = [
+            "lrunid",
+            "llaneid",
+            "lcxms",
+            "lsjfs",
+            "lanecreatetype",
+            "排机规则",
+            "index查重规则",
+        ]
+
+        for lane_id, sub in merged.loc[assigned_for_index].groupby("llaneid", sort=False):
+            lane_id_text = str(lane_id).strip()
+            duplicated_indexes = _duplicate_tokens_for_rows(sub)
+            if not duplicated_indexes:
+                continue
+            min_allowed, _ = _lane_capacity_bounds_from_rows(sub)
+            working_indices = list(sub.index)
+            removed_indices: List[int] = []
+            while duplicated_indexes:
+                candidates: List[Tuple[int, float, int]] = []
+                working_sub = merged.loc[working_indices]
+                for row_index, row_value in working_sub.iterrows():
+                    overlap_count = len(_row_index_tokens(row_value) & duplicated_indexes)
+                    if overlap_count <= 0:
+                        continue
+                    candidate_indices = [idx for idx in working_indices if idx != row_index]
+                    candidate_sub = merged.loc[candidate_indices]
+                    if _effective_output_capacity(candidate_sub) < min_allowed - 1e-6:
+                        continue
+                    row_data = _safe_float(row_value.get("wkcontractdata"), default=0.0) or 0.0
+                    candidates.append((-overlap_count, row_data, int(row_index)))
+                if not candidates:
+                    break
+                _, _, remove_index = min(candidates)
+                working_indices.remove(remove_index)
+                removed_indices.append(remove_index)
+                duplicated_indexes = _duplicate_tokens_for_rows(merged.loc[working_indices])
+
+            if not duplicated_indexes and removed_indices:
+                repaired_index_row_indices.update(removed_indices)
+                logger.warning(
+                    "输出前Index复核修复Lane {}: 清空{}条冲突明细成Lane标记".format(
+                        lane_id_text,
+                        len(removed_indices),
+                    )
+                )
+                continue
+            failed_index_lane_ids.add(lane_id_text)
+            logger.warning(
+                "输出前Index复核淘汰Lane {}: 重复Index={}".format(
+                    lane_id_text,
+                    sorted(duplicated_indexes)[:20] if duplicated_indexes else "无法在容量下限内剔除冲突明细",
+                )
+            )
+
+        if repaired_index_row_indices:
+            repaired_index_mask = merged.index.isin(repaired_index_row_indices)
+            for column_name in clear_columns:
+                if column_name in merged.columns:
+                    merged.loc[repaired_index_mask, column_name] = ""
+            for column_name in ["runid", "laneid"]:
+                if column_name in merged.columns:
+                    merged.loc[repaired_index_mask, column_name] = pd.NA
+            lane_assigned_mask = lane_assigned_mask & (~repaired_index_mask)
+
+        if failed_index_lane_ids:
+            failed_index_mask = merged["llaneid"].astype(str).str.strip().isin(failed_index_lane_ids)
+            for column_name in clear_columns:
+                if column_name in merged.columns:
+                    merged.loc[failed_index_mask, column_name] = ""
+            for column_name in ["runid", "laneid"]:
+                if column_name in merged.columns:
+                    merged.loc[failed_index_mask, column_name] = pd.NA
+            lane_assigned_mask = lane_assigned_mask & (~failed_index_mask)
+
+    # 输出最终保险：按输出字段口径复核有效容量，超出模式容量区间的Lane先尝试最小移除明细，失败才淘汰整Lane。
+    if {"llaneid", "wkcontractdata", "lcxms"}.issubset(set(merged.columns)):
+        lane_text_for_capacity = merged["llaneid"].astype(str).str.strip()
+        assigned_for_capacity = (
+            merged["llaneid"].notna()
+            & ~lane_text_for_capacity.isin({"", "nan", "None", "NONE", "null", "NULL"})
+        )
+        failed_capacity_lane_ids: Set[str] = set()
+        repaired_capacity_row_indices: Set[int] = set()
+        for lane_id, sub in merged.loc[assigned_for_capacity].groupby("llaneid", sort=False):
+            lane_id_text = str(lane_id).strip()
+            min_allowed, max_allowed = _lane_capacity_bounds_from_rows(sub)
+            effective_total = _effective_output_capacity(sub)
+            if min_allowed - 1e-6 <= effective_total <= max_allowed + 1e-6:
+                continue
+
+            if effective_total > max_allowed + 1e-6:
+                working_indices = list(sub.index)
+                removed_indices: List[int] = []
+                while _effective_output_capacity(merged.loc[working_indices]) > max_allowed + 1e-6:
+                    candidates: List[Tuple[float, int]] = []
+                    for row_index, row_value in merged.loc[working_indices].iterrows():
+                        candidate_indices = [idx for idx in working_indices if idx != row_index]
+                        candidate_sub = merged.loc[candidate_indices]
+                        candidate_total = _effective_output_capacity(candidate_sub)
+                        if candidate_total < min_allowed - 1e-6:
+                            continue
+                        row_data = _safe_float(row_value.get("wkcontractdata"), default=0.0) or 0.0
+                        candidates.append((row_data, int(row_index)))
+                    if not candidates:
+                        break
+                    _, remove_index = min(candidates)
+                    working_indices.remove(remove_index)
+                    removed_indices.append(remove_index)
+                repaired_total = _effective_output_capacity(merged.loc[working_indices]) if working_indices else 0.0
+                if min_allowed - 1e-6 <= repaired_total <= max_allowed + 1e-6 and removed_indices:
+                    repaired_capacity_row_indices.update(removed_indices)
+                    logger.warning(
+                        "输出前容量复核修复Lane {}: 有效容量{:.1f}G -> {:.1f}G，清空{}条明细成Lane标记".format(
+                            lane_id_text,
+                            effective_total,
+                            repaired_total,
+                            len(removed_indices),
+                        )
+                    )
+                    continue
+
+            failed_capacity_lane_ids.add(lane_id_text)
+            logger.warning(
+                "输出前容量复核淘汰Lane {}: 有效容量{:.1f}G不在[{:.1f}, {:.1f}]".format(
+                    lane_id_text,
+                    effective_total,
+                    min_allowed,
+                    max_allowed,
+                )
+            )
+        if repaired_capacity_row_indices:
+            repaired_capacity_mask = merged.index.isin(repaired_capacity_row_indices)
+            for column_name in [
+                "lrunid",
+                "llaneid",
+                "lcxms",
+                "lsjfs",
+                "lanecreatetype",
+                "排机规则",
+                "index查重规则",
+            ]:
+                if column_name in merged.columns:
+                    merged.loc[repaired_capacity_mask, column_name] = ""
+            for column_name in ["runid", "laneid"]:
+                if column_name in merged.columns:
+                    merged.loc[repaired_capacity_mask, column_name] = pd.NA
+            lane_assigned_mask = lane_assigned_mask & (~repaired_capacity_mask)
+        if failed_capacity_lane_ids:
+            failed_capacity_mask = merged["llaneid"].astype(str).str.strip().isin(failed_capacity_lane_ids)
+            for column_name in [
+                "lrunid",
+                "llaneid",
+                "lcxms",
+                "lsjfs",
+                "lanecreatetype",
+                "排机规则",
+                "index查重规则",
+            ]:
+                if column_name in merged.columns:
+                    merged.loc[failed_capacity_mask, column_name] = ""
+            for column_name in ["runid", "laneid"]:
+                if column_name in merged.columns:
+                    merged.loc[failed_capacity_mask, column_name] = pd.NA
+            lane_assigned_mask = lane_assigned_mask & (~failed_capacity_mask)
 
     # 生成 lanesorter：按 llaneid 升序为每条 Lane 编号（从1开始）
     lane_id_text = merged["llaneid"].astype(str).str.strip()
@@ -10370,7 +11474,6 @@ def arrange_library(
                 len(lane_seq_10_plus_24_lanes),
                 len(lane_seq_unassigned),
             )
-
     # ===== 步骤1.5: 1.1模式分流编排 =====
     mode_1_1_config = get_scheduling_config().get_mode_1_1_config()
     mode_1_1_lanes: List[LaneAssignment] = []

@@ -2,7 +2,7 @@
   "_meta": {
     "description": "1.1模式专属业务规则配置",
     "created": "2026-04-14 13:15:00",
-    "updated": "2026-05-06 12:21:39",
+    "updated": "2026-05-07 15:45:00",
     "note": "排机程序中1.1模式的文库级筛选、首轮分流、第二轮组织和pooling特例参数。lane容量由scheduling_rule_matrix.json负责。"
   },
   "single_library_contract_limit_gb": 500,
@@ -153,5 +153,7 @@
     }
   },
   "second_round_output_rate_threshold": 40.0,
-  "second_round_default_pooling_factor": 2.5
+  "second_round_default_pooling_factor": 2.5,
+  "first_round_enable_post_fill_optimization": true,
+  "first_round_second_pass_enable_post_fill_optimization": true
 }
