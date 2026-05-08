@@ -2,10 +2,10 @@
 Index验证器 - 基于真实数据验证的Index冲突检测
 经过生产数据验证的Index重复检测算法
 创建时间：2025-12-17 18:00:00
-更新时间：2026-04-12 10:00:00
+更新时间：2026-05-08 14:00:00
 
 算法来源：output/check_lane_index_repeat.new.py（真实数据验证通过）
-修改记录：2026-01-27 - 单端与双端比对时只核对P7端，不再核对P5端
+修改记录：2026-05-08 - 调整Index冲突判定：单双混排只核对P7，双端按P7/P5联合判定
 """
 
 from typing import List, Tuple, Optional
@@ -57,10 +57,14 @@ class IndexValidatorVerified:
     基于真实数据验证的Index校验器
     
     核心算法：
-    1. 重复判定规则：至少2个碱基不同才算不重复（same > L-2 判定为重复）
+    1. 重复判定规则：
+       - 6碱基：相同位数<=4不重复（>4判重复）
+       - 8碱基：相同位数<=6不重复（>6判重复）
+       - >8碱基：相同位数<=7不重复（>7判重复）
     2. 左端（P7）：左对齐比较前L个碱基
-    3. 右端（P5）：右对齐截取后L个碱基再比较
-    4. 单端vs双端：只核对P7端，P7重复即判定为冲突（2026-01-27修改）
+    3. 右端（P5）：右对齐截取后L个碱基比较
+    4. 单端/单双混排：只核对P7端
+    5. 双端混排：P7和P5都重复才判定冲突（任一端不重复即可通过）
     
     已在真实生产数据上验证通过
     """
@@ -353,18 +357,17 @@ class IndexValidatorVerified:
             # 左端不重复，整体不重复
             return False, None, same_left, None
         
-        # 2. 左端重复，根据单双端组合检查右端
+        # 2. 左端重复后，根据单双端组合继续判定
         if right1 is None and right2 is None:
             # 单端 vs 单端：只看左端，已重复
             return True, ConflictType.SINGLE_SINGLE, same_left, None
         
         elif right1 is not None and right2 is not None:
-            # 双端 vs 双端：右端也需要重复
+            # 双端 vs 双端：P7与P5都重复才判定冲突（任一端不重复即可通过）
             is_right_repeat, same_right = self._side_is_repeated_right(right1, right2)
             if is_right_repeat:
                 return True, ConflictType.DUAL_DUAL, same_left, same_right
-            else:
-                return False, None, same_left, same_right
+            return False, None, same_left, same_right
         
         else:
             # 单端 vs 双端：只核对P7端（左端），不核对P5端
@@ -375,8 +378,10 @@ class IndexValidatorVerified:
         """
         判断对齐后的序列是否重复
         
-        规则：至少2个碱基不同才算不重复
-        即：same > (L - 2) 判定为重复
+        规则：
+        - 6碱基：same > 4 判定重复
+        - 8碱基：same > 6 判定重复
+        - >8碱基：same > 7 判定重复
         
         Args:
             seq1, seq2: 已对齐的序列
@@ -396,8 +401,8 @@ class IndexValidatorVerified:
         
         same = sum(1 for a, b in zip(s1, s2) if a == b)
         
-        # 至少2个碱基不同才算不重复
-        is_repeated = same > (L - 2)
+        threshold = min(L - 2, 7)
+        is_repeated = same > threshold
         
         return is_repeated, same
     
