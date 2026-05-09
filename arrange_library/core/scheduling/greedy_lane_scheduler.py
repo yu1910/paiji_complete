@@ -2,7 +2,7 @@
 逐Lane贪心排机器 - 简化高效的排机算法
 采用逐Lane填充策略，一条Lane排满后再排下一条
 创建时间：2025-12-24 13:30:00
-更新时间：2026-05-07 16:28:00
+更新时间：2026-05-09 11:07:30
 
 核心思想：
 - 按优先级排序文库
@@ -586,48 +586,95 @@ class GreedyLaneScheduler:
         target_group: str,
         libs: List[EnhancedLibraryInfo],
         machine_type: str,
-    ) -> Optional[Dict[str, float]]:
+    ) -> Optional[Dict[str, Any]]:
         """解析碱基不均衡专Lane的容量区间与目标占比。"""
         if not libs:
             return None
 
-        metadata = {"is_dedicated_imbalance_lane": True}
-        selection = self._resolve_lane_capacity_rule(
-            libraries=libs,
-            machine_type=machine_type,
-            metadata=metadata,
-        )
         imbalance_ratio = float(self.imbalance_handler.get_group_data_ratio(target_group) or 0.0)
         balance_ratio = float(self.imbalance_handler.get_group_balance_ratio(target_group) or 0.0)
         if imbalance_ratio <= 0:
             return None
 
-        min_total = float(selection.effective_min_gb)
-        max_total = float(selection.effective_max_gb)
-        target_total = self._clamp_float(
-            float(selection.soft_target_gb or max_total or min_total),
-            min_total,
-            max_total,
-        )
+        total_imbalance_data = sum(lib.get_data_amount_gb() for lib in libs)
+        base_metadata = {"is_dedicated_imbalance_lane": True}
+        candidate_modes = ("1.1", "3.6T-NEW")
+        selected_profile: Optional[Dict[str, Any]] = None
+        selected_score: Optional[Tuple[int, float]] = None
 
-        if balance_ratio <= 1e-9:
-            imbalance_min = min_total
-            imbalance_max = max_total
-            target_imbalance = target_total
-        else:
-            imbalance_min = min_total * imbalance_ratio
-            imbalance_max = max_total * imbalance_ratio
-            target_imbalance = target_total * imbalance_ratio
+        for mode_priority, seq_mode in enumerate(candidate_modes):
+            mode_metadata = {
+                **base_metadata,
+                "seq_mode": seq_mode,
+                "lcxms": seq_mode,
+                "selected_seq_mode": seq_mode,
+            }
+            selection = self._resolve_lane_capacity_rule(
+                libraries=libs,
+                machine_type=machine_type,
+                metadata=mode_metadata,
+            )
+            min_total = float(selection.effective_min_gb)
+            max_total = float(selection.effective_max_gb)
+            target_total = self._clamp_float(
+                float(selection.soft_target_gb or max_total or min_total),
+                min_total,
+                max_total,
+            )
 
+            if balance_ratio <= 1e-9:
+                imbalance_min = min_total
+                imbalance_max = max_total
+                target_imbalance = target_total
+            else:
+                imbalance_min = min_total * imbalance_ratio
+                imbalance_max = max_total * imbalance_ratio
+                target_imbalance = target_total * imbalance_ratio
+
+            if total_imbalance_data + 1e-6 < imbalance_min:
+                continue
+
+            score = (mode_priority, abs(total_imbalance_data - target_imbalance))
+            if selected_score is None or score < selected_score:
+                selected_score = score
+                selected_profile = {
+                    "selection": selection,
+                    "seq_mode": seq_mode,
+                    "imbalance_ratio": imbalance_ratio,
+                    "balance_ratio": balance_ratio,
+                    "target_total_gb": target_total,
+                    "min_total_gb": min_total,
+                    "max_total_gb": max_total,
+                    "target_imbalance_gb": target_imbalance,
+                    "min_imbalance_gb": imbalance_min,
+                    "max_imbalance_gb": imbalance_max,
+                }
+                if seq_mode == "1.1":
+                    break
+
+        if selected_profile is None:
+            logger.info(
+                "专用Lane分组{}剩余合同量{:.1f}G无法满足1.1或3.6T-NEW有效容量下限",
+                target_group,
+                total_imbalance_data,
+            )
+            return None
+
+        selection = selected_profile["selection"]
         return {
-            "imbalance_ratio": imbalance_ratio,
-            "balance_ratio": balance_ratio,
-            "target_total_gb": target_total,
-            "min_total_gb": min_total,
-            "max_total_gb": max_total,
-            "target_imbalance_gb": target_imbalance,
-            "min_imbalance_gb": imbalance_min,
-            "max_imbalance_gb": imbalance_max,
+            "imbalance_ratio": float(selected_profile["imbalance_ratio"]),
+            "balance_ratio": float(selected_profile["balance_ratio"]),
+            "target_total_gb": float(selected_profile["target_total_gb"]),
+            "min_total_gb": float(selected_profile["min_total_gb"]),
+            "max_total_gb": float(selected_profile["max_total_gb"]),
+            "target_imbalance_gb": float(selected_profile["target_imbalance_gb"]),
+            "min_imbalance_gb": float(selected_profile["min_imbalance_gb"]),
+            "max_imbalance_gb": float(selected_profile["max_imbalance_gb"]),
+            "selected_seq_mode": str(selected_profile["seq_mode"]),
+            "capacity_rule_code": str(getattr(selection, "rule_code", "") or ""),
+            "capacity_effective_min_gb": float(getattr(selection, "effective_min_gb", 0.0) or 0.0),
+            "capacity_effective_max_gb": float(getattr(selection, "effective_max_gb", 0.0) or 0.0),
+            "loading_method": str(getattr(selection, "loading_method", "") or ""),
         }
 
     def _calculate_dedicated_balance_data(
@@ -2005,6 +2052,17 @@ class GreedyLaneScheduler:
 
                     lane.metadata["is_dedicated_imbalance_lane"] = True
                     lane.metadata["dedicated_group"] = target_group
+                    lane.metadata["selected_seq_mode"] = lane_profile["selected_seq_mode"]
+                    lane.metadata["seq_mode"] = lane_profile["selected_seq_mode"]
+                    lane.metadata["lcxms"] = lane_profile["selected_seq_mode"]
+                    lane.metadata["selected_round_label"] = "碱基不均衡专用Lane"
+                    lane.metadata["capacity_rule_code"] = lane_profile["capacity_rule_code"]
+                    lane.metadata["capacity_effective_min_gb"] = round(lane_profile["capacity_effective_min_gb"], 3)
+                    lane.metadata["capacity_effective_max_gb"] = round(lane_profile["capacity_effective_max_gb"], 3)
+                    lane.metadata["capacity_raw_business_gb"] = round(picked_data, 3)
+                    lane.metadata["capacity_balance_gb"] = round(balance_data, 3)
+                    lane.metadata["capacity_effective_total_gb"] = round(picked_data + balance_data, 3)
+                    lane.metadata["loading_method"] = lane_profile["loading_method"]
                     lane.metadata["dedicated_target_ratio"] = round(lane_profile["imbalance_ratio"], 4)
                     lane.metadata["dedicated_balance_ratio"] = round(lane_profile["balance_ratio"], 4)
                     lane.metadata["dedicated_imbalance_data_gb"] = round(picked_data, 3)
@@ -2019,7 +2077,12 @@ class GreedyLaneScheduler:
                         lane.libraries,
                         lane_machine_type_str,
                         lane=lane,
-                        metadata={"is_dedicated_imbalance_lane": True},
+                        metadata={
+                            "is_dedicated_imbalance_lane": True,
+                            "seq_mode": lane_profile["selected_seq_mode"],
+                            "lcxms": lane_profile["selected_seq_mode"],
+                            "selected_seq_mode": lane_profile["selected_seq_mode"],
+                        },
                     )
                     if effective_total > max_allowed + 1e-6 or effective_total < min_allowed - 1e-6:
                         remaining_all.extend(picked + next_remaining)
@@ -2030,7 +2093,8 @@ class GreedyLaneScheduler:
                         logger.info(
                             f"专用Lane {lane.lane_id} 形成成功 - 分组={target_group}, "
                             f"碱基不均衡={picked_data:.1f}G, 平衡文库={balance_data:.1f}G, "
-                            f"总量(含平衡)={effective_total:.1f}G"
+                            f"总量(含平衡)={effective_total:.1f}G, 模式={lane.metadata.get('selected_seq_mode')}, "
+                            f"容量规则={lane.metadata.get('capacity_rule_code')}"
                         )
                         remaining = next_remaining
                     else:
@@ -2071,17 +2135,27 @@ class GreedyLaneScheduler:
         
         # [2025-12-26 修复] 传入metadata指示这是碱基不均衡专用Lane，跳过碱基不均衡占比检查
         validation_metadata: Dict[str, object] = {"is_dedicated_imbalance_lane": True}
+        selected_seq_mode = str(lane.metadata.get("selected_seq_mode") or lane.metadata.get("seq_mode") or "").strip()
+        if selected_seq_mode:
+            validation_metadata["seq_mode"] = selected_seq_mode
+            validation_metadata["lcxms"] = selected_seq_mode
+            validation_metadata["selected_seq_mode"] = selected_seq_mode
         balance_data = lane.metadata.get("wkbalancedata")
         if balance_data is None:
             balance_data = lane.metadata.get("wkadd_balance_data")
         if balance_data is not None:
             validation_metadata["wkbalancedata"] = balance_data
         # 专Lane有效容量按原始文库+平衡文库核算，不能通过metadata放宽容量上限。
+        capacity_metadata: Dict[str, object] = {"is_dedicated_imbalance_lane": True}
+        if selected_seq_mode:
+            capacity_metadata["seq_mode"] = selected_seq_mode
+            capacity_metadata["lcxms"] = selected_seq_mode
+            capacity_metadata["selected_seq_mode"] = selected_seq_mode
         min_allowed, max_allowed = self._resolve_lane_capacity_limits(
             lane.libraries,
             machine_type_str,
             lane=lane,
-            metadata={"is_dedicated_imbalance_lane": True},
+            metadata=capacity_metadata,
         )
         effective_total = lane.total_data_gb + float(balance_data or 0.0)
         if effective_total > max_allowed + 1e-6 or effective_total < min_allowed - 1e-6:
@@ -5637,6 +5711,27 @@ class GreedyLaneScheduler:
         metadata: Dict[str, Any] = {}
 
         # 只透传会影响校验行为、且不会因种子文库变化而过期的元数据。
+        capacity_rule_code = str(lane_metadata.get("capacity_rule_code") or "").strip()
+        mode_locked_by_capacity_rule = False
+        if capacity_rule_code == "tj_1595_standard_pe150_25b":
+            metadata["selected_seq_mode"] = "3.6T-NEW"
+            metadata["seq_mode"] = "3.6T-NEW"
+            metadata["lcxms"] = "3.6T-NEW"
+            mode_locked_by_capacity_rule = True
+        elif capacity_rule_code.startswith("tj_1595_mode_1_1"):
+            metadata["selected_seq_mode"] = "1.1"
+            metadata["seq_mode"] = "1.1"
+            metadata["lcxms"] = "1.1"
+            mode_locked_by_capacity_rule = True
+        if not mode_locked_by_capacity_rule:
+            for mode_key in ("selected_seq_mode", "seq_mode", "lcxms", "sequencing_mode"):
+                mode_value = lane_metadata.get(mode_key)
+                if mode_value is not None and str(mode_value).strip():
+                    normalized_mode = str(mode_value).strip()
+                    metadata["selected_seq_mode"] = normalized_mode
+                    metadata["seq_mode"] = normalized_mode
+                    metadata["lcxms"] = normalized_mode
+                    break
         if lane_metadata.get("is_package_lane"):
             metadata["is_package_lane"] = True
         balance_data = lane_metadata.get("wkbalancedata")

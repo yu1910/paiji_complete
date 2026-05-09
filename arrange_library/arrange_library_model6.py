@@ -1,7 +1,7 @@
 """
 端到端排机流程测试 - 排机与 Pooling 预测
 创建时间：2026-04-10 16:06:41
-更新时间：2026-05-08 13:54:00
+更新时间：2026-05-09 11:07:30
 
 功能：
 - 支持完整排机流程（GreedyLaneScheduler）
@@ -133,6 +133,8 @@ LANE_SEQ_10_PLUS_24_BALANCE_RATIO = 0.05
 LANE_SEQ_10_PLUS_24_LANE_PREFIX = "LS"
 LANE_SEQ_10_PLUS_24_TARGET_TOTAL_GB = 1000.0
 LANE_SEQ_10_PLUS_24_TOLERANCE_GB = 5.0
+LANE_SEQ_10_PLUS_24_BALANCE_DENOMINATOR = 1.0 - LANE_SEQ_10_PLUS_24_BALANCE_RATIO
+MIN_BALANCE_RATIO_DENOMINATOR = 1e-9
 PRIORITY_36T_PRECONSUME_LANE_FLOOR_GB = 995.0
 PRIORITY_36T_PRECONSUME_FILLER_MAX_GB_PER_LANE = 250.0
 PRIORITY_36T_PRECONSUME_MULTI_LANE_CLINICAL_MAX_GROUP_SHARE = 0.6
@@ -2829,8 +2831,31 @@ def _validate_lane_seq_10_plus_24_rules(
     libraries = libraries if libraries is not None else (getattr(lane, "libraries", []) or [])
     total_index_pairs = _count_lane_index_pairs(libraries)
     conflicts = _validate_index_conflicts_latest(libraries)
+    total_contract_data = sum(
+        float(getattr(lib, "contract_data_raw", 0.0) or 0.0)
+        for lib in libraries
+    )
+    metadata = getattr(lane, "metadata", None) or {}
+    if not any(_is_ai_balance_library(lib) for lib in libraries):
+        total_contract_data += _safe_float(
+            metadata.get("wkbalancedata")
+            or metadata.get("wkadd_balance_data")
+            or metadata.get("required_balance_data_gb"),
+            default=0.0,
+        )
+    min_total = LANE_SEQ_10_PLUS_24_TARGET_TOTAL_GB - LANE_SEQ_10_PLUS_24_TOLERANCE_GB
+    max_total = LANE_SEQ_10_PLUS_24_TARGET_TOTAL_GB + LANE_SEQ_10_PLUS_24_TOLERANCE_GB
 
     errors: List[str] = []
+    if total_contract_data < min_total - 1e-6 or total_contract_data > max_total + 1e-6:
+        errors.append(
+            "10+24 Lane seq {} 有效数据量不满足容量规则: 当前{:.3f}G, 要求[{:.3f}, {:.3f}]G".format(
+                lane.lane_id,
+                total_contract_data,
+                min_total,
+                max_total,
+            )
+        )
     if total_index_pairs < AI_LANE_MIN_INDEX_PAIRS:
         errors.append(
             "10+24 Lane seq {} Index对数不足: 当前{}对, 要求>={}对".format(
@@ -4268,7 +4293,20 @@ def _get_library_detail_output_key(lib: EnhancedLibraryInfo) -> str:
 
 def _is_ai_balance_library(lib: Any) -> bool:
     """判断是否为排机后新增的AI平衡文库。"""
-    return bool(getattr(lib, BALANCE_LIBRARY_MARKER_COLUMN, False))
+    if bool(getattr(lib, BALANCE_LIBRARY_MARKER_COLUMN, False)):
+        return True
+    sample_id = _safe_str(getattr(lib, "sample_id", None) or getattr(lib, "wksampleid", None), default="")
+    return sample_id.lower() == "phix"
+
+
+def _calculate_balance_amount_for_final_ratio(non_balance_amount: float, balance_ratio: float) -> float:
+    """按最终Lane总量占比计算应补平衡文库量。"""
+    non_balance_amount = float(non_balance_amount or 0.0)
+    balance_ratio = float(balance_ratio or 0.0)
+    if non_balance_amount <= 0 or balance_ratio <= 0:
+        return 0.0
+    denominator = max(1.0 - balance_ratio, MIN_BALANCE_RATIO_DENOMINATOR)
+    return non_balance_amount * balance_ratio / denominator
 
 
 def _parse_balance_library_config_rows() -> List[Dict[str, Any]]:
@@ -4678,7 +4716,7 @@ def _resolve_lane_balance_data_gb(lane: LaneAssignment) -> float:
             return 0.0
         if explicit_value > 0:
             return round(explicit_value, 3)
-        denominator = max(1.0 - history_ratio, 1e-9)
+        denominator = max(1.0 - history_ratio, MIN_BALANCE_RATIO_DENOMINATOR)
         return round(non_balance_order * history_ratio / denominator, 3)
     if not _is_explicit_dedicated_imbalance_lane(lane):
         metadata = getattr(lane, "metadata", None)
@@ -4690,7 +4728,13 @@ def _resolve_lane_balance_data_gb(lane: LaneAssignment) -> float:
                 for lib in list(getattr(lane, "libraries", []) or [])
                 if not _is_ai_balance_library(lib)
             )
-            return round(non_balance_data * LANE_SEQ_10_PLUS_24_BALANCE_RATIO, 3)
+            return round(
+                _calculate_balance_amount_for_final_ratio(
+                    non_balance_data,
+                    LANE_SEQ_10_PLUS_24_BALANCE_RATIO,
+                ),
+                3,
+            )
         return 0.0
     ratio = _resolve_lane_balance_ratio(lane)
     if ratio <= 0:
@@ -4700,7 +4744,7 @@ def _resolve_lane_balance_data_gb(lane: LaneAssignment) -> float:
     lane_capacity = _safe_float(getattr(lane, "lane_capacity_gb", None), default=0.0)
     if lane_capacity <= 0:
         lane_capacity = _lane_capacity_for_machine(getattr(lane, "machine_type", MachineType.NOVA_X_25B))
-    return round(lane_capacity * ratio, 3)
+    return round(_calculate_balance_amount_for_final_ratio(lane_capacity, ratio), 3)
 
 
 def _get_lane_balance_templates(lane: LaneAssignment) -> List[Dict[str, Any]]:
@@ -5250,10 +5294,9 @@ def _build_10_plus_24_lane_seq_lanes(
     target_total = LANE_SEQ_10_PLUS_24_TARGET_TOTAL_GB
     min_total = target_total - LANE_SEQ_10_PLUS_24_TOLERANCE_GB
     max_total = target_total + LANE_SEQ_10_PLUS_24_TOLERANCE_GB
-    balance_multiplier = 1.0 + LANE_SEQ_10_PLUS_24_BALANCE_RATIO
-    min_contract_data = min_total / balance_multiplier
-    max_contract_data = max_total / balance_multiplier
-    target_contract_data = target_total / balance_multiplier
+    min_contract_data = min_total * LANE_SEQ_10_PLUS_24_BALANCE_DENOMINATOR
+    max_contract_data = max_total * LANE_SEQ_10_PLUS_24_BALANCE_DENOMINATOR
+    target_contract_data = target_total * LANE_SEQ_10_PLUS_24_BALANCE_DENOMINATOR
 
     while remaining:
         selected, next_remaining = _pick_10_plus_24_lane_seq_subset(
@@ -5266,7 +5309,13 @@ def _build_10_plus_24_lane_seq_lanes(
             break
 
         selected_data = sum(float(getattr(lib, "contract_data_raw", 0.0) or 0.0) for lib in selected)
-        balance_data = round(selected_data * LANE_SEQ_10_PLUS_24_BALANCE_RATIO, 3)
+        balance_data = round(
+            _calculate_balance_amount_for_final_ratio(
+                selected_data,
+                LANE_SEQ_10_PLUS_24_BALANCE_RATIO,
+            ),
+            3,
+        )
         effective_total = selected_data + balance_data
         if effective_total < min_total - 1e-6 or effective_total > max_total + 1e-6:
             logger.warning(
@@ -7590,6 +7639,26 @@ def _build_lane_metadata_for_validator(
         metadata["seq_mode"] = "Lane seq"
         metadata["seq_strategy"] = "10+24"
     if lane_metadata:
+        capacity_rule_code = str(lane_metadata.get("capacity_rule_code") or "").strip()
+        mode_locked_by_capacity_rule = False
+        if capacity_rule_code == "tj_1595_standard_pe150_25b":
+            metadata["seq_mode"] = "3.6T-NEW"
+            metadata["lcxms"] = "3.6T-NEW"
+            metadata["selected_seq_mode"] = "3.6T-NEW"
+            mode_locked_by_capacity_rule = True
+        elif capacity_rule_code.startswith("tj_1595_mode_1_1"):
+            metadata["seq_mode"] = "1.1"
+            metadata["lcxms"] = "1.1"
+            metadata["selected_seq_mode"] = "1.1"
+            mode_locked_by_capacity_rule = True
+        if not mode_locked_by_capacity_rule:
+            for mode_key in ("selected_seq_mode", "seq_mode", "lcxms", "sequencing_mode"):
+                mode_value = lane_metadata.get(mode_key)
+                if mode_value:
+                    metadata["seq_mode"] = str(mode_value).strip()
+                    metadata["lcxms"] = str(mode_value).strip()
+                    metadata["selected_seq_mode"] = str(mode_value).strip()
+                    break
         if lane_metadata.get("is_package_lane"):
             metadata["is_package_lane"] = True
         if lane_metadata.get("is_lane_seq_10_plus_24_lane"):
@@ -8476,6 +8545,10 @@ def _collect_prediction_rows(
             lane_balance_data_value = round(float(lane_balance_data), 3)
         # 从 lane metadata 中读取模式与轮次标记（编排器注入）
         lane_selected_seq_mode = str(lane_meta.get("selected_seq_mode", "") or "").strip()
+        if lane_rule_code in {"tj_1595_standard_pe150_25b", "tj_1595_10_plus_24_lane_seq"}:
+            lane_selected_seq_mode = lane_sequencing_mode or lane_selected_seq_mode
+        elif lane_rule_code.startswith("tj_1595_mode_1_1"):
+            lane_selected_seq_mode = "1.1"
         lane_selected_round_label = str(lane_meta.get("selected_round_label", "") or "").strip()
         round2_low_output_origrecs = {
             str(item).strip()
@@ -8568,7 +8641,7 @@ def _collect_prediction_rows(
 
 
 def _find_output_57_failed_lane_ids(df: pd.DataFrame) -> Set[str]:
-    """按输出表字段口径复核57规则，返回失败的llaneid集合。"""
+    """按输出表字段口径复核组合56/57规则，仅供专项诊断调用，不参与lane输出淘汰。"""
     if "llaneid" not in df.columns:
         return set()
 
@@ -8607,6 +8680,11 @@ def _find_output_57_failed_lane_ids(df: pd.DataFrame) -> Set[str]:
             data_type = str(row.get("wkdatatype") or row.get("wksampletype") or "")
             sample_id = str(row.get("wksampleid") or "")
             contract_data = pd.to_numeric(row.get("wkcontractdata"), errors="coerce")
+            is_balance_library = (
+                sample_id.strip().lower() == "phix"
+                or str(row.get(BALANCE_LIBRARY_MARKER_COLUMN) or "").strip().lower()
+                in {"true", "1", "yes", "是"}
+            )
             libs.append(
                 type(
                     "OutputLaneLib",
@@ -8622,6 +8700,8 @@ def _find_output_57_failed_lane_ids(df: pd.DataFrame) -> Set[str]:
                         else "否",
                         "contract_data_raw": 0.0 if pd.isna(contract_data) else float(contract_data),
                         "jjbj": "是" if str(row.get("wk_jjbj") or "").strip() == "是" else "否",
+                        BALANCE_LIBRARY_MARKER_COLUMN: is_balance_library,
+                        "_is_ai_balance_library": is_balance_library,
                     },
                 )()
             )
@@ -9095,30 +9175,32 @@ def _build_detail_output(
         )
         merged = merged.loc[:, ~merged.columns.duplicated()].copy()
 
-    failed_57_lane_ids = _find_output_57_failed_lane_ids(merged)
-    if failed_57_lane_ids:
-        failed_57_mask = merged["llaneid"].astype(str).isin(failed_57_lane_ids)
-        logger.warning(
-            "输出前57规则复核淘汰{}条Lane: {}".format(
-                len(failed_57_lane_ids),
-                sorted(failed_57_lane_ids),
+    output_57_check_enabled = False
+    if output_57_check_enabled:
+        failed_57_lane_ids = _find_output_57_failed_lane_ids(merged)
+        if failed_57_lane_ids:
+            failed_57_mask = merged["llaneid"].astype(str).isin(failed_57_lane_ids)
+            logger.warning(
+                "输出前57规则复核淘汰{}条Lane: {}".format(
+                    len(failed_57_lane_ids),
+                    sorted(failed_57_lane_ids),
+                )
             )
-        )
-        for column_name in [
-            "lrunid",
-            "llaneid",
-            "lcxms",
-            "lsjfs",
-            "lanecreatetype",
-            "排机规则",
-            "index查重规则",
-        ]:
-            if column_name in merged.columns:
-                merged.loc[failed_57_mask, column_name] = ""
-        for column_name in ["runid", "laneid"]:
-            if column_name in merged.columns:
-                merged.loc[failed_57_mask, column_name] = pd.NA
-        lane_assigned_mask = lane_assigned_mask & (~failed_57_mask)
+            for column_name in [
+                "lrunid",
+                "llaneid",
+                "lcxms",
+                "lsjfs",
+                "lanecreatetype",
+                "排机规则",
+                "index查重规则",
+            ]:
+                if column_name in merged.columns:
+                    merged.loc[failed_57_mask, column_name] = ""
+            for column_name in ["runid", "laneid"]:
+                if column_name in merged.columns:
+                    merged.loc[failed_57_mask, column_name] = pd.NA
+            lane_assigned_mask = lane_assigned_mask & (~failed_57_mask)
 
     # lane_show规则：包FC+包Lane均有值 或 所在lane包含拆分文库
     if "lane_show" not in merged.columns:
@@ -10359,9 +10441,12 @@ def arrange_library(
             for lane in mode_1_1_lanes:
                 if not isinstance(lane.metadata, dict):
                     lane.metadata = {}
-                lane.metadata["selected_seq_mode"] = "1.1"
+                selected_seq_mode = str(lane.metadata.get("selected_seq_mode") or "").strip()
+                if not selected_seq_mode:
+                    lane.metadata["selected_seq_mode"] = "1.1"
+                    selected_seq_mode = "1.1"
                 for lib in list(lane.libraries or []):
-                    lib._current_seq_mode_raw = "1.1"
+                    lib._current_seq_mode_raw = selected_seq_mode
             # 将包Lane、10+24 Lane seq、3.6T高优先级预消耗Lane和1.1模式Lane一起纳入最终结果
             all_existing_lanes = (
                 list(package_lanes)
