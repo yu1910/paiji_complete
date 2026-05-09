@@ -1,7 +1,7 @@
 """
 端到端排机流程测试 - 排机与 Pooling 预测
 创建时间：2026-04-10 16:06:41
-更新时间：2026-05-09 15:14:10
+更新时间：2026-05-09 16:06:20
 
 功能：
 - 支持完整排机流程（GreedyLaneScheduler）
@@ -6539,6 +6539,266 @@ def _collect_detail_output_libraries(solution: Any) -> List[EnhancedLibraryInfo]
     return detail_libraries
 
 
+def _collect_split_family_state(solution: Any) -> Dict[str, Dict[str, Any]]:
+    """收集当前解中拆分家族的成Lane/未分配状态。"""
+    family_state: Dict[str, Dict[str, Any]] = {}
+
+    def ensure_entry(family_id: str) -> Dict[str, Any]:
+        return family_state.setdefault(
+            family_id,
+            {
+                "assigned": [],
+                "unassigned": [],
+                "expected": 0,
+                "source": None,
+            },
+        )
+
+    for lane in list(getattr(solution, "lane_assignments", []) or []):
+        for lib in list(getattr(lane, "libraries", []) or []):
+            family_id = _get_split_family_id_for_lane_build(lib)
+            if not family_id:
+                continue
+            expected_count = int(getattr(lib, "total_fragments", 0) or 0)
+            if expected_count <= 1:
+                continue
+            entry = ensure_entry(family_id)
+            entry["assigned"].append((lane, lib))
+            entry["expected"] = max(int(entry["expected"] or 0), expected_count)
+            source_library = getattr(lib, "_split_source_library", None)
+            if source_library is not None:
+                entry["source"] = source_library
+
+    for lib in list(getattr(solution, "unassigned_libraries", []) or []):
+        family_id = _get_split_family_id_for_lane_build(lib)
+        if not family_id:
+            continue
+        expected_count = int(getattr(lib, "total_fragments", 0) or 0)
+        if expected_count <= 1:
+            continue
+        entry = ensure_entry(family_id)
+        entry["unassigned"].append(lib)
+        entry["expected"] = max(int(entry["expected"] or 0), expected_count)
+        source_library = getattr(lib, "_split_source_library", None)
+        if source_library is not None:
+            entry["source"] = source_library
+
+    return family_state
+
+
+def _lane_is_valid_after_split_repair(lane: LaneAssignment, validator: Any) -> bool:
+    """判断拆分修复后的lane是否仍符合终态校验。"""
+    if _is_package_lane_assignment(lane):
+        return True
+    metadata = _build_lane_metadata_for_validator(lane.lane_id, lane.metadata)
+    result = _validate_lane_with_latest_index(
+        validator=validator,
+        libraries=list(getattr(lane, "libraries", []) or []),
+        lane_id=str(lane.lane_id),
+        machine_type=lane.machine_type.value if lane.machine_type else "Nova X-25B",
+        metadata=metadata,
+    )
+    return bool(result.is_valid)
+
+
+def _try_reorder_lanes_to_keep_split_families_in_same_run(solution: Any) -> int:
+    """尝试通过调整lane顺序让完整拆分家族落入同一个8-lane run。"""
+    lanes = list(getattr(solution, "lane_assignments", []) or [])
+    if not lanes:
+        return 0
+    family_state = _collect_split_family_state(solution)
+    priority_lane_ids: List[str] = []
+    for entry in family_state.values():
+        expected_count = int(entry.get("expected", 0) or 0)
+        assigned_items = list(entry.get("assigned", []) or [])
+        if expected_count <= 1 or len(assigned_items) != expected_count or entry.get("unassigned"):
+            continue
+        current_runids = {
+            index // 8
+            for index, lane in enumerate(lanes)
+            if any(lane is assigned_lane for assigned_lane, _ in assigned_items)
+        }
+        if len(current_runids) <= 1:
+            continue
+        for lane, _ in assigned_items:
+            lane_id = str(lane.lane_id)
+            if lane_id not in priority_lane_ids:
+                priority_lane_ids.append(lane_id)
+
+    if not priority_lane_ids:
+        return 0
+
+    priority_set = set(priority_lane_ids)
+    priority_lanes = [lane for lane in lanes if str(lane.lane_id) in priority_set]
+    other_lanes = [lane for lane in lanes if str(lane.lane_id) not in priority_set]
+    solution.lane_assignments = priority_lanes + other_lanes
+    return len(priority_lanes)
+
+
+def _try_place_unassigned_split_fragments_into_existing_run(solution: Any, validator: Any) -> int:
+    """尝试把未分配拆分片段补回同一run内的合规lane。"""
+    lanes = list(getattr(solution, "lane_assignments", []) or [])
+    if not lanes:
+        return 0
+    family_state = _collect_split_family_state(solution)
+    placed_count = 0
+    for family_id, entry in family_state.items():
+        expected_count = int(entry.get("expected", 0) or 0)
+        assigned_items = list(entry.get("assigned", []) or [])
+        pending_items = list(entry.get("unassigned", []) or [])
+        if expected_count <= 1 or not pending_items:
+            continue
+        if len(assigned_items) + len(pending_items) != expected_count:
+            continue
+        assigned_lane_ids = {str(lane.lane_id) for lane, _ in assigned_items}
+        if assigned_items:
+            lane_indices = [idx for idx, lane in enumerate(lanes) if str(lane.lane_id) in assigned_lane_ids]
+            if not lane_indices:
+                continue
+            target_run_index = min(lane_indices) // 8
+        else:
+            target_run_index = 0
+        run_lanes = lanes[target_run_index * 8:(target_run_index + 1) * 8]
+        for fragment in list(pending_items):
+            placed = False
+            for lane in run_lanes:
+                lane_id = str(lane.lane_id)
+                if lane_id in assigned_lane_ids:
+                    continue
+                if any(_get_split_family_id_for_lane_build(lib) == family_id for lib in list(lane.libraries or [])):
+                    continue
+                lane.add_library(fragment)
+                if _lane_is_valid_after_split_repair(lane, validator):
+                    solution.unassigned_libraries = [
+                        lib for lib in list(getattr(solution, "unassigned_libraries", []) or [])
+                        if id(lib) != id(fragment)
+                    ]
+                    assigned_lane_ids.add(lane_id)
+                    placed_count += 1
+                    placed = True
+                    break
+                lane.remove_library(fragment)
+            if not placed:
+                break
+    return placed_count
+
+
+def _repair_split_families_before_final_rollback(
+    solution: Any,
+    validator: Any,
+    max_attempts: int = 2,
+) -> Dict[str, int]:
+    """终态回滚前尝试修复拆分家族原子性问题。"""
+    stats = {"attempts": 0, "reordered_lanes": 0, "placed_fragments": 0}
+    for _ in range(max(0, int(max_attempts))):
+        stats["attempts"] += 1
+        reordered_lanes = _try_reorder_lanes_to_keep_split_families_in_same_run(solution)
+        placed_fragments = _try_place_unassigned_split_fragments_into_existing_run(solution, validator)
+        stats["reordered_lanes"] += reordered_lanes
+        stats["placed_fragments"] += placed_fragments
+        if reordered_lanes == 0 and placed_fragments == 0:
+            break
+    return stats
+
+
+def _rollback_incomplete_split_families_in_final_solution(solution: Any) -> Dict[str, int]:
+    """终态复核拆分家族，未全部成Lane或跨runid时恢复为原始文库。"""
+    family_state = _collect_split_family_state(solution)
+    family_assigned: Dict[str, List[Tuple[LaneAssignment, EnhancedLibraryInfo]]] = {
+        family_id: list(entry.get("assigned", []) or [])
+        for family_id, entry in family_state.items()
+    }
+    family_unassigned: Dict[str, List[EnhancedLibraryInfo]] = {
+        family_id: list(entry.get("unassigned", []) or [])
+        for family_id, entry in family_state.items()
+    }
+    expected_counts: Dict[str, int] = {
+        family_id: int(entry.get("expected", 0) or 0)
+        for family_id, entry in family_state.items()
+    }
+    source_libraries: Dict[str, EnhancedLibraryInfo] = {
+        family_id: entry.get("source")
+        for family_id, entry in family_state.items()
+        if entry.get("source") is not None
+    }
+
+    runid_by_lane = _build_runid_by_lane(list(getattr(solution, "lane_assignments", []) or []))
+    rollback_family_ids: Set[str] = set()
+    cross_run_family_ids: Set[str] = set()
+    incomplete_family_ids: Set[str] = set()
+    for family_id, expected_count in expected_counts.items():
+        assigned_items = family_assigned.get(family_id, [])
+        assigned_count = len(assigned_items)
+        unassigned_count = len(family_unassigned.get(family_id, []))
+        if expected_count <= 1:
+            continue
+        if assigned_count != expected_count or unassigned_count > 0:
+            rollback_family_ids.add(family_id)
+            incomplete_family_ids.add(family_id)
+            continue
+        assigned_runids = {
+            str(runid_by_lane.get(lane.lane_id, "") or "").strip()
+            for lane, _ in assigned_items
+            if str(runid_by_lane.get(lane.lane_id, "") or "").strip()
+        }
+        if len(assigned_runids) > 1:
+            rollback_family_ids.add(family_id)
+            cross_run_family_ids.add(family_id)
+
+    if not rollback_family_ids:
+        return {
+            "rollback_families": 0,
+            "removed_fragments": 0,
+            "restored_originals": 0,
+            "incomplete_families": 0,
+            "cross_run_families": 0,
+        }
+
+    removed_fragment_ids: Set[int] = set()
+    for family_id in rollback_family_ids:
+        for lane, lib in family_assigned.get(family_id, []):
+            lane.remove_library(lib)
+            removed_fragment_ids.add(id(lib))
+
+    solution.lane_assignments = [
+        lane for lane in list(getattr(solution, "lane_assignments", []) or [])
+        if list(getattr(lane, "libraries", []) or [])
+    ]
+    solution.unassigned_libraries = [
+        lib for lib in list(getattr(solution, "unassigned_libraries", []) or [])
+        if id(lib) not in removed_fragment_ids
+        and _get_split_family_id_for_lane_build(lib) not in rollback_family_ids
+    ]
+
+    existing_source_keys: Set[str] = {
+        _get_library_source_origrec_key(lib)
+        for lib in list(getattr(solution, "unassigned_libraries", []) or [])
+    }
+    restored_originals = 0
+    for family_id in rollback_family_ids:
+        source_library = source_libraries.get(family_id)
+        if source_library is None:
+            continue
+        source_library.is_split = False
+        source_library.wkissplit = ""
+        source_library.split_status = "rolled_back"
+        source_key = _get_library_source_origrec_key(source_library)
+        if source_key and source_key in existing_source_keys:
+            continue
+        solution.unassigned_libraries.append(source_library)
+        if source_key:
+            existing_source_keys.add(source_key)
+        restored_originals += 1
+
+    return {
+        "rollback_families": len(rollback_family_ids),
+        "removed_fragments": len(removed_fragment_ids),
+        "restored_originals": restored_originals,
+        "incomplete_families": len(incomplete_family_ids),
+        "cross_run_families": len(cross_run_family_ids),
+    }
+
+
 def _normalize_special_split_token(value: Any) -> List[str]:
     """将wkspecialsplits值规范化为token列表。"""
     raw = _safe_str(value, default="").lower()
@@ -8535,7 +8795,10 @@ def _collect_prediction_rows(
             lane_balance_data_value = round(float(lane_balance_data), 3)
         # 从 lane metadata 中读取模式与轮次标记（编排器注入）
         lane_selected_seq_mode = str(lane_meta.get("selected_seq_mode", "") or "").strip()
-        if lane_rule_code in {"tj_1595_standard_pe150_25b", "tj_1595_10_plus_24_lane_seq"}:
+        if _is_package_lane_assignment(lane) or bool(lane_meta.get("is_lane_seq_10_plus_24_lane")):
+            lane_selected_seq_mode = "Lane seq"
+            lane_sequencing_mode = "Lane seq"
+        elif lane_rule_code in {"tj_1595_standard_pe150_25b", "tj_1595_10_plus_24_lane_seq"}:
             lane_selected_seq_mode = lane_sequencing_mode or lane_selected_seq_mode
         elif lane_rule_code.startswith("tj_1595_mode_1_1"):
             lane_selected_seq_mode = "1.1"
@@ -10074,7 +10337,13 @@ def arrange_library(
         
         for run in package_result.runs:
             for lane_result in run.lanes:
-                lane_metadata = {'is_package_lane': True, 'package_id': lane_result.package_id}
+                lane_metadata = {
+                    'is_package_lane': True,
+                    'package_id': lane_result.package_id,
+                    'selected_seq_mode': 'Lane seq',
+                    'seq_mode': 'Lane seq',
+                    'lcxms': 'Lane seq',
+                }
                 if float(getattr(lane_result, "planned_balance_data_gb", 0.0) or 0.0) > 0:
                     lane_metadata["wkbalancedata"] = round(
                         float(getattr(lane_result, "planned_balance_data_gb", 0.0) or 0.0),
@@ -10511,9 +10780,36 @@ def arrange_library(
             )
     _validate_final_package_lanes(solution)
 
+    final_cleanup_validator = LaneValidator(strict_mode=True)
+    split_repair_stats = _repair_split_families_before_final_rollback(
+        solution=solution,
+        validator=final_cleanup_validator,
+        max_attempts=2,
+    )
+    if split_repair_stats["reordered_lanes"] > 0 or split_repair_stats["placed_fragments"] > 0:
+        logger.info(
+            "拆分原子性修复完成: 尝试{}轮，重排Lane={}，补入片段={}".format(
+                split_repair_stats["attempts"],
+                split_repair_stats["reordered_lanes"],
+                split_repair_stats["placed_fragments"],
+            )
+        )
+
+    # 拆分原子性复核：终态过滤前先回滚不完整或跨runid的拆分家族，再让受影响Lane继续接受终态校验。
+    final_split_stats = _rollback_incomplete_split_families_in_final_solution(solution)
+    if final_split_stats["rollback_families"] > 0:
+        logger.warning(
+            "拆分原子性复核回滚: 家族={}，不完整={}，跨runid={}，撤回片段={}，恢复原始文库={}".format(
+                final_split_stats["rollback_families"],
+                final_split_stats["incomplete_families"],
+                final_split_stats["cross_run_families"],
+                final_split_stats["removed_fragments"],
+                final_split_stats["restored_originals"],
+            )
+        )
+
     # 终态总复核：平衡文库注入完成后，对所有非包Lane再走一遍严格校验。
     # 若 Lane 仍不合规（容量/混排等），整体回退到未分配池，防止不合格 Lane 流入输出。
-    final_cleanup_validator = LaneValidator(strict_mode=True)
     cleanup_stats = _final_non_package_validation_cleanup(solution, final_cleanup_validator)
     if cleanup_stats["removed_lanes"] > 0:
         logger.warning(
@@ -10522,6 +10818,26 @@ def arrange_library(
                 cleanup_stats["recovered_libs"],
             )
         )
+
+    post_cleanup_split_stats = _rollback_incomplete_split_families_in_final_solution(solution)
+    if post_cleanup_split_stats["rollback_families"] > 0:
+        logger.warning(
+            "终态过滤后拆分兜底回滚: 家族={}，不完整={}，跨runid={}，撤回片段={}，恢复原始文库={}".format(
+                post_cleanup_split_stats["rollback_families"],
+                post_cleanup_split_stats["incomplete_families"],
+                post_cleanup_split_stats["cross_run_families"],
+                post_cleanup_split_stats["removed_fragments"],
+                post_cleanup_split_stats["restored_originals"],
+            )
+        )
+        second_cleanup_stats = _final_non_package_validation_cleanup(solution, final_cleanup_validator)
+        if second_cleanup_stats["removed_lanes"] > 0:
+            logger.warning(
+                "拆分兜底回滚后二次终态总复核: 淘汰{}条不合规Lane，回收{}个文库".format(
+                    second_cleanup_stats["removed_lanes"],
+                    second_cleanup_stats["recovered_libs"],
+                )
+            )
 
     # 收集预测结果
     pred_df = _collect_prediction_rows(
