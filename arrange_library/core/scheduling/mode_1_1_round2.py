@@ -1,7 +1,7 @@
 """
 1.1模式第二轮候选识别与分组模块
 创建时间：2026-04-14 13:40:00
-更新时间：2026-05-07 10:28:18
+更新时间：2026-05-09 15:14:10
 
 职责：
 - 从待排文库中识别 lastlaneround == "1.1第一轮" 且历史测序模式属于 1/1.0/1.1 的第二轮候选
@@ -231,9 +231,9 @@ class Mode11Round2Handler:
             return raw_value
         return tokens[0]
 
-    def _get_last_output_rate(self, lib: EnhancedLibraryInfo) -> Optional[float]:
-        """获取历史产出率，兼容 dataclass 字段与运行时透传字段。"""
-        for attr_name in ("last_outrate", "_last_outrate_raw", "wklastoutrate"):
+    def _get_output_rate(self, lib: EnhancedLibraryInfo) -> Optional[float]:
+        """获取当前加测产出率，统一使用 wkoutputrate/OUTPUTRATE 口径。"""
+        for attr_name in ("output_rate", "outputrate", "wkoutputrate"):
             value = getattr(lib, attr_name, None)
             if value in (None, ""):
                 continue
@@ -258,8 +258,8 @@ class Mode11Round2Handler:
         for lib in group.libraries:
             if not self._is_add_test_like(lib):
                 continue
-            last_outrate = self._get_last_output_rate(lib)
-            if last_outrate is not None and last_outrate < self._output_rate_threshold:
+            output_rate = self._get_output_rate(lib)
+            if output_rate is not None and output_rate < self._output_rate_threshold:
                 return True
         return False
 
@@ -269,8 +269,8 @@ class Mode11Round2Handler:
         for lib in group.libraries:
             if not self._is_add_test_like(lib):
                 continue
-            last_outrate = self._get_last_output_rate(lib)
-            if last_outrate is None or last_outrate >= self._output_rate_threshold:
+            output_rate = self._get_output_rate(lib)
+            if output_rate is None or output_rate >= self._output_rate_threshold:
                 continue
             origrec = str(getattr(lib, "origrec", "") or "").strip()
             if origrec:

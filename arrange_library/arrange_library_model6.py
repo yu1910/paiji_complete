@@ -1,7 +1,7 @@
 """
 端到端排机流程测试 - 排机与 Pooling 预测
 创建时间：2026-04-10 16:06:41
-更新时间：2026-05-09 11:07:30
+更新时间：2026-05-09 15:14:10
 
 功能：
 - 支持完整排机流程（GreedyLaneScheduler）
@@ -4685,13 +4685,6 @@ def _resolve_mode_1_1_round2_order_for_balance_library(
     if add_test_output_rate is not None and add_test_output_rate > 0:
         return round(float(contract_data) / float(add_test_output_rate), 6)
 
-    current_order = _get_lib_attr_float(
-        lib,
-        ["split_order_amount", "order_data_amount", "orderdata", "lorderdata"],
-    )
-    if current_order is not None and current_order > 0:
-        return round(float(current_order), 6)
-
     return None
 
 
@@ -6644,16 +6637,12 @@ def _resolve_explicit_lane_loading_concentration(
         _matches_lane_seq_strategy_keyword(lib, "10+24")
         for lib in libraries
     )
-    if has_10_plus_24 and any(
+    has_atac_sample_type = any(
         _library_sample_type_matches_rule(lib, LANE_LOADING_10_PLUS_24_ATAC_TYPES)
         for lib in libraries
-    ):
-        return 1.9, "10_plus_24_atac_1_9"
-
-    if lane_sample_types and lane_sample_types.issubset(LANE_LOADING_COMBO_GROUP_A):
-        if _lane_contains_customer_prefixed_sample_type(lane_sample_types):
-            return 2.5, "special_10x_combo_group_a_customer_2_5"
-        return 1.78, "special_10x_combo_group_a_non_customer_1_78"
+    )
+    if has_10_plus_24 or has_atac_sample_type:
+        return 1.9, "10_plus_24_or_atac_1_9"
 
     if lane_sample_types and lane_sample_types.issubset(LANE_LOADING_COMBO_GROUP_B):
         if _lane_contains_customer_prefixed_sample_type(lane_sample_types):
@@ -6749,8 +6738,10 @@ def _match_lane_loading_concentration_rule(
 
 def _resolve_lane_loading_concentration(
     libraries: List[EnhancedLibraryInfo],
+    lane_id: str = "",
+    lane_metadata: Optional[Dict[str, Any]] = None,
 ) -> Tuple[Optional[float], str]:
-    """按显式业务规则优先，其次走统一规则表计算Lane上机浓度。"""
+    """严格按显式业务规则解析上机浓度，未命中规则时不赋值。"""
     if not libraries:
         return None, "empty_lane"
     lane_sample_types = _get_lane_sample_types(libraries)
@@ -6760,7 +6751,8 @@ def _resolve_lane_loading_concentration(
     )
     if explicit_concentration is not None:
         return explicit_concentration, explicit_rule
-    return get_scheduling_config().resolve_loading_concentration(libraries)
+
+    return None, "no_loading_concentration_rule_matched"
 
 
 def _resolve_lane_output_rule_fields(
@@ -7343,7 +7335,7 @@ def _apply_mode_1_1_round2_historical_order_rule_to_prediction_df(
     prediction_df: pd.DataFrame,
     output_path: Optional[Path] = None,
 ) -> pd.DataFrame:
-    """对1.1第二轮普通样本按历史产出率重算下单量。"""
+    """对1.1第二轮普通样本按 wkoutputrate 重算下单量。"""
     if prediction_df is None or prediction_df.empty:
         return prediction_df
 
@@ -7380,30 +7372,28 @@ def _apply_mode_1_1_round2_historical_order_rule_to_prediction_df(
         if contract_data is None or contract_data <= 0:
             continue
 
-        historical_outrate = _resolve_historical_outrate(
-            last_outrate=_get_row_attr_float(row, ["wklastoutrate"]),
-            last_output=_get_row_attr_float(row, ["wklastoutput"]),
-            last_order=_get_row_attr_float(row, ["wklastorderdata"]),
+        output_rate = _normalize_rate_to_decimal(
+            _get_row_attr_float(row, ["wkoutputrate", "outputrate", "output_rate"])
         )
-        if historical_outrate is None or historical_outrate <= 0:
+        if output_rate is None or output_rate <= 0:
             missing_history_count += 1
             continue
 
-        rounded_order = round(float(contract_data) / float(historical_outrate), 6)
+        rounded_order = round(float(contract_data) / float(output_rate), 6)
         df.at[idx, "lorderdata"] = rounded_order
         if "predicted_lorderdata" in df.columns:
             df.at[idx, "predicted_lorderdata"] = rounded_order
         applied_count += 1
 
     logger.info(
-        "1.1第二轮历史产出率规则应用完成: 覆盖{}条, 历史值缺失{}条".format(
+        "1.1第二轮wkoutputrate规则应用完成: 覆盖{}条, wkoutputrate缺失{}条".format(
             applied_count, missing_history_count
         )
     )
 
     if output_path is not None:
         df.to_csv(output_path, index=False)
-        logger.info(f"已写回1.1第二轮历史产出率修正结果: {output_path}")
+        logger.info(f"已写回1.1第二轮wkoutputrate修正结果: {output_path}")
 
     return df
 
@@ -7470,10 +7460,6 @@ def _resolve_mode_1_1_round2_order_for_balance_row(row: pd.Series) -> Optional[f
     )
     if add_test_output_rate is not None and add_test_output_rate > 0:
         return round(float(contract_data) / float(add_test_output_rate), 6)
-
-    current_order = _get_row_attr_float(row, ["lorderdata", "predicted_lorderdata"])
-    if current_order is not None and current_order > 0:
-        return round(float(current_order), 6)
 
     return None
 
@@ -8505,11 +8491,15 @@ def _collect_prediction_rows(
     logger.info(f"{tag} 收集排机结果，用于后续 prediction_delivery 预测")
 
     runid_by_lane = _build_runid_by_lane(lanes)
-    for lane in lanes:
+    for lane_sorter, lane in enumerate(lanes, start=1):
         libs = list(lane.libraries or [])
         if not libs:
             continue
-        lane_loading_concentration, lane_concentration_rule = _resolve_lane_loading_concentration(libs)
+        lane_loading_concentration, lane_concentration_rule = _resolve_lane_loading_concentration(
+            libs,
+            lane_id=lane.lane_id,
+            lane_metadata=lane.metadata,
+        )
         lane_loading_method, lane_sequencing_mode, lane_rule_code = _resolve_lane_output_rule_fields(
             libraries=libs,
             machine_type=lane.machine_type,
@@ -8589,6 +8579,7 @@ def _collect_prediction_rows(
                     "detail_row_key": _get_library_detail_output_key(lib),
                     "runid": runid,
                     "lane_id": lane.lane_id,
+                    "lanesorter": lane_sorter,
                     "lsjnd": (
                         None
                         if lane_loading_concentration is None
@@ -8928,6 +8919,7 @@ def _build_detail_output(
         for missing_column in [
             "runid",
             "lane_id",
+            "lanesorter",
             "lsjnd",
             "resolved_lsjfs",
             "resolved_lcxms",
@@ -8953,6 +8945,7 @@ def _build_detail_output(
                 "origrec_key",
                 "runid",
                 "lane_id",
+                "lanesorter",
                 "lsjnd",
                 "resolved_lsjfs",
                 "resolved_lcxms",
@@ -9123,6 +9116,12 @@ def _build_detail_output(
         if column_name in merged.columns:
             _ensure_object_column(merged, column_name)
             merged.loc[unassigned_output_mask, column_name] = ""
+
+    # lanesorter用于下游按Lane稳定排序：同一Lane内所有行使用同一个顺序号，未成Lane留空。
+    if "lanesorter" not in merged.columns:
+        merged["lanesorter"] = pd.NA
+    merged.loc[~lane_assigned_mask, "lanesorter"] = pd.NA
+    merged["lanesorter"] = pd.to_numeric(merged["lanesorter"], errors="coerce").astype("Int64")
 
     # lsjfs优先读取统一规则表中的loading_method，未成Lane记录保持原值
     if "lsjfs" not in merged.columns:
@@ -9908,6 +9907,11 @@ def _run_prediction_delivery(input_data: Union[Path, pd.DataFrame], output_path:
         if column_name not in prediction_df.columns:
             prediction_df[column_name] = pd.NA
         prediction_df[column_name] = pd.NA
+
+    if "lanesorter" in prediction_df.columns:
+        prediction_df["lanesorter"] = pd.to_numeric(
+            prediction_df["lanesorter"], errors="coerce"
+        ).astype("Int64")
 
     prediction_df = prediction_df.drop(
         columns=[
