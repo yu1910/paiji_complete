@@ -1,6 +1,6 @@
 # 合同数据量规则配置
 # 创建时间：2025-10-09 10:00:00
-# 更新时间：2025-12-01 10:00:00
+# 更新时间：2026-05-11 16:02:39
 # 数据来源：天津-规则表6：生产自主包Lane/散样排机的Lane数据量
 # 参考文档：docs/排机规则文档.md#合同数据量校验-规则1
 
@@ -139,9 +139,11 @@ workflows:
         - priority: "其他"
           product_line: ["S", "Z", "ZS"]
           sequencing_mode: "3.6T-New"
-          lane_volume_gb: 975
-          fc_volume_gb: 7800
-          float_range_gb: 10
+          lane_volume_gb: 1050
+          min_lane_volume_gb: 1000
+          max_lane_volume_gb: 1100
+          fc_volume_gb: 8400
+          float_range_gb: 5
           lane_count: 8
           loading_method: "25B"
           min_data_volume: 1150
@@ -149,18 +151,22 @@ workflows:
         - priority: "临检"
           product_line: ["S", "Z", "ZS"]
           sequencing_mode: "3.6T-New"
-          lane_volume_gb: 975
-          fc_volume_gb: 7800
-          float_range_gb: 10
+          lane_volume_gb: 1050
+          min_lane_volume_gb: 1000
+          max_lane_volume_gb: 1100
+          fc_volume_gb: 8400
+          float_range_gb: 5
           lane_count: 8
           loading_method: "25B"
           
         - priority: "YC"
           product_line: ["S", "Z", "ZS"]
           sequencing_mode: "3.6T-New"
-          lane_volume_gb: 975
-          fc_volume_gb: 7800
-          float_range_gb: 10
+          lane_volume_gb: 1050
+          min_lane_volume_gb: 1000
+          max_lane_volume_gb: 1100
+          fc_volume_gb: 8400
+          float_range_gb: 5
           lane_count: 8
           loading_method: "25B"
     
@@ -171,27 +177,33 @@ workflows:
         - priority: "其他"
           product_line: ["S", "Z", "ZS"]
           sequencing_mode: "3.6T-New"
-          lane_volume_gb: 975
-          fc_volume_gb: 7800
-          float_range_gb: 10
+          lane_volume_gb: 1050
+          min_lane_volume_gb: 1000
+          max_lane_volume_gb: 1100
+          fc_volume_gb: 8400
+          float_range_gb: 5
           lane_count: 8
           loading_method: "25B"
           
         - priority: "临检"
           product_line: ["S", "Z", "ZS"]
           sequencing_mode: "3.6T-New"
-          lane_volume_gb: 975
-          fc_volume_gb: 7800
-          float_range_gb: 10
+          lane_volume_gb: 1050
+          min_lane_volume_gb: 1000
+          max_lane_volume_gb: 1100
+          fc_volume_gb: 8400
+          float_range_gb: 5
           lane_count: 8
           loading_method: "25B"
           
         - priority: "YC"
           product_line: ["S", "Z", "ZS"]
           sequencing_mode: "3.6T-New"
-          lane_volume_gb: 975
-          fc_volume_gb: 7800
-          float_range_gb: 10
+          lane_volume_gb: 1050
+          min_lane_volume_gb: 1000
+          max_lane_volume_gb: 1100
+          fc_volume_gb: 8400
+          float_range_gb: 5
           lane_count: 8
           loading_method: "25B"
 

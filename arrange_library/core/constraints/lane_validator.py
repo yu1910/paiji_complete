@@ -1,7 +1,7 @@
 """
 成Lane校验程序
 创建时间：2025-12-02 18:00:00
-更新时间：2026-05-08 14:00:00
+更新时间：2026-05-11 16:02:39
 
 变更记录：
 - 2026-03-06: 移除类内LANE_CAPACITY/LANE_MIN_DATA/LANE_MAX_DATA死代码常量，
@@ -23,7 +23,7 @@
 - 10bp占比：10bp Index占比>=40%（混排时）
 - 单端占比：单端Index占比<30%
 - 碱基不均衡占比：碱基不均衡文库占比<=40%
-- 容量校验：Lane总数据量由规则矩阵决定，Nova X-25B标准规则effective_min=970G，effective_max=980G
+- 容量校验：Lane总数据量由规则矩阵决定，Nova X-25B标准规则合同容量1000G-1100G，effective_min=995G，effective_max=1105G
 - Peak Size校验：1.1模式跳过；3.6T-NEW等其他模式最大-最小<=150bp 或 150bp窗口覆盖>=75%
 - 特殊文库限制：特殊文库总量<=阈值（不再限制类型数量）
 - FC最小数据量校验：Nova X-25B整个FC最小1150G
@@ -147,6 +147,7 @@ class LaneValidator:
         self.base_imbalance_keywords: List[str] = limits.base_imbalance_keywords
         self.special_library_keywords: List[str] = limits.special_library_keywords
         self._imbalance_handler = BaseImbalanceHandler()
+        self._current_metadata: Dict = {}
 
         # 复用同一个 IndexConflictValidator 实例，避免每次 _validate_index_conflicts
         # 调用时都重复初始化（每次初始化会打印 INFO 日志，高频调用时有明显开销）
@@ -182,7 +183,8 @@ class LaneValidator:
         """
         if metadata is None:
             metadata = {}
-        
+        self._current_metadata = dict(metadata)
+
         # 从metadata中获取模式
         lane_mode = metadata.get('mode', lane_mode)
         errors = []
@@ -260,7 +262,10 @@ class LaneValidator:
                     warnings.append(index_10bp_result)
         
         # 4. 单端Index占比校验
-        single_end_result = self._validate_single_end_ratio(libraries)
+        # 纯非10bp专用Lane允许集中排 6/8bp Index，不套用普通Lane 30%单端Index限制。
+        single_end_result = None
+        if not is_pure_non_10bp_lane:
+            single_end_result = self._validate_single_end_ratio(libraries)
         if single_end_result:
             if single_end_result.severity == ValidationSeverity.ERROR:
                 errors.append(single_end_result)
@@ -651,7 +656,10 @@ class LaneValidator:
             )
 
         has_balanced = (total_data - imbalance_data) > 1e-6
-        if has_balanced and self._imbalance_handler:
+        should_check_mix_56_57 = bool(
+            getattr(self, "_current_metadata", {}).get("check_56_57_mix_rule", False)
+        )
+        if has_balanced and should_check_mix_56_57 and self._imbalance_handler:
             is_compatible, reason = self._imbalance_handler.check_mix_compatibility(
                 libraries,
                 enforce_total_limit=False,
@@ -773,36 +781,51 @@ class LaneValidator:
         lane_mode: str,
         metadata: Optional[Dict] = None,
     ) -> bool:
-        """判断Lane是否属于1.1模式，1.1模式不执行Peak Size限制。"""
-        mode_candidates = []
+        """判断Lane是否属于1.1模式，1.1模式不执行Peak Size限制。
+
+        实时Peak检查以当前选定模式为准：优先读取selected_seq_mode/lcxms等
+        Lane级元数据；只有Lane级模式缺失时才回退到文库当前模式。
+        历史lastcxms不参与当前Lane Peak判断，避免3.6T-NEW被误判为1.1。
+        """
         metadata = metadata or {}
-        for key in ("mode", "lcxms", "seq_mode", "selected_seq_mode", "current_seq_mode", "lane_sj_mode"):
+        lane_level_candidates = []
+        for key in ("selected_seq_mode", "lcxms", "seq_mode", "sequencing_mode", "current_seq_mode", "lane_sj_mode", "mode"):
             value = metadata.get(key)
             if value is not None:
-                mode_candidates.append(value)
+                lane_level_candidates.append(value)
         if lane_mode:
-            mode_candidates.append(lane_mode)
+            lane_level_candidates.append(lane_mode)
+
+        def _is_mode_1_1_value(value: object) -> bool:
+            text = str(value or "").strip().upper().replace("模式", "")
+            return text in {"1", "1.0", "1.1"} or text.startswith("1.1") or text.startswith("1.0")
+
+        def _is_mode_3_6t_value(value: object) -> bool:
+            text = str(value or "").strip().upper().replace(" ", "")
+            return text in {"3.6T-NEW", "3.6TNEW"}
+
+        for value in lane_level_candidates:
+            if _is_mode_3_6t_value(value):
+                return False
+            if _is_mode_1_1_value(value):
+                return True
 
         for lib in libraries:
             for attr_name in (
+                "_current_seq_mode_raw",
                 "lcxms",
                 "current_seq_mode",
                 "lane_sj_mode",
                 "seq_mode",
                 "selected_seq_mode",
-                "last_cxms",
-                "lastcxms",
             ):
                 value = getattr(lib, attr_name, None)
-                if value is not None:
-                    mode_candidates.append(value)
-
-        for value in mode_candidates:
-            text = str(value).strip().upper().replace("模式", "")
-            if text in {"1", "1.0", "1.1"}:
-                return True
-            if text.startswith("1.1") or text.startswith("1.0"):
-                return True
+                if value is None:
+                    continue
+                if _is_mode_3_6t_value(value):
+                    return False
+                if _is_mode_1_1_value(value):
+                    return True
         return False
     
     def _validate_peak_size(self, libraries: List[EnhancedLibraryInfo]) -> Optional[ValidationError]:

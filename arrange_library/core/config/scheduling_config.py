@@ -1,7 +1,7 @@
 """
 排机系统统一配置管理模块
 创建时间：2025-12-03 14:00:00
-更新时间：2026-04-28 15:50:00
+更新时间：2026-05-11 16:02:39
 
 集中管理所有排机相关的配置常量，避免硬编码分散在各个模块中。
 配置来源：docs/排机规则文档.md、config/business_rules.yaml
@@ -43,8 +43,8 @@ class PriorityLevel(Enum):
 class LaneCapacityConfig:
     """Lane容量配置"""
     # 标准Lane容量（非1.0模式，Nova X-25B PE150策略）
-    # 目标975G，tolerance=5G，有效区间[970G, 980G]
-    standard_capacity: float = 975.0
+    # 合同容量1000G-1100G，tolerance=5G，有效区间[995G, 1105G]
+    standard_capacity: float = 1050.0
     standard_tolerance: float = 5.0
     
     # 1.0模式Lane容量
@@ -60,7 +60,7 @@ class LaneCapacityConfig:
     
     # 不同机器类型的容量（fallback值，优先由规则矩阵决定）
     machine_capacities: Dict[str, float] = field(default_factory=lambda: {
-        'Nova X-25B': 975.0,        # 目标975G，有效区间[970G, 980G]
+        'Nova X-25B': 1050.0,       # 目标1050G，合同区间[1000G, 1100G]
         'Nova X-10B': 380.0,
         'Novaseq': 880.0,
         'T7': 1670.0,

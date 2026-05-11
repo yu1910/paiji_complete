@@ -2,7 +2,7 @@
 逐Lane贪心排机器 - 简化高效的排机算法
 采用逐Lane填充策略，一条Lane排满后再排下一条
 创建时间：2025-12-24 13:30:00
-更新时间：2026-05-09 11:07:30
+更新时间：2026-05-11 14:55:00
 
 核心思想：
 - 按优先级排序文库
@@ -46,7 +46,7 @@ from arrange_library.core.ai.pooling_coefficient_optimizer import (
 from arrange_library.core.config.scheduling_config import get_scheduling_config, SchedulingMode
 from arrange_library.models.library_info import EnhancedLibraryInfo, MachineType
 from arrange_library.core.constraints.index_validator_verified import IndexConflictValidator
-from arrange_library.core.constraints.lane_validator import LaneValidator
+from arrange_library.core.constraints.lane_validator import LaneValidator, LaneValidationResult, ValidationRuleType
 from arrange_library.core.scheduling.scheduling_types import LaneAssignment, SchedulingSolution
 from arrange_library.core.preprocessing.base_imbalance_handler import BaseImbalanceHandler
 from arrange_library.core.preprocessing.batch_rule_analyzer import BatchRuleAnalyzer, BatchAnalysisReport
@@ -1446,6 +1446,7 @@ class GreedyLaneScheduler:
                 family_libraries.append(source_library)
             is_3_6t_new_family = self._is_3_6t_new_split_family(family_libraries)
             if source_library is not None:
+                source_library.wkissplit = ""
                 source_key = str(getattr(source_library, "origrec", "") or id(source_library))
                 if is_3_6t_new_family:
                     setattr(source_library, "_split_family_rollback_unassigned_only", True)
@@ -4578,6 +4579,7 @@ class GreedyLaneScheduler:
         for family_id in family_ids:
             source_library = family_context.get(family_id, {}).get("source_library")
             if source_library is not None:
+                source_library.wkissplit = ""
                 setattr(source_library, "_split_family_rollback_unassigned_only", True)
                 restored.append(source_library)
         return restored
@@ -5563,6 +5565,22 @@ class GreedyLaneScheduler:
         result = validator.validate_lane(
             selected, lane_id="TEMP_RESIDUAL", machine_type=machine_type, metadata=metadata
         )
+        if not result.is_valid and use_dedicated_imbalance:
+            filtered_errors = [
+                error for error in result.errors
+                if error.rule_type != ValidationRuleType.BASE_IMBALANCE_RATIO
+            ]
+            filtered_warnings = [
+                warning for warning in result.warnings
+                if warning.rule_type != ValidationRuleType.BASE_IMBALANCE_RATIO
+            ]
+            if not filtered_errors and not (validator.strict_mode and filtered_warnings):
+                result = LaneValidationResult(
+                    lane_id=result.lane_id,
+                    is_valid=True,
+                    errors=[],
+                    warnings=filtered_warnings,
+                )
         if not result.is_valid:
             error_msgs = [str(e) for e in result.errors]
             logger.info(f"残余精选: 验证失败 - {', '.join(error_msgs[:2])}")
@@ -5611,7 +5629,8 @@ class GreedyLaneScheduler:
             machine_type=machine_type_enum,
             lane_capacity_gb=self.config.lane_capacity_gb,
             libraries=selected,
-            total_data_gb=total_data
+            total_data_gb=total_data,
+            metadata=dict(metadata),
         )
         
         # [2025-12-31 新增] 最终完整验证：检查所有规则
@@ -5743,9 +5762,9 @@ class GreedyLaneScheduler:
             metadata["wkbalancedata"] = balance_data
 
         metadata.update({
-            'is_dedicated_imbalance_lane': lane.lane_id.startswith('DL_'),
-            'is_pure_non_10bp_lane': lane.lane_id.startswith('NB_'),
-            'is_backbone_lane': lane.lane_id.startswith('BL_')
+            'is_dedicated_imbalance_lane': lane.lane_id.startswith('DL_') or bool(lane_metadata.get('is_dedicated_imbalance_lane')),
+            'is_pure_non_10bp_lane': lane.lane_id.startswith('NB_') or bool(lane_metadata.get('is_pure_non_10bp_lane')),
+            'is_backbone_lane': lane.lane_id.startswith('BL_') or bool(lane_metadata.get('is_backbone_lane'))
         })
         if lane.libraries:
             first_lib = lane.libraries[0]

@@ -1,7 +1,7 @@
 """
 包Lane/FC排机程序
 创建时间：2025-12-02 17:40:00
-更新时间：2026-04-02 00:00:00
+更新时间：2026-05-11 13:52:00
 
 依据《排机流程规划》步骤二.1实现：
 - 根据包Lane编号/Lane ID/FC/RunCycle进行固定分组
@@ -380,7 +380,9 @@ class PackageLaneScheduler:
             total_contract_data = float(getattr(lib, 'contract_data_raw', 0.0) or 0.0)
             split_values = self._split_contract_data_evenly(total_contract_data, len(package_lane_numbers))
             original_library_id = (
-                str(getattr(lib, 'origrec', '') or '').strip()
+                str(getattr(lib, 'fragment_id', '') or '').strip()
+                or str(getattr(lib, '_detail_output_key', '') or '').strip()
+                or str(getattr(lib, 'origrec', '') or '').strip()
                 or str(getattr(lib, 'library_code', '') or '').strip()
                 or family_id
             )
@@ -670,16 +672,7 @@ class PackageLaneScheduler:
                 unprocessed.extend(libs)
                 continue
 
-            constraint_messages = self.scheduling_config.validate_lane_constraints(
-                libraries=libs,
-                machine_type=machine_type,
-            )
-            if constraint_messages:
-                failed_packages[f"package_lane_{pkg_id}"] = "；".join(constraint_messages)
-                unprocessed.extend(libs)
-                continue
-
-            # 包Lane规则：按整条Lane统计Index对总数，需≥5。
+            # 包Lane只执行专属规则：容量、Index对数、Index冲突。
             total_index_pairs = self._count_lane_index_pairs(libs)
             if total_index_pairs < 5:
                 failed_packages[f"package_lane_{pkg_id}"] = (
@@ -687,14 +680,6 @@ class PackageLaneScheduler:
                 )
                 unprocessed.extend(libs)
                 logger.warning(f"包Lane {pkg_id} Index对数不足：当前共{total_index_pairs}对（要求整条包Lane≥5对）")
-                continue
-            
-            # 碱基不均衡限制校验（规则文档Line 81-82）
-            imbalance_valid, imbalance_reason = self._validate_package_lane_imbalance(libs)
-            if not imbalance_valid:
-                failed_packages[f"package_lane_{pkg_id}"] = imbalance_reason
-                unprocessed.extend(libs)
-                logger.warning(f"包Lane {pkg_id} 碱基不均衡限制不满足：{imbalance_reason}")
                 continue
             
             # Index冲突校验

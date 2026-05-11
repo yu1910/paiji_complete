@@ -1,6 +1,6 @@
 # 机器类型配置文件
 # 创建时间：2025-09-10 16:15:00
-# 更新时间：2025-12-01 10:00:00
+# 更新时间：2026-05-11 16:02:39
 # 参考文档：docs/排机规则文档.md#数据量校验规则
 
 # Nova X-10B 配置 (小容量高精度机器)
@@ -39,14 +39,14 @@ nova_x_10b:
       score: 0.6
 
 # Nova X-25B 配置 (大容量高吞吐机器)
-# 参考规则文档：Lane数据量970G-980G（PE150策略，目标975G，tolerance=5G）
+# 参考规则文档：Lane合同数据量1000G-1100G（PE150策略，目标1050G，浮动±5G）
 nova_x_25b:
-  capacity: 975.0                    # GB 标称容量 - PE150策略目标975G
-  tolerance: 5.0                     # GB 容差范围 - PE150策略±5G（970G-980G）
+  capacity: 1050.0                   # GB 标称容量 - PE150策略目标1050G
+  tolerance: 5.0                     # GB 容差范围 - PE150策略±5G（有效995G-1105G）
   buffer_strategy: "adaptive"        # 改为自适应策略以应对巨大容量变异
   max_large_libraries: 15           # 增加以支持超容量Lane(最多349个文库)
   preferred_library_size: 12.9       # GB 调整为生产数据平均值
-  overflow_threshold: 990.0          # GB 溢出预警阈值 - PE150策略上限
+  overflow_threshold: 1105.0         # GB 溢出预警阈值 - PE150策略有效上限
   
   # 缓冲参数 - 根据生产数据巨大变异性调整
   base_buffer: 0.85                  # 基础缓冲因子 (15%余量) - 保守应对超容量

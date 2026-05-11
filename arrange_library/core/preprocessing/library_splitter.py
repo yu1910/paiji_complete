@@ -1,7 +1,7 @@
 """
 文库拆分器
 创建时间：2025-11-20 10:00:00
-更新时间：2026-05-06 14:35:00
+更新时间：2026-05-11 13:15:14
 功能：严格按照《排机规则文档》执行文库拆分，支持多级拆分
 """
 
@@ -99,21 +99,11 @@ class LibrarySplitter:
         2. 3.6T-NEW模式单index合同数据量 > 100G 时拆分
         3. 3.6T-NEW模式多index合同数据量 > 300G 时拆分
         """
-        # 1. 包Lane编号文库绝对禁止拆分
-        if self._has_package_lane_binding(lib):
-            logger.debug(
-                "  文库 {} 存在包Lane编号 {}，禁止拆分".format(
-                    getattr(lib, "origrec", ""),
-                    str(getattr(lib, "package_lane_number", None) or getattr(lib, "baleno", None) or "").strip(),
-                )
-            )
+        # 1. 包FC/指定Lane不拆分；带包Lane编号的文库按包Lane规则允许拆分。
+        if not self._has_package_lane_binding(lib) and self._has_fixed_lane_binding(lib):
             return False
 
-        # 2. 包FC/指定Lane不拆分
-        if self._has_fixed_lane_binding(lib):
-            return False
-
-        # 3. 读取合同量
+        # 2. 读取合同量
         try:
             data_amount = float(lib.contract_data_raw or 0)
         except (ValueError, TypeError):
@@ -211,10 +201,12 @@ class LibrarySplitter:
         ``llastcxms`` 仅用于 1.1 模式分流和第二轮候选识别，不参与拆分模式判断。
         """
         mode_candidates = [
+            getattr(lib, "_current_seq_mode_raw", None),
+            getattr(lib, "selected_seq_mode", None),
+            getattr(lib, "current_seq_mode", None),
+            getattr(lib, "lcxms", None),
             getattr(lib, "_lane_sj_mode_raw", None),
             getattr(lib, "lane_sj_mode", None),
-            getattr(lib, "_current_seq_mode_raw", None),
-            getattr(lib, "current_seq_mode", None),
             getattr(lib, "seq_scheme", None),
             getattr(lib, "test_no", None),
         ]
@@ -319,15 +311,33 @@ class LibrarySplitter:
 
         split_libs = []
         split_data_amount = data_amount / split_count
+        split_single_index_data = self._split_optional_float_value(
+            getattr(lib, "single_index_data", None),
+            split_count,
+        )
+        split_ten_bp_data = self._split_optional_float_value(
+            getattr(lib, "ten_bp_data", None),
+            split_count,
+        )
 
         original_aidbid = str(
             getattr(lib, "wkaidbid", None) or getattr(lib, "aidbid", None) or ""
         ).strip()
-        original_total_contract = float(lib.contract_data_raw or 0.0)
+        raw_total_contract = (
+            getattr(lib, "wktotalcontractdata", None)
+            if getattr(lib, "wktotalcontractdata", None) not in (None, "")
+            else getattr(lib, "total_contract_data", None)
+        )
+        try:
+            original_total_contract = float(raw_total_contract)
+        except (TypeError, ValueError):
+            original_total_contract = float(lib.contract_data_raw or 0.0)
 
         for i in range(split_count):
             new_lib = copy.deepcopy(lib)
             new_lib.contract_data_raw = split_data_amount
+            new_lib.single_index_data = split_single_index_data
+            new_lib.ten_bp_data = split_ten_bp_data
             new_lib.is_split = True
             new_lib.wkissplit = "yes"
             new_lib.split_status = "completed"
@@ -357,6 +367,16 @@ class LibrarySplitter:
             split_libs.append(new_lib)
         
         return split_libs
+
+    @staticmethod
+    def _split_optional_float_value(value: Any, split_count: int) -> Any:
+        """按拆分份数均分可选数值字段，空值保持不变。"""
+        if value in (None, ""):
+            return value
+        try:
+            return float(value) / split_count
+        except (TypeError, ValueError):
+            return value
     
     def _calculate_split_count(
         self,
