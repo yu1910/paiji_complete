@@ -1,7 +1,7 @@
 """
 端到端排机流程测试 - 排机与 Pooling 预测
 创建时间：2026-04-10 16:06:41
-更新时间：2026-05-12 11:37:55
+更新时间：2026-05-12 16:35:00
 
 功能：
 - 支持完整排机流程（GreedyLaneScheduler）
@@ -10284,7 +10284,8 @@ def _build_detail_output(
     assigned_lane_keys = pd.MultiIndex.from_frame(
         merged.loc[lane_assigned_mask, ["lrunid", "llaneid"]]
     )
-    merged.loc[lane_assigned_mask, "lanecontractdata"] = assigned_lane_keys.map(lane_contract_by_key).astype(float).round(3)
+    lane_contract_values = pd.Series(assigned_lane_keys.map(lane_contract_by_key), index=merged.index[lane_assigned_mask])
+    merged.loc[lane_assigned_mask, "lanecontractdata"] = pd.to_numeric(lane_contract_values, errors="coerce").round(3)
     merged.loc[unassigned_output_mask, "lanecontractdata"] = ""
     merged.drop(columns=["_lane_contract_sum_for_output"], inplace=True)
 

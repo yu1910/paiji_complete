@@ -4,5 +4,5 @@
 # 53_sta.csv 验证1.1第一轮的数据， 1.1第二轮测试数据_补列.csv 验证1.1第二轮
 python "./arrange_library/arrange_library_model6.py" \
   --mode arrange \
-  --data-file "./arrange_library/209_sta.csv" \
-  --output-file "./arrange_library/209_sta_arrange.csv"
+  --data-file "./arrange_library/252_sta.csv" \
+  --output-file "./arrange_library/252_sta_arrange.csv"
