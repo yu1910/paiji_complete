@@ -1,7 +1,7 @@
 """
 端到端排机流程测试 - 排机与 Pooling 预测
 创建时间：2026-04-10 16:06:41
-更新时间：2026-05-11 15:15:00
+更新时间：2026-05-12 11:37:55
 
 功能：
 - 支持完整排机流程（GreedyLaneScheduler）
@@ -84,6 +84,16 @@ _QUICK_INDEX_VALIDATION_RESULT_CACHE: Dict[
     Tuple[bool, Tuple[Tuple[str, Optional[str]], ...]],
 ] = {}
 _SCATTERED_MIX_SORT_CACHE: Dict[Tuple[int, ...], Tuple[EnhancedLibraryInfo, ...]] = {}
+_RESCUE_RULE_BUCKET_CACHE: Dict[Tuple[str, Tuple[str, ...]], List[Tuple[str, List[EnhancedLibraryInfo]]]] = {}
+_MAIN_RULE_BUCKET_SCHEDULE_CACHE: Dict[
+    Tuple[Tuple[str, ...], bool],
+    Tuple[List[Any], List[EnhancedLibraryInfo], Set[str], int],
+] = {}
+_BUCKET_TOTAL_DATA_CACHE: Dict[Tuple[str, ...], float] = {}
+_LIGHT_POOL_FEASIBILITY_CACHE: Dict[
+    Tuple[str, Tuple[Tuple[str, str], ...], Tuple[str, ...]],
+    Tuple[bool, str],
+] = {}
 _COMPACT_LIBRARY_IDENTITY_BY_KEY: Dict[str, int] = {}
 _COMPACT_LIBRARY_IDENTITY_NEXT = 0
 from arrange_library.core.data import load_libraries_from_csv
@@ -929,7 +939,189 @@ def _resolve_lane_capacity_limits(
 
 def _total_lane_data(libraries: List[EnhancedLibraryInfo]) -> float:
     """计算文库列表的总数据量"""
-    return sum(lib.get_data_amount_gb() for lib in libraries)
+    if not libraries:
+        return 0.0
+    signature = _build_library_identity_signature(libraries, canonicalize=True)
+    cached = _BUCKET_TOTAL_DATA_CACHE.get(signature)
+    if cached is not None:
+        return cached
+    total = sum(lib.get_data_amount_gb() for lib in libraries)
+    if len(_BUCKET_TOTAL_DATA_CACHE) >= 8192:
+        _BUCKET_TOTAL_DATA_CACHE.clear()
+    _BUCKET_TOTAL_DATA_CACHE[signature] = total
+    return total
+
+
+def _merge_partial_schedule_solutions(partial_solutions: List[Any]) -> Any:
+    """合并多个分桶排机结果。"""
+    from types import SimpleNamespace
+
+    merged = SimpleNamespace(
+        lane_assignments=[],
+        unassigned_libraries=[],
+        split_rollback_mode_1_1_libraries=[],
+    )
+    for solution in partial_solutions:
+        if solution is None:
+            continue
+        merged.lane_assignments.extend(list(getattr(solution, "lane_assignments", []) or []))
+        merged.unassigned_libraries.extend(list(getattr(solution, "unassigned_libraries", []) or []))
+        merged.split_rollback_mode_1_1_libraries.extend(
+            list(getattr(solution, "split_rollback_mode_1_1_libraries", []) or [])
+        )
+    return merged
+
+
+def _schedule_single_bucket_with_cache(
+    *,
+    scheduler: GreedyLaneScheduler,
+    bucket_libraries: List[EnhancedLibraryInfo],
+    post_fill_optimization_enabled: bool,
+) -> Any:
+    """单个规则桶调度，复用主流程分桶缓存。"""
+    bucket_signature = _build_library_identity_signature(bucket_libraries, canonicalize=True)
+    cache_key = (bucket_signature, bool(post_fill_optimization_enabled))
+    cached = _MAIN_RULE_BUCKET_SCHEDULE_CACHE.get(cache_key)
+    if cached is not None:
+        cached_solutions, _, _, _ = cached
+        if cached_solutions:
+            return cached_solutions[0]
+
+    bucket_solution = scheduler.schedule(
+        bucket_libraries,
+        keep_failed_lanes=True,
+        libraries_already_split=True,
+        perform_presplit_family_rollback=False,
+        enable_post_fill_optimization=post_fill_optimization_enabled,
+    )
+    _MAIN_RULE_BUCKET_SCHEDULE_CACHE[cache_key] = (
+        [bucket_solution],
+        list(getattr(bucket_solution, "unassigned_libraries", []) or []),
+        {
+            _get_library_identity_key(lib)
+            for lane in list(getattr(bucket_solution, "lane_assignments", []) or [])
+            for lib in list(getattr(lane, "libraries", []) or [])
+        },
+        1,
+    )
+    return bucket_solution
+
+
+def _schedule_with_rule_bucket_prescheduling(
+    *,
+    scheduler: GreedyLaneScheduler,
+    libraries: List[EnhancedLibraryInfo],
+    post_fill_optimization_enabled: bool,
+) -> Any:
+    """主流程规则分桶预调度：先按规则桶独立排，再汇总尾货统一补排。"""
+    from types import SimpleNamespace
+
+    if not libraries:
+        return SimpleNamespace(lane_assignments=[], unassigned_libraries=[])
+
+    machine_type = MachineType.NOVA_X_25B
+    rule_buckets = _build_rescue_rule_buckets(libraries, "MAIN")
+    if not rule_buckets:
+        return scheduler.schedule(
+            libraries,
+            keep_failed_lanes=True,
+            libraries_already_split=True,
+            perform_presplit_family_rollback=False,
+            enable_post_fill_optimization=post_fill_optimization_enabled,
+        )
+
+    partial_solutions: List[Any] = []
+    tail_pool: List[EnhancedLibraryInfo] = []
+    scheduled_library_keys: Set[str] = set()
+    bucket_count = 0
+
+    for bucket_name, bucket_libraries in rule_buckets:
+        if not bucket_libraries:
+            continue
+        bucket_count += 1
+        feasible, reason = _quick_check_pool_feasibility(
+            pool=bucket_libraries,
+            machine_type=machine_type,
+            lane_metadata=None,
+            stage_label=f"MAIN_{bucket_name}",
+        )
+        if not feasible:
+            logger.info(
+                "主流程规则分桶跳过: bucket={}, count={}, reason={}".format(
+                    bucket_name,
+                    len(bucket_libraries),
+                    reason,
+                )
+            )
+            tail_pool.extend(bucket_libraries)
+            continue
+
+        min_allowed, _ = _resolve_lane_capacity_limits(bucket_libraries, machine_type)
+        total_data = _total_lane_data(bucket_libraries)
+        if total_data + 1e-6 < min_allowed:
+            logger.info(
+                "主流程规则分桶尾货回收: bucket={}, count={}, data={:.1f}G不足门槛{:.1f}G".format(
+                    bucket_name,
+                    len(bucket_libraries),
+                    total_data,
+                    min_allowed,
+                )
+            )
+            tail_pool.extend(bucket_libraries)
+            continue
+
+        logger.info(
+            "主流程规则分桶预调度: bucket={}, count={}, data={:.1f}G".format(
+                bucket_name,
+                len(bucket_libraries),
+                total_data,
+            )
+        )
+        bucket_solution = _schedule_single_bucket_with_cache(
+            scheduler=scheduler,
+            bucket_libraries=bucket_libraries,
+            post_fill_optimization_enabled=post_fill_optimization_enabled,
+        )
+        partial_solutions.append(bucket_solution)
+        for lane in list(getattr(bucket_solution, "lane_assignments", []) or []):
+            for lib in list(getattr(lane, "libraries", []) or []):
+                scheduled_library_keys.add(_get_library_identity_key(lib))
+        tail_pool.extend(list(getattr(bucket_solution, "unassigned_libraries", []) or []))
+
+    dedup_tail_pool: List[EnhancedLibraryInfo] = []
+    seen_tail_keys: Set[str] = set()
+    for lib in tail_pool:
+        lib_key = _get_library_identity_key(lib)
+        if lib_key in scheduled_library_keys or lib_key in seen_tail_keys:
+            continue
+        seen_tail_keys.add(lib_key)
+        dedup_tail_pool.append(lib)
+
+    logger.info(
+        "主流程规则分桶预调度完成: 分桶={}，桶后尾货={}个/{:.1f}G".format(
+            bucket_count,
+            len(dedup_tail_pool),
+            _total_lane_data(dedup_tail_pool),
+        )
+    )
+
+    if dedup_tail_pool:
+        logger.info(
+            "主流程尾货统一补排启动: count={}, data={:.1f}G".format(
+                len(dedup_tail_pool),
+                _total_lane_data(dedup_tail_pool),
+            )
+        )
+        tail_solution = _schedule_single_bucket_with_cache(
+            scheduler=scheduler,
+            bucket_libraries=dedup_tail_pool,
+            post_fill_optimization_enabled=post_fill_optimization_enabled,
+        )
+        partial_solutions.append(tail_solution)
+
+    merged_solution = _merge_partial_schedule_solutions(partial_solutions)
+    _deduplicate_solution_libraries(merged_solution)
+    return merged_solution
 
 
 def _is_priority_36t_preconsume_lane_capacity_valid(
@@ -3390,6 +3582,257 @@ def _build_scattered_mix_candidate_order(
     return prioritized
 
 
+def _is_truthy_flag(value: Any) -> bool:
+    """宽松识别业务布尔标记。"""
+    normalized = _normalize_text_for_match(value)
+    return normalized in {"Y", "YES", "TRUE", "1", "是", "需", "需要", "包LANE", "包FC"}
+
+
+def _safe_library_text(lib: EnhancedLibraryInfo, *field_names: str) -> str:
+    """按候选字段名顺序提取文库文本字段。"""
+    for field_name in field_names:
+        value = getattr(lib, field_name, None)
+        if value not in (None, ""):
+            return str(value).strip()
+    return ""
+
+
+def _is_manual_or_risk_library(lib: EnhancedLibraryInfo) -> bool:
+    """识别风险建库、手工模板、客户自建库等高约束文库。"""
+    combined_text = " ".join(
+        _normalize_text_for_match(text)
+        for text in [
+            getattr(lib, "risk_build_flag", None),
+            getattr(lib, "wkjkhj", None),
+            getattr(lib, "remarks", None),
+            getattr(lib, "machine_note", None),
+        ]
+        if text not in (None, "")
+    )
+    return any(keyword in combined_text for keyword in ["风险", "RISK", "手工", "模板", "客户自建", "自建库"])
+
+
+def _is_customer_library_candidate(lib: EnhancedLibraryInfo) -> bool:
+    """识别客户文库。"""
+    customer_flag = _normalize_text_for_match(getattr(lib, "customer_library", None))
+    lab_type = _normalize_text_for_match(getattr(lib, "lab_type", None))
+    return _is_truthy_flag(getattr(lib, "customer_library", None)) or "客户" in customer_flag or "CUSTOMER" in lab_type
+
+
+def _is_scattered_library_candidate(lib: EnhancedLibraryInfo) -> bool:
+    """识别散样/混排优先处理文库。"""
+    if _get_scattered_mix_priority_rank(lib) < 2:
+        return True
+    text = " ".join(
+        _normalize_text_for_match(_safe_library_text(lib, field_name))
+        for field_name in ["sub_project_name", "remarks", "machine_note", "add_test_note", "add_tests_remark"]
+    )
+    return any(keyword in text for keyword in ["散", "混排", "SCATTERED", "MIX"])
+
+
+def _derive_rescue_rule_bucket_name(lib: EnhancedLibraryInfo) -> str:
+    """为补Lane/救援阶段生成粗粒度规则桶名称。"""
+    special_split = _normalize_text_for_match(
+        getattr(lib, "special_splits", None) or getattr(lib, "wkspecialsplits", None)
+    )
+    special_group_a = {_normalize_text_for_match(value) for value in SPECIAL_SPLIT_GROUP_A}
+    special_group_b = {_normalize_text_for_match(value) for value in SPECIAL_SPLIT_GROUP_B}
+    if special_split in special_group_a:
+        return "special_combo_a"
+    if special_split in special_group_b:
+        return "special_combo_b"
+    if _is_truthy_flag(getattr(lib, "is_package_lane", None)):
+        return "package_lane"
+    try:
+        if callable(getattr(lib, "is_10x_library", None)) and lib.is_10x_library():
+            return "ten_x"
+    except Exception:
+        logger.exception("识别10X文库异常，回退到普通规则分桶")
+    if _is_manual_or_risk_library(lib):
+        return "manual_or_risk"
+    if _is_customer_library_candidate(lib):
+        return "customer_library"
+    if _is_imbalance_library_candidate(lib):
+        return "imbalance"
+    if _is_scattered_library_candidate(lib):
+        return "scattered"
+    product_line = _normalize_text_for_match(_safe_library_text(lib, "wkproductline", "product_line"))
+    if product_line in {"WGS", "RNA", "MRNA", "单细胞", "SINGLECELL"}:
+        return f"product_{product_line}"
+    return "general"
+
+
+def _derive_rescue_pre_group_key(lib: EnhancedLibraryInfo) -> str:
+    """构Lane前更强预分组，提升候选池纯度。"""
+    task_group = _normalize_text_for_match(_safe_library_text(lib, "wktaskgroupname", "sub_project_name")) or "NA"
+    product_line = _normalize_text_for_match(_safe_library_text(lib, "wkproductline", "product_line")) or "NA"
+    sample_type = _normalize_text_for_match(_safe_library_text(lib, "wksampletype", "sample_type_code")) or "NA"
+    eq_type = _normalize_text_for_match(_safe_library_text(lib, "wkeqtype", "eq_type")) or "NA"
+    split_type = _normalize_text_for_match(_safe_library_text(lib, "wkspecialsplits", "special_splits")) or "NA"
+    is_ten_x = False
+    try:
+        is_ten_x = bool(callable(getattr(lib, "is_10x_library", None)) and lib.is_10x_library())
+    except Exception:
+        is_ten_x = False
+    flags = [
+        "TENX" if is_ten_x else "",
+        "PACKAGE" if _is_truthy_flag(getattr(lib, "is_package_lane", None)) else "",
+        "SCATTERED" if _is_scattered_library_candidate(lib) else "",
+        "CUSTOMER" if _is_customer_library_candidate(lib) else "",
+        "MANUAL_RISK" if _is_manual_or_risk_library(lib) else "",
+        "IMBALANCE" if _is_imbalance_library_candidate(lib) else "",
+    ]
+    compact_flags = "+".join(flag for flag in flags if flag) or "NORMAL"
+    return "|".join([task_group, product_line, sample_type, eq_type, split_type, compact_flags])
+
+
+def _group_rescue_bucket_candidates(bucket_name: str, libraries: List[EnhancedLibraryInfo]) -> List[Tuple[str, List[EnhancedLibraryInfo]]]:
+    """按细粒度规则预分组，并将大组优先返回。"""
+    grouped: Dict[str, List[EnhancedLibraryInfo]] = {}
+    for lib in libraries:
+        group_key = _derive_rescue_pre_group_key(lib)
+        grouped.setdefault(group_key, []).append(lib)
+    ordered_groups = sorted(
+        grouped.items(),
+        key=lambda item: (-_total_lane_data(item[1]), -len(item[1]), item[0]),
+    )
+    return [(f"{bucket_name}:{group_key}", libs) for group_key, libs in ordered_groups]
+
+
+def _build_rescue_rule_buckets(pool: List[EnhancedLibraryInfo], lane_id_prefix: str) -> List[Tuple[str, List[EnhancedLibraryInfo]]]:
+    """构建救援阶段规则分桶，缩小无效搜索空间。"""
+    if not pool:
+        return []
+    cache_key = (lane_id_prefix, _build_library_identity_signature(pool, canonicalize=True))
+    cached = _RESCUE_RULE_BUCKET_CACHE.get(cache_key)
+    if cached is not None:
+        return [(bucket_name, list(bucket_libraries)) for bucket_name, bucket_libraries in cached]
+
+    rough_buckets: Dict[str, List[EnhancedLibraryInfo]] = {}
+    for lib in pool:
+        rough_buckets.setdefault(_derive_rescue_rule_bucket_name(lib), []).append(lib)
+
+    ordered_bucket_names = sorted(
+        rough_buckets.keys(),
+        key=lambda name: (
+            0 if name.startswith("special_combo") else 1,
+            0 if name in {"package_lane", "ten_x", "imbalance", "manual_or_risk"} else 1,
+            -_total_lane_data(rough_buckets[name]),
+            -len(rough_buckets[name]),
+            name,
+        ),
+    )
+    refined_buckets: List[Tuple[str, List[EnhancedLibraryInfo]]] = []
+    for bucket_name in ordered_bucket_names:
+        refined_buckets.extend(_group_rescue_bucket_candidates(bucket_name, rough_buckets[bucket_name]))
+
+    if len(_RESCUE_RULE_BUCKET_CACHE) >= 512:
+        _RESCUE_RULE_BUCKET_CACHE.clear()
+    _RESCUE_RULE_BUCKET_CACHE[cache_key] = [(bucket_name, list(bucket_libraries)) for bucket_name, bucket_libraries in refined_buckets]
+    return refined_buckets
+
+
+def _quick_check_pool_feasibility(
+    *,
+    pool: List[EnhancedLibraryInfo],
+    machine_type: MachineType,
+    lane_metadata: Optional[Dict[str, Any]] = None,
+    stage_label: str,
+) -> Tuple[bool, str]:
+    """救援前轻校验：明显不可能成Lane的候选池直接跳过。"""
+    if not pool:
+        return False, "空候选池"
+
+    metadata = _build_lane_metadata_for_validator(f"{stage_label}_TMP", lane_metadata)
+    cache_key = (
+        machine_type.value if isinstance(machine_type, MachineType) else str(machine_type),
+        tuple(sorted((str(key), repr(value)) for key, value in metadata.items())),
+        _build_library_identity_signature(pool, canonicalize=True),
+    )
+    cached = _LIGHT_POOL_FEASIBILITY_CACHE.get(cache_key)
+    if cached is not None:
+        return cached
+
+    min_allowed, max_allowed = _resolve_lane_capacity_limits(
+        libraries=pool,
+        machine_type=machine_type,
+        lane_metadata=lane_metadata,
+    )
+    total_data = _total_lane_data(pool)
+    if total_data + 1e-6 < min_allowed:
+        result = (False, f"总量{total_data:.1f}G低于最小门槛{min_allowed:.1f}G")
+    else:
+        has_package = any(_is_truthy_flag(getattr(lib, "is_package_lane", None)) for lib in pool)
+        has_non_package = any(not _is_truthy_flag(getattr(lib, "is_package_lane", None)) for lib in pool)
+        normalized_special_splits = {
+            _normalize_text_for_match(getattr(lib, "special_splits", None) or getattr(lib, "wkspecialsplits", None))
+            for lib in pool
+        }
+        special_group_a = {_normalize_text_for_match(value) for value in SPECIAL_SPLIT_GROUP_A}
+        special_group_b = {_normalize_text_for_match(value) for value in SPECIAL_SPLIT_GROUP_B}
+        has_group_a = any(split_value in special_group_a for split_value in normalized_special_splits)
+        has_group_b = any(split_value in special_group_b for split_value in normalized_special_splits)
+        if has_package and has_non_package:
+            result = (False, "包Lane文库与普通文库混入同池")
+        elif has_group_a and has_group_b:
+            result = (False, "10X special combo A/B混池")
+        elif total_data > max_allowed * 6 and len(pool) > 256:
+            result = (True, f"超大池{len(pool)}个/{total_data:.1f}G，允许进入分桶后再细化")
+        else:
+            result = (True, f"通过轻校验: pool={len(pool)}个/{total_data:.1f}G")
+
+    if len(_LIGHT_POOL_FEASIBILITY_CACHE) >= 4096:
+        _LIGHT_POOL_FEASIBILITY_CACHE.clear()
+    _LIGHT_POOL_FEASIBILITY_CACHE[cache_key] = result
+    return result
+
+
+def _quick_check_lane_candidate(
+    *,
+    libraries: List[EnhancedLibraryInfo],
+    machine_type: MachineType,
+    lane_metadata: Optional[Dict[str, Any]] = None,
+    stage_label: str,
+) -> Tuple[bool, str]:
+    """候选Lane轻校验：在重校验前统一过滤明显失败组合。"""
+    feasible, reason = _quick_check_pool_feasibility(
+        pool=libraries,
+        machine_type=machine_type,
+        lane_metadata=lane_metadata,
+        stage_label=stage_label,
+    )
+    if not feasible:
+        return feasible, reason
+
+    cache_key = (
+        machine_type.value if isinstance(machine_type, MachineType) else str(machine_type),
+        tuple(sorted((str(key), repr(value)) for key, value in _build_lane_metadata_for_validator(stage_label, lane_metadata).items())),
+        _build_library_identity_signature(libraries, canonicalize=True),
+    )
+    cached = _LIGHT_POOL_FEASIBILITY_CACHE.get(cache_key)
+    if cached is not None and cached[1].startswith("candidate:"):
+        return cached[0], cached[1][10:]
+
+    ss_valid, _, ss_reason = _validate_lane_special_split_rule(libraries)
+    if not ss_valid:
+        result = (False, f"candidate:{ss_reason}")
+    else:
+        imbalance_mix_valid, imbalance_reason = _validate_lane_57_mix_rules(
+            libraries,
+            enforce_total_limit=False,
+            lane_metadata=lane_metadata,
+        )
+        if not imbalance_mix_valid:
+            result = (False, f"candidate:{imbalance_reason}")
+        else:
+            result = (True, "candidate:通过候选轻校验")
+
+    if len(_LIGHT_POOL_FEASIBILITY_CACHE) >= 4096:
+        _LIGHT_POOL_FEASIBILITY_CACHE.clear()
+    _LIGHT_POOL_FEASIBILITY_CACHE[cache_key] = result
+    return result[0], result[1][10:]
+
+
 def _attempt_build_lane_from_pool(
     pool: List[EnhancedLibraryInfo],
     validator,
@@ -3400,6 +3843,7 @@ def _attempt_build_lane_from_pool(
     other_failure_attempts: int = DEFAULT_OTHER_FAILURE_ATTEMPTS,
     extra_metadata: Optional[Dict[str, Any]] = None,
     prioritize_scattered_mix: bool = False,
+    deterministic_candidate_order: Optional[str] = None,
     lane_validation_cache: Optional[
         Dict[Tuple[str, Tuple[Tuple[str, str], ...], Tuple[str, ...]], Any]
     ] = None,
@@ -3521,15 +3965,13 @@ def _attempt_build_lane_from_pool(
                     )
                     if total + data > trial_max_allowed:
                         continue
-                    ss_valid, _, _ = _validate_lane_special_split_rule(trial_libs)
-                    if not ss_valid:
-                        continue
-                    imbalance_mix_valid, _ = _validate_lane_57_mix_rules(
-                        trial_libs,
-                        enforce_total_limit=False,
+                    candidate_light_valid, _ = _quick_check_lane_candidate(
+                        libraries=trial_libs,
+                        machine_type=machine_type,
                         lane_metadata=extra_metadata,
+                        stage_label=f"{lane_id_prefix}_candidate",
                     )
-                    if not imbalance_mix_valid:
+                    if not candidate_light_valid:
                         continue
                     idx_valid, lib_indices = _validate_new_lib_quick_with_result_cache(
                         idx_validator=_idx_validator,
@@ -3548,8 +3990,14 @@ def _attempt_build_lane_from_pool(
                 if not added_candidate:
                     break
         else:
-            candidates = list(active_pool)
-            random.shuffle(candidates)
+            if deterministic_candidate_order == "high_constraint":
+                candidates = _sort_remaining_for_high_constraint_lane(
+                    list(active_pool),
+                    current_lane_libs=selected if selected else None,
+                )
+            else:
+                candidates = list(active_pool)
+                random.shuffle(candidates)
             for lib in candidates:
                 if _shares_split_family_with_selected(selected, lib):
                     continue
@@ -3740,15 +4188,28 @@ def _attempt_build_rescue_lane_from_pool(
     # Stage 3 的 OG 普通尾货聚簇补Lane本身已经是同类、低优先级、窄池候选，
     # 再走散样混排优先路径收益很低，却会显著放大排序与重试成本。
     if lane_id_prefix == "OG":
+        candidate_pool = list(pool)
+        candidate_total_data = sum(lib.get_data_amount_gb() for lib in candidate_pool)
+        candidate_min_lane_data, _ = _resolve_lane_capacity_limits(candidate_pool, machine_type)
+        if candidate_total_data + 1e-6 < candidate_min_lane_data:
+            logger.info(
+                "补Lane尝试跳过: lane_prefix={}, pool_size={}, pool_data={:.3f}G不足最小门槛{:.3f}G".format(
+                    lane_id_prefix,
+                    len(candidate_pool),
+                    candidate_total_data,
+                    candidate_min_lane_data,
+                )
+            )
+            return None, []
         logger.info(
             "补Lane尝试: variant=cluster_fast_path, lane_prefix={}, pool_size={}, pool_data={:.3f}G, prioritize_scattered_mix=False".format(
                 lane_id_prefix,
-                len(pool),
-                sum(lib.get_data_amount_gb() for lib in pool),
+                len(candidate_pool),
+                candidate_total_data,
             )
         )
         return _attempt_build_lane_from_pool(
-            pool=list(pool),
+            pool=candidate_pool,
             validator=validator,
             machine_type=machine_type,
             lane_id_prefix=lane_id_prefix,
@@ -3757,10 +4218,35 @@ def _attempt_build_rescue_lane_from_pool(
             other_failure_attempts=other_failure_attempts,
             extra_metadata=extra_metadata,
             prioritize_scattered_mix=False,
+            deterministic_candidate_order=None,
             lane_validation_cache=lane_validation_cache,
         )
 
     seen_variants: Set[Tuple[bool, Tuple[int, ...]]] = set()
+    variants: List[Tuple[str, List[EnhancedLibraryInfo], bool]] = []
+
+    bucket_variants = _build_rescue_rule_buckets(pool, lane_id_prefix)
+    for bucket_name, bucket_pool in bucket_variants:
+        feasible, reason = _quick_check_pool_feasibility(
+            pool=bucket_pool,
+            machine_type=machine_type,
+            lane_metadata=extra_metadata,
+            stage_label=f"{lane_id_prefix}_{bucket_name}",
+        )
+        if not feasible:
+            logger.info(
+                "补Lane轻校验跳过: variant={}, lane_prefix={}, pool_size={}, reason={}".format(
+                    bucket_name,
+                    lane_id_prefix,
+                    len(bucket_pool),
+                    reason,
+                )
+            )
+            continue
+        variants.append((bucket_name, list(bucket_pool), True))
+        if len(bucket_pool) >= 32:
+            variants.append((f"{bucket_name}:relaxed", list(bucket_pool), False))
+
     non_clinical_pool = [
         lib for lib in pool
         if _get_scattered_mix_priority_rank(lib) >= 1
@@ -3770,9 +4256,7 @@ def _attempt_build_rescue_lane_from_pool(
         if _get_scattered_mix_priority_rank(lib) == 2
     ]
 
-    variants: List[Tuple[str, List[EnhancedLibraryInfo], bool]] = [
-        ("full_priority", list(pool), True),
-    ]
+    variants.append(("full_priority", list(pool), True))
     if non_clinical_pool and len(non_clinical_pool) < len(pool):
         variants.append(("non_clinical_priority", list(non_clinical_pool), True))
     if non_clinical_pool:
@@ -3785,6 +4269,22 @@ def _attempt_build_rescue_lane_from_pool(
         if key in seen_variants:
             continue
         seen_variants.add(key)
+        feasible, reason = _quick_check_pool_feasibility(
+            pool=candidate_pool,
+            machine_type=machine_type,
+            lane_metadata=extra_metadata,
+            stage_label=f"{lane_id_prefix}_{variant_name}",
+        )
+        if not feasible:
+            logger.info(
+                "补Lane轻校验跳过: variant={}, lane_prefix={}, pool_size={}, reason={}".format(
+                    variant_name,
+                    lane_id_prefix,
+                    len(candidate_pool),
+                    reason,
+                )
+            )
+            continue
         candidate_total_data = sum(lib.get_data_amount_gb() for lib in candidate_pool)
         candidate_min_lane_data, _ = _resolve_lane_capacity_limits(candidate_pool, machine_type)
         if candidate_total_data + 1e-6 < candidate_min_lane_data:
@@ -3817,6 +4317,7 @@ def _attempt_build_rescue_lane_from_pool(
             other_failure_attempts=other_failure_attempts,
             extra_metadata=extra_metadata,
             prioritize_scattered_mix=prioritize_scattered_mix,
+            deterministic_candidate_order=None,
             lane_validation_cache=lane_validation_cache,
         )
         if lane:
@@ -3958,15 +4459,13 @@ def _attempt_build_lane_from_prioritized_pool(
                     )
                     if total + data > trial_max_allowed:
                         continue
-                    ss_valid, _, _ = _validate_lane_special_split_rule(trial_libs)
-                    if not ss_valid:
-                        continue
-                    imbalance_mix_valid, _ = _validate_lane_57_mix_rules(
-                        trial_libs,
-                        enforce_total_limit=False,
+                    candidate_light_valid, _ = _quick_check_lane_candidate(
+                        libraries=trial_libs,
+                        machine_type=machine_type,
                         lane_metadata=extra_metadata,
+                        stage_label=f"{lane_id_prefix}_candidate",
                     )
-                    if not imbalance_mix_valid:
+                    if not candidate_light_valid:
                         continue
                     # 带缓存增量检查，避免对 selected 中已有文库的索引反复解析
                     idx_valid, lib_indices = _validate_new_lib_quick_with_result_cache(
@@ -6263,6 +6762,42 @@ def _get_residual_regroup_cluster_key(lib: EnhancedLibraryInfo) -> str:
     return _normalize_text_for_match(sample_type)
 
 
+def _normalize_residual_major_cluster_project(lib: EnhancedLibraryInfo) -> str:
+    """提取未分配大簇 regroup 使用的项目名。"""
+    return _normalize_text_for_match(
+        _safe_library_text(lib, "sub_project_name", "wksubprojectname")
+    ) or "EMPTY"
+
+
+def _build_residual_major_cluster_key(lib: EnhancedLibraryInfo) -> str:
+    """为未分配大簇专项 regroup 构建稳定聚类键。"""
+    project_name = _normalize_residual_major_cluster_project(lib)
+    sample_type = _normalize_text_for_match(
+        _safe_library_text(lib, "sample_type_code", "wksampletype")
+    ) or "EMPTY"
+    data_type = _normalize_text_for_match(
+        _safe_library_text(lib, "data_type", "wkdatatype")
+    ) or "EMPTY"
+    task_group = _normalize_text_for_match(
+        _safe_library_text(lib, "task_group_name", "wktaskgroupname")
+    ) or "EMPTY"
+    return "|".join([project_name, sample_type, data_type, task_group])
+
+
+def _is_major_residual_cluster_candidate(cluster_pool: List[EnhancedLibraryInfo]) -> bool:
+    """判断未分配簇是否值得优先做专项 regroup。"""
+    if not cluster_pool:
+        return False
+    total_gb = _total_lane_data(cluster_pool)
+    if len(cluster_pool) >= 24 and total_gb >= 300.0:
+        return True
+    if len(cluster_pool) >= 12 and total_gb >= 900.0:
+        return True
+    if total_gb >= 2000.0:
+        return True
+    return False
+
+
 def _rescue_remaining_lanes_by_layered_regroup_search(
     solution,
     validator,
@@ -6288,6 +6823,7 @@ def _rescue_remaining_lanes_by_layered_regroup_search(
     if not unassigned:
         return {
             "new_lanes": 0,
+            "major_cluster_lanes": 0,
             "priority_cluster_lanes": 0,
             "mixed_rescue_lanes": 0,
             "normal_cluster_lanes": 0,
@@ -6305,6 +6841,7 @@ def _rescue_remaining_lanes_by_layered_regroup_search(
     priority_cluster_lanes = 0
     mixed_rescue_lanes = 0
     normal_cluster_lanes = 0
+    major_cluster_lanes = 0
     skipped_split_libraries = 0
     new_lanes: List[LaneAssignment] = []
     lane_validation_cache: Dict[
@@ -6334,6 +6871,63 @@ def _rescue_remaining_lanes_by_layered_regroup_search(
         machine_priority_cluster_lanes = 0
         machine_mixed_rescue_lanes = 0
         machine_normal_cluster_lanes = 0
+        machine_major_cluster_lanes = 0
+
+        # Stage 0: 对同项目/同类型且总量大的尾货簇做专项 regroup。
+        major_clusters: Dict[str, List[EnhancedLibraryInfo]] = {}
+        for lib in machine_pool:
+            cluster_key = _build_residual_major_cluster_key(lib)
+            if not cluster_key:
+                continue
+            major_clusters.setdefault(cluster_key, []).append(lib)
+
+        for _, cluster_pool in sorted(
+            major_clusters.items(),
+            key=lambda item: (_total_lane_data(item[1]), len(item[1])),
+            reverse=True,
+        ):
+            if machine_major_cluster_lanes >= max(1, max_normal_cluster_lanes_per_machine // 2):
+                break
+            machine_pool_ids = _build_library_object_id_set(machine_pool)
+            active_cluster = [lib for lib in cluster_pool if id(lib) in machine_pool_ids]
+            if not active_cluster or not _is_major_residual_cluster_candidate(active_cluster):
+                continue
+            feasible, reason = _quick_check_pool_feasibility(
+                pool=active_cluster,
+                machine_type=machine_type,
+                lane_metadata=None,
+                stage_label="MAJOR_CLUSTER_RESCUE",
+            )
+            if not feasible:
+                logger.info(
+                    "未分配大簇专项regroup跳过: machine={}, count={}, data={:.1f}G, reason={}".format(
+                        machine_type.value,
+                        len(active_cluster),
+                        _total_lane_data(active_cluster),
+                        reason,
+                    )
+                )
+                continue
+
+            while active_cluster and machine_major_cluster_lanes < max(1, max_normal_cluster_lanes_per_machine // 2):
+                lane, used = _attempt_build_rescue_lane_from_pool(
+                    pool=active_cluster,
+                    validator=validator,
+                    machine_type=machine_type,
+                    lane_id_prefix="MG",
+                    lane_serial=_next_lane_serial("MG", machine_type),
+                    index_conflict_attempts=index_conflict_attempts_per_lane,
+                    other_failure_attempts=other_failure_attempts_per_lane,
+                    lane_validation_cache=lane_validation_cache,
+                )
+                if not lane:
+                    break
+                new_lanes.append(lane)
+                machine_major_cluster_lanes += 1
+                major_cluster_lanes += 1
+                used_ids = {id(lib) for lib in used}
+                machine_pool = [lib for lib in machine_pool if id(lib) not in used_ids]
+                active_cluster = [lib for lib in active_cluster if id(lib) not in used_ids]
 
         # Stage 1: 高优先级尾货优先做专Lane（同机型、同文库类型聚簇）。
         priority_clusters: Dict[str, List[EnhancedLibraryInfo]] = {}
@@ -6468,6 +7062,7 @@ def _rescue_remaining_lanes_by_layered_regroup_search(
 
     return {
         "new_lanes": len(new_lanes),
+        "major_cluster_lanes": major_cluster_lanes,
         "priority_cluster_lanes": priority_cluster_lanes,
         "mixed_rescue_lanes": mixed_rescue_lanes,
         "normal_cluster_lanes": normal_cluster_lanes,
@@ -10025,6 +10620,7 @@ def test_with_model(
     enable_peak_window_mixed_lanes: bool = True,
     enable_post_fill_optimization: Optional[bool] = None,
     enable_57_rescue: bool = False,
+    enable_rule_bucket_prescheduling: bool = True,
 ) -> Tuple[Dict[str, Any], Any]:
     """排机流程
 
@@ -10124,13 +10720,20 @@ def test_with_model(
         else bool(enable_post_fill_optimization)
     )
     if remaining_libraries:
-        solution = scheduler.schedule(
-            remaining_libraries,
-            keep_failed_lanes=True,
-            libraries_already_split=True,
-            perform_presplit_family_rollback=False,
-            enable_post_fill_optimization=post_fill_optimization_enabled,
-        )
+        if enable_rule_bucket_prescheduling:
+            solution = _schedule_with_rule_bucket_prescheduling(
+                scheduler=scheduler,
+                libraries=remaining_libraries,
+                post_fill_optimization_enabled=post_fill_optimization_enabled,
+            )
+        else:
+            solution = scheduler.schedule(
+                remaining_libraries,
+                keep_failed_lanes=True,
+                libraries_already_split=True,
+                perform_presplit_family_rollback=False,
+                enable_post_fill_optimization=post_fill_optimization_enabled,
+            )
     else:
         from types import SimpleNamespace
 
@@ -10455,9 +11058,11 @@ def test_with_model(
         )
     if layered_regroup_stats["new_lanes"] > 0:
         logger.info(
-            "剩余库分层重组搜索完成: 新增Lane={} (专lane={}, 混排lane={}, 普通lane={}), "
+            "剩余库分层重组搜索完成: 新增Lane={} (大簇专项={}, 高约束专项={}, 专lane={}, 混排lane={}, 普通lane={}), "
             "跳过拆分文库={}, 剩余未分配={}".format(
                 layered_regroup_stats["new_lanes"],
+                layered_regroup_stats.get("major_cluster_lanes", 0),
+                layered_regroup_stats.get("high_constraint_lanes", 0),
                 layered_regroup_stats["priority_cluster_lanes"],
                 layered_regroup_stats["mixed_rescue_lanes"],
                 layered_regroup_stats["normal_cluster_lanes"],
@@ -10541,6 +11146,7 @@ def _schedule_rollback_libraries_in_mode_1_1(
             enable_peak_window_mixed_lanes=enable_peak_window,
             enable_post_fill_optimization=enable_post_fill,
             enable_57_rescue=False,
+            enable_rule_bucket_prescheduling=False,
         )
     except Exception as exc:
         logger.error("拆分回滚原始文库回流1.1异常，保留为未分配输出: {}", exc)
@@ -10981,6 +11587,7 @@ def arrange_library(
                     enable_peak_window_mixed_lanes=first_round_enable_peak_window,
                     enable_post_fill_optimization=first_round_enable_post_fill_optimization,
                     enable_57_rescue=False,
+                    enable_rule_bucket_prescheduling=False,
                 )
                 first_round_priority_max_gb_per_lane = float(
                     mode_1_1_config.get("first_round_priority_max_gb_per_lane", 150.0) or 0.0
@@ -11050,6 +11657,7 @@ def arrange_library(
                             enable_peak_window_mixed_lanes=second_pass_enable_peak_window,
                             enable_post_fill_optimization=second_pass_enable_post_fill_optimization,
                             enable_57_rescue=False,
+                            enable_rule_bucket_prescheduling=False,
                         )
                         for lane in _1_1_second_solution.lane_assignments:
                             if not isinstance(lane.metadata, dict):
