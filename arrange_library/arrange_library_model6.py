@@ -2994,8 +2994,12 @@ def _count_library_index_pairs(lib: EnhancedLibraryInfo) -> int:
 
 
 def _count_lane_index_pairs(libraries: List[EnhancedLibraryInfo]) -> int:
-    """统计整条Lane的Index对总数。"""
-    return sum(_count_library_index_pairs(lib) for lib in libraries)
+    """统计整条Lane的真实文库Index对总数，不把AI平衡文库计入下限。"""
+    return sum(
+        _count_library_index_pairs(lib)
+        for lib in libraries
+        if not _is_ai_balance_library(lib)
+    )
 
 
 def _get_package_lane_number_from_library(lib: EnhancedLibraryInfo) -> str:
@@ -6060,8 +6064,8 @@ def _build_10_plus_24_lane_seq_lanes(
 def _materialize_balance_libraries_for_solution(solution: Any) -> Dict[str, int]:
     """对最终成lane结果补真实平衡文库。
 
-    普通Lane补平衡失败仍回退未分配；碱基不均衡专Lane保留，并在metadata记录
-    失败原因，避免大组专Lane因模板缺失被静默打散。
+    普通Lane补平衡失败仍回退未分配；碱基不均衡专Lane保留，仅保留所需平衡量
+    元数据，最终是否有效以后续总体验证和最终输出为准。
     """
     from arrange_library.core.constraints.lane_validator import LaneValidator
 
@@ -6074,7 +6078,6 @@ def _materialize_balance_libraries_for_solution(solution: Any) -> Dict[str, int]
     removed_lanes = 0
     preserved_dedicated_lanes = 0
     recovered_libraries = 0
-    failed_lane_ids: List[str] = []
     kept_lanes: List[LaneAssignment] = []
 
     for lane in lanes:
@@ -6095,21 +6098,13 @@ def _materialize_balance_libraries_for_solution(solution: Any) -> Dict[str, int]
             continue
 
         lane_id = _safe_str(getattr(lane, "lane_id", ""), default="")
-        failed_lane_ids.append(lane_id)
         if _is_explicit_dedicated_imbalance_lane(lane):
             if not isinstance(lane.metadata, dict):
                 lane.metadata = {}
-            lane.metadata["balance_materialize_failed"] = True
-            lane.metadata["balance_materialize_failure_reason"] = "missing_or_invalid_balance_library_template"
             lane.metadata["wkbalancedata"] = round(required_balance_data, 3)
             lane.metadata["required_balance_data_gb"] = round(required_balance_data, 3)
             kept_lanes.append(lane)
             preserved_dedicated_lanes += 1
-            logger.error(
-                "碱基不均专Lane {} 需要补平衡文库 {:.3f}G 但补充失败，保留该Lane并记录失败标记",
-                lane_id or "<unknown>",
-                required_balance_data,
-            )
             continue
 
         removed_lanes += 1
@@ -6118,11 +6113,6 @@ def _materialize_balance_libraries_for_solution(solution: Any) -> Dict[str, int]
             lib
             for lib in list(getattr(lane, "libraries", []) or [])
             if not _is_ai_balance_library(lib)
-        )
-        logger.error(
-            "Lane {} 需要补平衡文库 {:.3f}G 但补充失败，已取消该Lane并回收到未分配池",
-            lane_id or "<unknown>",
-            required_balance_data,
         )
 
     solution.lane_assignments = kept_lanes
@@ -6133,7 +6123,6 @@ def _materialize_balance_libraries_for_solution(solution: Any) -> Dict[str, int]
         "removed_lanes": removed_lanes,
         "preserved_dedicated_lanes": preserved_dedicated_lanes,
         "recovered_libraries": recovered_libraries,
-        "failed_lane_ids": failed_lane_ids,
     }
 
 
@@ -7357,6 +7346,127 @@ def _should_library_split_by_rules(lib: EnhancedLibraryInfo) -> bool:
     return bool(LibrarySplitter()._should_split(eval_lib))
 
 
+def _infer_existing_split_fragment_count(
+    fragment_data: float,
+    total_contract_data: float,
+) -> int:
+    """按线上已拆分行的片段量和总量推断拆分份数。"""
+    if fragment_data <= 0 or total_contract_data <= fragment_data + 1e-6:
+        return 1
+    ratio = total_contract_data / fragment_data
+    rounded = int(round(ratio))
+    if rounded > 1 and math.isclose(ratio, rounded, rel_tol=1e-6, abs_tol=1e-6):
+        return rounded
+    return max(2, int(math.ceil(ratio - 1e-9)))
+
+
+def _normalize_existing_split_fragments(libraries: List[EnhancedLibraryInfo]) -> None:
+    """为线上已拆分输入补齐家族元数据，保证终态拆分原子性复核生效。"""
+    split_groups: Dict[str, List[EnhancedLibraryInfo]] = {}
+    for lib in libraries:
+        if not _is_yes_value(getattr(lib, "wkissplit", "")):
+            continue
+        fragment_data = _safe_float(getattr(lib, "contract_data_raw", None), default=0.0)
+        total_data = max(
+            fragment_data,
+            _safe_float(getattr(lib, "total_contract_data", None), default=0.0),
+            _safe_float(getattr(lib, "wktotalcontractdata", None), default=0.0),
+        )
+        if total_data <= fragment_data + 1e-6:
+            continue
+        family_id = _safe_str(
+            getattr(lib, "original_library_id", None)
+            or getattr(lib, "sample_id", None)
+            or getattr(lib, "_source_origrec_key", None)
+            or getattr(lib, "_origrec_key", None)
+            or getattr(lib, "origrec", None),
+            default="",
+        )
+        if not family_id:
+            continue
+        split_groups.setdefault(family_id, []).append(lib)
+
+    for family_id, group in split_groups.items():
+        if not group:
+            continue
+        max_total = max(
+            _safe_float(getattr(lib, "total_contract_data", None), default=0.0)
+            or _safe_float(getattr(lib, "wktotalcontractdata", None), default=0.0)
+            or _safe_float(getattr(lib, "contract_data_raw", None), default=0.0)
+            for lib in group
+        )
+        fragment_values = [
+            _safe_float(getattr(lib, "contract_data_raw", None), default=0.0)
+            for lib in group
+        ]
+        positive_fragment_values = [value for value in fragment_values if value > 0]
+        if not positive_fragment_values:
+            continue
+        min_fragment = min(positive_fragment_values)
+        expected_count = max(
+            len(group),
+            _infer_existing_split_fragment_count(min_fragment, max_total),
+        )
+        source_library = deepcopy(group[0])
+        source_library.contract_data_raw = max_total
+        source_library.wktotalcontractdata = max_total
+        source_library.total_contract_data = max_total
+        source_library.is_split = False
+        source_library.wkissplit = ""
+        source_library.split_status = "rolled_back"
+        source_library.original_library_id = ""
+        source_library.fragment_index = 0
+        source_library.total_fragments = 0
+        source_library.fragment_id = ""
+        source_library._source_origrec_key = _safe_str(
+            getattr(group[0], "_source_origrec_key", None)
+            or getattr(group[0], "_origrec_key", None)
+            or getattr(group[0], "origrec", None),
+            default="",
+        )
+        source_library._detail_output_key = _safe_str(
+            getattr(group[0], "_detail_output_key", None)
+            or getattr(group[0], "wkaidbid", None)
+            or getattr(group[0], "aidbid", None)
+            or getattr(group[0], "origrec", None),
+            default="",
+        )
+
+        ordered_group = sorted(
+            group,
+            key=lambda lib: (
+                _safe_str(getattr(lib, "_source_origrec_key", None) or getattr(lib, "_origrec_key", None), default=""),
+                _safe_str(getattr(lib, "wkaidbid", None) or getattr(lib, "aidbid", None), default=""),
+            ),
+        )
+        for fragment_index, lib in enumerate(ordered_group, start=1):
+            lib.is_split = True
+            lib.wkissplit = "yes"
+            lib.split_status = _safe_str(getattr(lib, "split_status", None), default="") or "completed"
+            lib.original_library_id = family_id
+            lib.total_fragments = expected_count
+            lib.fragment_index = int(getattr(lib, "fragment_index", 0) or fragment_index)
+            lib.fragment_id = _safe_str(getattr(lib, "fragment_id", None), default="") or f"{family_id}_F{lib.fragment_index:03d}"
+            lib.wktotalcontractdata = max_total
+            lib.total_contract_data = max_total
+            lib._split_source_library = source_library
+            lib._source_origrec_key = _safe_str(
+                getattr(lib, "_source_origrec_key", None)
+                or getattr(lib, "_origrec_key", None)
+                or getattr(lib, "origrec", None),
+                default="",
+            )
+            lib._detail_output_key = _safe_str(
+                getattr(lib, "_detail_output_key", None)
+                or getattr(lib, "wkaidbid", None)
+                or getattr(lib, "aidbid", None)
+                or lib.fragment_id,
+                default="",
+            )
+            if hasattr(lib, "_library_identity_key_cache"):
+                delattr(lib, "_library_identity_key_cache")
+
+
 def _collect_lanes_with_split(lanes: List[LaneAssignment]) -> Set[str]:
     """收集包含拆分文库的lane_id集合。"""
     lane_ids: Set[str] = set()
@@ -7538,6 +7648,56 @@ def _repair_split_families_before_final_rollback(
         if reordered_lanes == 0 and placed_fragments == 0:
             break
     return stats
+
+
+def _enforce_split_family_atomicity_for_stage(
+    lane_assignments: List[LaneAssignment],
+    unassigned_libraries: List[EnhancedLibraryInfo],
+    validator: Any,
+    stage_label: str,
+) -> Tuple[List[LaneAssignment], List[EnhancedLibraryInfo], Dict[str, int]]:
+    """阶段内即时修复拆分家族，未满足原子性时立刻回退到未分配池。"""
+    from types import SimpleNamespace
+
+    stage_solution = SimpleNamespace(
+        lane_assignments=list(lane_assignments or []),
+        unassigned_libraries=list(unassigned_libraries or []),
+    )
+    repair_stats = _repair_split_families_before_final_rollback(
+        solution=stage_solution,
+        validator=validator,
+        max_attempts=2,
+    )
+    rollback_stats = _rollback_incomplete_split_families_in_final_solution(stage_solution)
+    combined_stats = {
+        "repair_attempts": int(repair_stats.get("attempts", 0) or 0),
+        "reordered_lanes": int(repair_stats.get("reordered_lanes", 0) or 0),
+        "placed_fragments": int(repair_stats.get("placed_fragments", 0) or 0),
+        "rollback_families": int(rollback_stats.get("rollback_families", 0) or 0),
+        "incomplete_families": int(rollback_stats.get("incomplete_families", 0) or 0),
+        "cross_run_families": int(rollback_stats.get("cross_run_families", 0) or 0),
+        "removed_fragments": int(rollback_stats.get("removed_fragments", 0) or 0),
+        "restored_originals": int(rollback_stats.get("restored_originals", 0) or 0),
+    }
+    if (
+        combined_stats["reordered_lanes"] > 0
+        or combined_stats["placed_fragments"] > 0
+        or combined_stats["rollback_families"] > 0
+    ):
+        logger.info(
+            "{}拆分即时校验完成: 重排Lane={}，补入片段={}，回滚家族={}，恢复原始文库={}".format(
+                stage_label,
+                combined_stats["reordered_lanes"],
+                combined_stats["placed_fragments"],
+                combined_stats["rollback_families"],
+                combined_stats["restored_originals"],
+            )
+        )
+    return (
+        list(getattr(stage_solution, "lane_assignments", []) or []),
+        list(getattr(stage_solution, "unassigned_libraries", []) or []),
+        combined_stats,
+    )
 
 
 def _rollback_incomplete_split_families_in_final_solution(solution: Any) -> Dict[str, int]:
@@ -10396,6 +10556,8 @@ def _collect_prediction_rows(
         ):
             lane_sequencing_mode = ""
         lane_selected_round_label = str(lane_meta.get("selected_round_label", "") or "").strip()
+        if _is_explicit_dedicated_imbalance_lane(lane):
+            lane_selected_round_label = ""
         round2_low_output_origrecs = {
             str(item).strip()
             for item in (lane_meta.get("mode_1_1_round2_low_output_origrecs") or [])
@@ -10898,8 +11060,16 @@ def _build_detail_output(
                 {"", "nan", "None", "NONE", "null", "NULL"}
             )
         )
-        merged.loc[lane_assigned_mask & resolved_round_mask, "laneround"] = merged.loc[
-            lane_assigned_mask & resolved_round_mask, "resolved_round_label"
+        resolved_round_text = merged["resolved_round_label"].astype(str).str.strip()
+        valid_round_label_mask = resolved_round_text.isin(
+            {
+                str(get_scheduling_config().get_mode_1_1_config().get("first_round_label", "1.1第一轮")),
+                str(get_scheduling_config().get_mode_1_1_config().get("second_round_label", "1.1第二轮")),
+            }
+        )
+        merged.loc[lane_assigned_mask & resolved_round_mask & valid_round_label_mask, "laneround"] = merged.loc[
+            lane_assigned_mask & resolved_round_mask & valid_round_label_mask,
+            "resolved_round_label",
         ]
     # 兜底：若已明确成Lane且测序模式属于1.1，但上游遗漏了轮次标签，
     # 则按业务口径回填为1.1第一轮。第二轮会显式写 selected_round_label，不会走到这里。
@@ -11007,7 +11177,9 @@ def _build_detail_output(
     # 旧输入或中间合并链路可能遗留1000G等历史值，不能作为本轮Lane实际合同量输出。
     if "lanecontractdata" not in merged.columns:
         merged["lanecontractdata"] = pd.NA
-    lane_contract_sum = pd.to_numeric(merged.get("wkcontractdata"), errors="coerce").fillna(0.0)
+    if "wkcontractdata" not in merged.columns:
+        merged["wkcontractdata"] = 0.0
+    lane_contract_sum = pd.to_numeric(merged["wkcontractdata"], errors="coerce").fillna(0.0)
     merged["_lane_contract_sum_for_output"] = lane_contract_sum
     lane_contract_by_key = (
         merged.loc[lane_assigned_mask]
@@ -11273,6 +11445,7 @@ def load_standardized_csv(data_file: str, limit: int | None = None) -> List[Enha
         except Exception as e:
             logger.warning(f"行 {idx} 创建文库对象失败: {e}")
     
+    _normalize_existing_split_fragments(libraries)
     logger.info(f"成功创建 {len(libraries)} 个文库对象")
     return libraries
 
@@ -12404,6 +12577,16 @@ def arrange_library(
                         int(first_round_priority_cap_stats["overflow_libraries"]),
                         first_round_priority_cap_stats["removed_priority_gb"],
                     )
+                (
+                    _1_1_solution.lane_assignments,
+                    _1_1_solution.unassigned_libraries,
+                    _1_1_stage_split_stats,
+                ) = _enforce_split_family_atomicity_for_stage(
+                    lane_assignments=list(_1_1_solution.lane_assignments or []),
+                    unassigned_libraries=list(_1_1_solution.unassigned_libraries or []),
+                    validator=LaneValidator(strict_mode=True),
+                    stage_label="1.1首轮",
+                )
                 mode_1_1_lanes.extend(list(_1_1_solution.lane_assignments))
                 fallback_libs = list(_1_1_solution.unassigned_libraries or [])
                 split_rule_fallback_libs = [lib for lib in fallback_libs if _should_library_split_by_rules(lib)]
@@ -12445,6 +12628,16 @@ def arrange_library(
                             lane.metadata["selected_round_label"] = first_round_label
                             for lib in list(lane.libraries or []):
                                 lib._current_seq_mode_raw = "1.1"
+                        (
+                            _1_1_second_solution.lane_assignments,
+                            _1_1_second_solution.unassigned_libraries,
+                            _1_1_second_stage_split_stats,
+                        ) = _enforce_split_family_atomicity_for_stage(
+                            lane_assignments=list(_1_1_second_solution.lane_assignments or []),
+                            unassigned_libraries=list(_1_1_second_solution.unassigned_libraries or []),
+                            validator=LaneValidator(strict_mode=True),
+                            stage_label="1.1二次补排",
+                        )
                         mode_1_1_lanes.extend(list(_1_1_second_solution.lane_assignments))
                         fallback_libs = list(_1_1_second_solution.unassigned_libraries or [])
                         logger.info(
@@ -12544,6 +12737,16 @@ def arrange_library(
                 existing_lanes=all_existing_lanes,
                 enable_57_rescue=False,
             )
+            (
+                solution.lane_assignments,
+                solution.unassigned_libraries,
+                main_stage_split_stats,
+            ) = _enforce_split_family_atomicity_for_stage(
+                lane_assignments=list(solution.lane_assignments or []),
+                unassigned_libraries=list(solution.unassigned_libraries or []),
+                validator=LaneValidator(strict_mode=True),
+                stage_label="主排机",
+            )
             rollback_mode_1_1_libraries = list(
                 getattr(solution, "split_rollback_mode_1_1_libraries", []) or []
             )
@@ -12597,12 +12800,6 @@ def arrange_library(
                 balance_materialize_stats["recovered_libraries"],
             )
         )
-        if balance_materialize_stats["removed_lanes"] > 0:
-            logger.error(
-                "存在需补平衡文库但补充失败的Lane，已禁止作为成功Lane输出: {}".format(
-                    ", ".join(balance_materialize_stats["failed_lane_ids"])
-                )
-            )
     _validate_final_package_lanes(solution)
 
     final_cleanup_validator = LaneValidator(strict_mode=True)
