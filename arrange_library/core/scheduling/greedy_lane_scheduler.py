@@ -478,6 +478,34 @@ class GreedyLaneScheduler:
         """判断文库是否可进入DL碱基不均衡专Lane。"""
         return str(getattr(lib, "jjbj", "") or getattr(lib, "wk_jjbj", "") or "").strip() == "是"
 
+    def _dedicated_imbalance_requires_single_sample_type(
+        self,
+        candidate_libs: List[EnhancedLibraryInfo],
+    ) -> bool:
+        """判断碱基不均衡专Lane候选是否必须保持同一样本类型。
+
+        普通互斥分组仍按“同类型整Lane”执行；G53/G54等组合分组、
+        以及规则允许的多分组组合，交给碱基不均衡混排规则判定。
+        """
+        if not candidate_libs or not self.imbalance_handler:
+            return True
+
+        group_ids: Set[str] = set()
+        for lib in candidate_libs:
+            group_id = self.imbalance_handler.identify_imbalance_type(lib)
+            if not group_id or group_id == "G_UNKNOWN":
+                return True
+            group_ids.add(group_id)
+
+        combination_rule_groups = {"G53", "G54", "G56", "G57"}
+        if group_ids.issubset(combination_rule_groups):
+            return False
+        if len(group_ids) != 1:
+            return False
+
+        group_def = self.imbalance_handler.groups.get(next(iter(group_ids)))
+        return not bool(getattr(group_def, "allow_internal_mixing", False))
+
     def _is_valid_dedicated_imbalance_candidate(
         self,
         candidate_libs: List[EnhancedLibraryInfo],
@@ -487,10 +515,11 @@ class GreedyLaneScheduler:
             return False
         if not all(self._is_dedicated_imbalance_library(lib) for lib in candidate_libs):
             return False
-        sample_type_keys = {self._get_library_sample_type_key(lib) for lib in candidate_libs}
-        sample_type_keys.discard("")
-        if len(sample_type_keys) != 1:
-            return False
+        if self._dedicated_imbalance_requires_single_sample_type(candidate_libs):
+            sample_type_keys = {self._get_library_sample_type_key(lib) for lib in candidate_libs}
+            sample_type_keys.discard("")
+            if len(sample_type_keys) != 1:
+                return False
         aidbid_keys = [self._get_library_aidbid_key(lib) for lib in candidate_libs]
         if len(aidbid_keys) != len(set(aidbid_keys)):
             return False
@@ -616,6 +645,12 @@ class GreedyLaneScheduler:
             )
             min_total = float(selection.effective_min_gb)
             max_total = float(selection.effective_max_gb)
+            if seq_mode == "3.6T-NEW":
+                # 碱基不均专Lane按含平衡文库的3.6T单Lane容量核算。
+                # 普通3.6T混排可能因上下文命中更高容量档位，但G26等专Lane
+                # 允许 800G不均 + 200G平衡 形成约1000G的3.6T专Lane。
+                min_total = min(min_total, 995.0)
+                max_total = min(max_total, 1105.0) if max_total > 0 else 1105.0
             target_total = self._clamp_float(
                 float(selection.soft_target_gb or max_total or min_total),
                 min_total,
@@ -2012,16 +2047,20 @@ class GreedyLaneScheduler:
 
             for target_group, libs in grouped.items():
                 remaining = self._sort_remaining_for_scattered_mix_lane(libs)
-                lane_profile = self._get_dedicated_lane_profile(
-                    target_group=target_group,
-                    libs=libs,
-                    machine_type=machine_type_str,
-                )
-                if lane_profile is None:
-                    remaining_all.extend(remaining)
-                    continue
 
                 while remaining:
+                    # 关键：专Lane档位不能按分组初始总量一次性锁死。
+                    # 例如 G25/G26 大组前几条适合走1.1，但最后可能只剩 800/1000G，
+                    # 这时应从 1.1 自动切到 3.6T-NEW 尾货专Lane，而不是继续按1.1下限判失败。
+                    lane_profile = self._get_dedicated_lane_profile(
+                        target_group=target_group,
+                        libs=remaining,
+                        machine_type=machine_type_str,
+                    )
+                    if lane_profile is None:
+                        remaining_all.extend(remaining)
+                        break
+
                     lane_id = self._get_next_lane_id("DL", machine_type)
                     picked, next_remaining = self._pick_dedicated_imbalance_subset(
                         remaining=remaining,
@@ -2085,6 +2124,9 @@ class GreedyLaneScheduler:
                             "selected_seq_mode": lane_profile["selected_seq_mode"],
                         },
                     )
+                    if lane_profile["selected_seq_mode"] == "3.6T-NEW":
+                        min_allowed = lane_profile["capacity_effective_min_gb"]
+                        max_allowed = lane_profile["capacity_effective_max_gb"]
                     if effective_total > max_allowed + 1e-6 or effective_total < min_allowed - 1e-6:
                         remaining_all.extend(picked + next_remaining)
                         break
@@ -2158,6 +2200,12 @@ class GreedyLaneScheduler:
             lane=lane,
             metadata=capacity_metadata,
         )
+        if selected_seq_mode == "3.6T-NEW":
+            metadata_min = lane.metadata.get("capacity_effective_min_gb")
+            metadata_max = lane.metadata.get("capacity_effective_max_gb")
+            if metadata_min is not None and metadata_max is not None:
+                min_allowed = float(metadata_min)
+                max_allowed = float(metadata_max)
         effective_total = lane.total_data_gb + float(balance_data or 0.0)
         if effective_total > max_allowed + 1e-6 or effective_total < min_allowed - 1e-6:
             logger.info(
@@ -4837,14 +4885,15 @@ class GreedyLaneScheduler:
             existing_aidbids = {self._get_library_aidbid_key(item) for item in lane.libraries}
             if self._get_library_aidbid_key(lib) in existing_aidbids:
                 return False
-            existing_sample_types = {
-                self._get_library_sample_type_key(item)
-                for item in lane.libraries
-                if self._get_library_sample_type_key(item)
-            }
-            lib_sample_type = self._get_library_sample_type_key(lib)
-            if existing_sample_types and lib_sample_type not in existing_sample_types:
-                return False
+            if self._dedicated_imbalance_requires_single_sample_type(test_libraries):
+                existing_sample_types = {
+                    self._get_library_sample_type_key(item)
+                    for item in lane.libraries
+                    if self._get_library_sample_type_key(item)
+                }
+                lib_sample_type = self._get_library_sample_type_key(lib)
+                if existing_sample_types and lib_sample_type not in existing_sample_types:
+                    return False
         
         # 1. 容量上限检查
         new_total = lane.total_data_gb + lib_data

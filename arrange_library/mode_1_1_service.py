@@ -23,6 +23,7 @@ from arrange_library.arrange_library_model6 import (
     _collect_detail_output_libraries,
     _collect_lanes_with_split,
     _collect_prediction_rows,
+    _get_machine_arrangement_exclusion_reason,
     _is_machine_supported_for_arrangement,
     _materialize_balance_libraries_for_solution,
     _read_csv_with_encoding_fallback,
@@ -422,7 +423,10 @@ def prepare_mode_1_1_libraries(
             getattr(lib, "eq_type", "")
         )
         lib.machine_type = machine_type
-        if not _is_machine_supported_for_arrangement(machine_type):
+        machine_exclusion_reason = _get_machine_arrangement_exclusion_reason(machine_type)
+        if machine_exclusion_reason:
+            lib._aiavailable_raw = "no"
+            lib._unaireason_raw = machine_exclusion_reason
             prepared.excluded_machine_libraries.append(lib)
             continue
         if _is_library_ai_schedulable(lib):
