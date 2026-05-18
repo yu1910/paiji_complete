@@ -13961,23 +13961,6 @@ def _collect_prediction_rows(
     logger.info(f"{tag} 收集排机结果，用于后续 prediction_delivery 预测")
 
     runid_by_lane = _build_runid_by_lane(lanes)
-    timestamp = datetime.now().strftime("%Y%m%d%H%M%S")
-    split_family_order: Dict[str, Tuple[int, str]] = {}
-    for lane_sorter, lane in enumerate(lanes, start=1):
-        for lib in list(getattr(lane, "libraries", []) or []):
-            if not _is_split_library(lib):
-                continue
-            family_id = _get_split_family_id_for_lane_build(lib)
-            if not family_id:
-                continue
-            split_family_order.setdefault(family_id, (lane_sorter, str(lane.lane_id)))
-    split_family_virtual_runid = {
-        family_id: f"VIRTUAL_RUN_{timestamp}_{idx:03d}"
-        for idx, family_id in enumerate(
-            sorted(split_family_order, key=lambda item: (split_family_order[item][0], split_family_order[item][1], item)),
-            start=1,
-        )
-    }
     for lane_sorter, lane in enumerate(lanes, start=1):
         libs = list(lane.libraries or [])
         if not libs:
@@ -14085,8 +14068,6 @@ def _collect_prediction_rows(
                 last_order=last_order,
             )
             is_balance_lib = _is_ai_balance_library(lib)
-            split_family_id = _get_split_family_id_for_lane_build(lib) if _is_split_library(lib) else ""
-            virtual_runid = split_family_virtual_runid.get(split_family_id, "")
 
             rows.append(
                 {
@@ -14094,8 +14075,8 @@ def _collect_prediction_rows(
                     "origrec_key": _get_library_source_origrec_key(lib),
                     "detail_row_key": _get_library_detail_output_key(lib),
                     "runid": runid,
-                    "virtualrunid": virtual_runid or None,
-                    "virtuallaneid": virtual_runid or None,
+                    "virtualrunid": None,
+                    "virtuallaneid": None,
                     "lane_id": lane.lane_id,
                     "lanesorter": lane_sorter,
                     "lsjnd": (
