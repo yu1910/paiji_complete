@@ -4075,6 +4075,7 @@ def _validate_no_split_for_package_lane_libraries(solution: Any) -> None:
                 non_package_lane_libs = [
                     lane_lib
                     for lane_lib in getattr(lane, "libraries", []) or []
+                    if not _is_ai_balance_library(lane_lib)
                     if not _safe_str(
                         getattr(lane_lib, "package_lane_number", None) or getattr(lane_lib, "baleno", None),
                         default="",
