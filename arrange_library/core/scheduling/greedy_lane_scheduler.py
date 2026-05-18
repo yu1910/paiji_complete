@@ -225,6 +225,8 @@ class GreedyLaneScheduler:
             Tuple[str, Tuple[Tuple[str, str], ...], Tuple[str, ...]],
             Tuple[bool, Tuple[str, ...]],
         ] = {}
+        self._can_add_failure_log_counts: Dict[str, int] = {}
+        self._can_add_failure_log_limit_per_reason = 0
         
         # 记录配置信息
         config_mode = "按机型自动" if self._base_config.use_machine_config else "固定"
@@ -237,6 +239,182 @@ class GreedyLaneScheduler:
 
         self._batch_analysis_report: Optional[BatchAnalysisReport] = None
         self._strategy_plan: Optional[StrategyExecutionPlan] = None
+
+    def _format_library_for_reject_log(self, lib: EnhancedLibraryInfo) -> str:
+        """输出足够定位规则冲突的文库摘要。"""
+        return (
+            f"origrec={getattr(lib, 'origrec', '')}, "
+            f"project={getattr(lib, 'project_type', '') or getattr(lib, 'project_name', '') or getattr(lib, 'task_group', '')}, "
+            f"sample_type={getattr(lib, 'sample_type_code', '') or getattr(lib, 'data_type', '') or getattr(lib, 'lab_type', '')}, "
+            f"board={getattr(lib, 'board_number', '')}, "
+            f"priority={getattr(lib, 'data_priority', '')}, "
+            f"seq={getattr(lib, 'seq_strategy', '')}, "
+            f"data={lib.get_data_amount_gb():.1f}G"
+        )
+
+    def _log_priority_preconsume_failed_lane(
+        self,
+        lane: LaneAssignment,
+        error_types: List[str],
+        blocked_priority_libs: List[EnhancedLibraryInfo],
+        reusable_fillers: List[EnhancedLibraryInfo],
+    ) -> None:
+        """高优预消耗失败时打印Lane组成，定位补料为何无法通过终态红线。"""
+        libraries = list(getattr(lane, "libraries", []) or [])
+        total_gb = sum(lib.get_data_amount_gb() for lib in libraries)
+        if total_gb <= 0:
+            total_gb = float(getattr(lane, "total_data_gb", 0.0) or 0.0)
+
+        def _sum_data(items: List[EnhancedLibraryInfo]) -> float:
+            return sum(item.get_data_amount_gb() for item in items)
+
+        def _is_customer(item: EnhancedLibraryInfo) -> bool:
+            return bool(getattr(item, "is_customer_library", lambda: False)())
+
+        def _is_imbalance(item: EnhancedLibraryInfo) -> bool:
+            return bool(getattr(item, "is_base_imbalance", lambda: False)())
+
+        def _has_10bp_index(item: EnhancedLibraryInfo) -> bool:
+            ten_bp_data = float(getattr(item, "ten_bp_data", 0.0) or 0.0)
+            if ten_bp_data > 0:
+                return True
+            index_seq = str(getattr(item, "index_seq", "") or "")
+            index_parts = [
+                part.strip()
+                for part in index_seq.replace(";", ",").split(",")
+                if part.strip()
+            ]
+            return any(len(part) >= 10 for part in index_parts)
+
+        def _ratio(data_gb: float) -> float:
+            return data_gb / total_gb if total_gb > 0 else 0.0
+
+        peaks = [
+            float(getattr(item, "peak_size", 0.0) or 0.0)
+            for item in libraries
+            if float(getattr(item, "peak_size", 0.0) or 0.0) > 0
+        ]
+        customer_gb = _sum_data([item for item in libraries if _is_customer(item)])
+        ten_bp_gb = _sum_data([item for item in libraries if _has_10bp_index(item)])
+        imbalance_gb = _sum_data([item for item in libraries if _is_imbalance(item)])
+        priority_gb = _sum_data(blocked_priority_libs)
+        filler_gb = _sum_data(reusable_fillers)
+        filler_summary = [
+            self._format_library_for_reject_log(item)
+            for item in reusable_fillers[:25]
+        ]
+        sample_type_data: Dict[str, float] = {}
+        for item in libraries:
+            key = str(
+                getattr(item, "sample_type_code", "")
+                or getattr(item, "data_type", "")
+                or getattr(item, "lab_type", "")
+                or ""
+            ).strip() or "-"
+            sample_type_data[key] = sample_type_data.get(key, 0.0) + item.get_data_amount_gb()
+        sample_type_summary = ", ".join(
+            f"{key}:{value:.1f}G"
+            for key, value in sorted(sample_type_data.items(), key=lambda kv: -kv[1])[:12]
+        )
+        logger.debug(
+            "高优预消耗失败Lane组成: lane_id={}, errors={}, libs={}, total={:.1f}G, "
+            "priority={}({:.1f}G), fillers={}({:.1f}G), customer={:.1f}G/{:.1%}, "
+            "10bp={:.1f}G/{:.1%}, imbalance={:.1f}G/{:.1%}, peak_range={}, "
+            "sample_type_data=[{}], filler_examples={}",
+            getattr(lane, "lane_id", ""),
+            error_types,
+            len(libraries),
+            total_gb,
+            len(blocked_priority_libs),
+            priority_gb,
+            len(reusable_fillers),
+            filler_gb,
+            customer_gb,
+            _ratio(customer_gb),
+            ten_bp_gb,
+            _ratio(ten_bp_gb),
+            imbalance_gb,
+            _ratio(imbalance_gb),
+            (f"{min(peaks):.0f}-{max(peaks):.0f}" if peaks else "-"),
+            sample_type_summary,
+            filler_summary,
+        )
+
+    def _log_can_add_reject(
+        self,
+        reason_key: str,
+        reason_detail: str,
+        lane: LaneAssignment,
+        lib: EnhancedLibraryInfo,
+        test_libraries: Optional[List[EnhancedLibraryInfo]] = None,
+    ) -> None:
+        """节流打印 _can_add_to_lane 拒绝原因，避免大批量排机刷爆日志。"""
+        if self._can_add_failure_log_limit_per_reason <= 0:
+            return
+        count = self._can_add_failure_log_counts.get(reason_key, 0)
+        if count >= self._can_add_failure_log_limit_per_reason:
+            self._can_add_failure_log_counts[reason_key] = count + 1
+            return
+
+        self._can_add_failure_log_counts[reason_key] = count + 1
+        lane_libraries = list(getattr(lane, "libraries", []) or [])
+        projected_libraries = list(test_libraries or (lane_libraries + [lib]))
+        lane_sample_types = sorted(
+            {
+                str(
+                    getattr(item, "sample_type_code", "")
+                    or getattr(item, "data_type", "")
+                    or getattr(item, "lab_type", "")
+                    or ""
+                ).strip()
+                for item in projected_libraries
+                if str(
+                    getattr(item, "sample_type_code", "")
+                    or getattr(item, "data_type", "")
+                    or getattr(item, "lab_type", "")
+                    or ""
+                ).strip()
+            }
+        )
+        lane_projects = sorted(
+            {
+                str(
+                    getattr(item, "project_type", "")
+                    or getattr(item, "project_name", "")
+                    or getattr(item, "task_group", "")
+                    or ""
+                ).strip()
+                for item in projected_libraries
+                if str(
+                    getattr(item, "project_type", "")
+                    or getattr(item, "project_name", "")
+                    or getattr(item, "task_group", "")
+                    or ""
+                ).strip()
+            }
+        )
+        lane_boards = sorted(
+            {
+                str(getattr(item, "board_number", "") or "").strip()
+                for item in projected_libraries
+                if str(getattr(item, "board_number", "") or "").strip()
+            }
+        )
+        logger.info(
+            "_can_add_to_lane拒绝: reason={}, detail={}, lane_id={}, lane_libs={}, "
+            "lane_total={:.1f}G -> {:.1f}G, candidate=[{}], projected_sample_types={}, "
+            "projected_projects={}, projected_boards={}",
+            reason_key,
+            reason_detail,
+            getattr(lane, "lane_id", ""),
+            len(lane_libraries),
+            float(getattr(lane, "total_data_gb", 0.0) or 0.0),
+            sum(item.get_data_amount_gb() for item in projected_libraries),
+            self._format_library_for_reject_log(lib),
+            lane_sample_types,
+            lane_projects,
+            lane_boards,
+        )
 
     def _run_batch_analysis(
         self, libraries: List[EnhancedLibraryInfo]
@@ -258,8 +436,11 @@ class GreedyLaneScheduler:
             for line in report.summary_lines():
                 logger.info(line)
 
-            planner = RuleConstrainedStrategyPlanner()
-            self._strategy_plan = planner.plan(report)
+            if self._strategy_plan is None:
+                planner = RuleConstrainedStrategyPlanner()
+                self._strategy_plan = planner.plan(report)
+            else:
+                logger.info("保留外部传入的策略执行计划，仅使用批次分析报告")
             return report
         except Exception as exc:
             logger.warning(f"批次全局分析异常，不影响排机: {exc}")
@@ -387,6 +568,51 @@ class GreedyLaneScheduler:
         if source_key:
             return source_key
         return str(id(lib))
+
+    def _rebuild_unassigned_after_lane_mutation(
+        self,
+        original_pool: List[EnhancedLibraryInfo],
+        all_lanes: List[LaneAssignment],
+        extra_unassigned: Optional[List[EnhancedLibraryInfo]] = None,
+        *,
+        stage_name: str,
+    ) -> List[EnhancedLibraryInfo]:
+        """按原池扣除当前已入Lane身份重建未分配池，避免优化阶段漏回尾库。"""
+        assigned_keys = {
+            self._get_library_runtime_key(lib)
+            for lane in list(all_lanes or [])
+            for lib in list(getattr(lane, "libraries", []) or [])
+        }
+        rebuilt: List[EnhancedLibraryInfo] = []
+        seen_keys: Set[str] = set()
+
+        for pool in (list(original_pool or []), list(extra_unassigned or [])):
+            for lib in pool:
+                lib_key = self._get_library_runtime_key(lib)
+                if lib_key in assigned_keys or lib_key in seen_keys:
+                    continue
+                seen_keys.add(lib_key)
+                rebuilt.append(lib)
+
+        before_keys = {
+            self._get_library_runtime_key(lib)
+            for lib in list(original_pool or [])
+        }
+        after_keys = assigned_keys | seen_keys
+        missing_keys = before_keys - after_keys
+        if missing_keys:
+            logger.warning(
+                "{}守恒修复: 原未分配池有{}个文库未进入Lane/未分配结果，已按原池补回",
+                stage_name,
+                len(missing_keys),
+            )
+            for lib in list(original_pool or []):
+                lib_key = self._get_library_runtime_key(lib)
+                if lib_key in missing_keys and lib_key not in seen_keys:
+                    seen_keys.add(lib_key)
+                    rebuilt.append(lib)
+
+        return rebuilt
 
     def _build_library_signature(
         self,
@@ -965,7 +1191,7 @@ class GreedyLaneScheduler:
             for round_num in range(4, 50):  # 最多尝试到第50轮，增加尝试次数
                 if failed and len(failed) >= 10 and failed_pool_viable:
                     random.shuffle(failed)
-                    logger.info(f"第{round_num}轮排机: {len(failed)} 个未分配文库")
+                    logger.debug(f"第{round_num}轮排机: {len(failed)} 个未分配文库")
                     lanes_n, failed_n = self._schedule_machine_group(failed, machine_type)
                     next_failed_signature = self._build_retry_pool_signature(failed_n)
                     # [2025-12-29 修复] 无论是否形成新Lane，都要更新failed
@@ -980,7 +1206,7 @@ class GreedyLaneScheduler:
                         consecutive_failures += 1
                         if next_failed_signature == failed_signature:
                             stagnant_retry_rounds += 1
-                            logger.info(
+                            logger.debug(
                                 f"第{round_num}轮排机后未分配池无变化，连续{stagnant_retry_rounds}轮停滞"
                             )
                         else:
@@ -1081,14 +1307,51 @@ class GreedyLaneScheduler:
         # 尝试将剩余未分配文库塞入已有Lane的剩余空间
         if enable_post_fill_optimization and unassigned and all_lanes:
             logger.info(f"最后填充策略: 尝试将{len(unassigned)}个未分配文库塞入已有Lane")
+            post_fill_original_pool = list(unassigned)
             still_unassigned: List[EnhancedLibraryInfo] = []
             filled_count = 0
             removed_libs: List[EnhancedLibraryInfo] = []  # 记录被踢出的文库
             fill_candidates = self._sort_remaining_for_scattered_mix_lane(unassigned)
+            lane_fill_capacity_cache: Dict[int, Tuple[str, float]] = {}
+            post_fill_lane_window = min(len(all_lanes), 8 if len(all_lanes) > 8 else len(all_lanes))
+
+            def _refresh_fill_lane_capacity(lane: LaneAssignment) -> Tuple[str, float]:
+                machine_type_str = lane.machine_type.value if lane.machine_type else "Nova X-25B"
+                _, max_capacity = self._resolve_lane_capacity_limits(
+                    lane.libraries,
+                    machine_type_str,
+                    lane=lane,
+                )
+                lane_fill_capacity_cache[id(lane)] = (machine_type_str, max_capacity)
+                return machine_type_str, max_capacity
+
+            def _select_fill_lane_window(lib: EnhancedLibraryInfo) -> List[LaneAssignment]:
+                lib_machine_type = getattr(lib, "eq_type", "") or "Nova X-25B"
+                lib_data = lib.get_data_amount_gb()
+                scored_lanes: List[Tuple[Tuple[int, int, float, int], LaneAssignment]] = []
+                for lane in all_lanes:
+                    machine_type_str, max_capacity = lane_fill_capacity_cache.get(id(lane), (None, None))
+                    if machine_type_str is None or max_capacity is None:
+                        machine_type_str, max_capacity = _refresh_fill_lane_capacity(lane)
+                    projected_total = lane.total_data_gb + lib_data
+                    overflow = max(0.0, projected_total - max_capacity)
+                    scored_lanes.append(
+                        (
+                            (
+                                0 if overflow <= 1e-6 else 1,
+                                0 if machine_type_str == lib_machine_type else 1,
+                                overflow if overflow > 0 else max_capacity - projected_total,
+                                len(lane.libraries),
+                            ),
+                            lane,
+                        )
+                    )
+                scored_lanes.sort(key=lambda item: item[0])
+                return [lane for _, lane in scored_lanes[:post_fill_lane_window]]
             
             for lib in fill_candidates:
                 placed = False
-                for lane in all_lanes:
+                for lane in _select_fill_lane_window(lib):
                     # 检查容量
                     machine_type_str = lane.machine_type.value if lane.machine_type else (lib.eq_type or "Nova X-25B")
                     test_libs_for_capacity = lane.libraries + [lib]
@@ -1100,6 +1363,10 @@ class GreedyLaneScheduler:
                     new_total = lane.total_data_gb + lib.get_data_amount_gb()
                     if new_total > max_capacity:
                         continue
+                    lane_mutated_during_attempt = False
+                    initial_capacity_max = max_capacity
+                    initial_index_checked = False
+                    initial_peak_checked = False
                     
                     if lane.lane_id.startswith('DL_'):
                         if not self._can_add_to_lane(lane, lib):
@@ -1138,11 +1405,13 @@ class GreedyLaneScheduler:
                         test_libs = lane.libraries + [lib]
                         if not self.index_validator.validate_lane_quick(test_libs):
                             continue
+                        initial_index_checked = True
                     
                     # [2025-12-25 新增] Peak Size约束检查
                     test_libs_for_peak = lane.libraries + [lib]
                     if not self._check_peak_size_compatible(test_libs_for_peak):
                         continue
+                    initial_peak_checked = True
                     
                     # [2025-12-31 新增] 动态调整策略：计算需要踢出的违反规则的文库数据量
                     # 注意：对于NB Lane，如果已有内部文库，完全禁止添加客户文库（已在前面检查）
@@ -1174,11 +1443,18 @@ class GreedyLaneScheduler:
                             lane.remove_library(old_lib)
                         for new_lib in repaired_libs:
                             lane.add_library(new_lib)
+                        lane_mutated_during_attempt = True
+                        _refresh_fill_lane_capacity(lane)
 
                         # 当前lib已经在修复结果中时，不再走后续“添加lib”流程
                         if lib in lane.libraries:
                             placed = True
                             filled_count += 1
+                            break
+
+                        # 当前候选被严格修复流程移出时，回到未分配池等待后续阶段处理。
+                        if lib in removed_libs:
+                            placed = False
                             break
 
                         # 若修复后未包含当前lib，则本次尝试失败
@@ -1272,21 +1548,29 @@ class GreedyLaneScheduler:
                             lane.remove_library(l)
                             removed_libs.append(l)  # 记录被踢出的文库，后续重新分配
                             logger.debug(f"填充阶段: 从Lane {lane.lane_id} 踢出违反规则的文库 {l.origrec} ({l.get_data_amount_gb():.1f}GB)")
+                        lane_mutated_during_attempt = True
+                        _refresh_fill_lane_capacity(lane)
                     
                     # 5. 最终容量检查（确保添加后不超过上限）
                     final_total = lane.total_data_gb + lib.get_data_amount_gb()
-                    _, max_capacity = self._resolve_lane_capacity_limits(
-                        lane.libraries + [lib],
-                        machine_type_str,
-                        lane=lane,
-                    )
+                    if lane_mutated_during_attempt:
+                        _, max_capacity = self._resolve_lane_capacity_limits(
+                            lane.libraries + [lib],
+                            machine_type_str,
+                            lane=lane,
+                        )
+                    else:
+                        max_capacity = initial_capacity_max
                     if final_total > max_capacity:
                         continue  # 最终容量超过上限，拒绝添加
                     
                     # 6. 最终Index冲突检查（确保添加后没有Index冲突）
                     if self.config.enable_index_check:
                         final_test_libs = lane.libraries + [lib]
-                        if not self.index_validator.validate_lane_quick(final_test_libs):
+                        if (
+                            (not initial_index_checked or lane_mutated_during_attempt)
+                            and not self.index_validator.validate_lane_quick(final_test_libs)
+                        ):
                             continue  # 最终Index冲突检查失败，拒绝添加
                     
                     # 7. 最终规则检查（确保添加后所有规则都满足）
@@ -1310,7 +1594,10 @@ class GreedyLaneScheduler:
                         continue  # 最终碱基不均衡占比检查失败，拒绝添加
                     
                     # 7.3 Peak Size检查
-                    if not self._check_peak_size_compatible(final_test_libs):
+                    if (
+                        (not initial_peak_checked or lane_mutated_during_attempt)
+                        and not self._check_peak_size_compatible(final_test_libs)
+                    ):
                         continue  # 最终Peak Size检查失败，拒绝添加
                     
                     # 7.4 10bp Index占比检查（仅非NB Lane）
@@ -1320,6 +1607,7 @@ class GreedyLaneScheduler:
                     
                     # 8. 通过所有检查，加入Lane
                     lane.add_library(lib)
+                    _refresh_fill_lane_capacity(lane)
                     placed = True
                     filled_count += 1
                     
@@ -1340,15 +1628,41 @@ class GreedyLaneScheduler:
                 logger.info(f"最后填充策略: 成功塞入{filled_count}个文库，踢出{len(removed_libs)}个违反规则的文库，剩余{len(still_unassigned)}个无法分配")
             
             # 将被踢出的文库添加到未分配列表，以便后续重新分配
-            unassigned = still_unassigned + removed_libs
+            rebuilt_unassigned = self._rebuild_unassigned_after_lane_mutation(
+                original_pool=post_fill_original_pool,
+                all_lanes=all_lanes,
+                extra_unassigned=removed_libs,
+                stage_name="最后填充策略",
+            )
+            if len(rebuilt_unassigned) != len(still_unassigned) + len(removed_libs):
+                logger.warning(
+                    "最后填充策略未分配池重建修正: 旧算法={}个，新算法={}个",
+                    len(still_unassigned) + len(removed_libs),
+                    len(rebuilt_unassigned),
+                )
+            unassigned = rebuilt_unassigned
         
         # ===== [2025-12-25 新增] 挪移优化策略 =====
         # 当有未分配文库且无法新开Lane时，从现有Lane挪出部分文库合并成新Lane
         if enable_post_fill_optimization and unassigned and all_lanes:
+            redistribution_original_pool = list(unassigned)
             unassigned, new_lanes = self._optimize_by_redistribution(
                 unassigned, all_lanes, machine_type
             )
             all_lanes.extend(new_lanes)
+            rebuilt_unassigned = self._rebuild_unassigned_after_lane_mutation(
+                original_pool=redistribution_original_pool,
+                all_lanes=all_lanes,
+                extra_unassigned=unassigned,
+                stage_name="挪移优化",
+            )
+            if len(rebuilt_unassigned) != len(unassigned):
+                logger.warning(
+                    "挪移优化未分配池重建修正: 子函数返回={}个，守恒重建={}个",
+                    len(unassigned),
+                    len(rebuilt_unassigned),
+                )
+            unassigned = rebuilt_unassigned
         elif not enable_post_fill_optimization and unassigned and all_lanes:
             logger.info(
                 "最后填充与挪移优化已按调用方要求关闭: 保留{}个未分配文库直接回流后续流程".format(
@@ -1803,6 +2117,68 @@ class GreedyLaneScheduler:
         priority_core = [lib for lib in libraries if self._is_priority_core_library(lib)]
         fillers = [lib for lib in libraries if not self._is_priority_core_library(lib)]
         return priority_core, fillers
+
+    def _priority_preconsume_profile_can_add_library(
+        self,
+        lane: LaneAssignment,
+        lib: EnhancedLibraryInfo,
+    ) -> bool:
+        """高优预消耗按终态红线画像限流，高优和补料都不能把Lane推过红线。"""
+        test_libraries = list(lane.libraries or []) + [lib]
+        total_data = sum(item.get_data_amount_gb() for item in test_libraries)
+        if total_data <= 0:
+            return True
+
+        if not self._check_customer_ratio_compatible_by_data(test_libraries):
+            return False
+
+        data_10bp = sum(
+            item.get_data_amount_gb()
+            for item in test_libraries
+            if self._library_has_10bp_index(item)
+        )
+        data_non_10bp = total_data - data_10bp
+        if data_10bp > 0 and data_non_10bp > 0:
+            ten_bp_ratio = data_10bp / total_data
+            if ten_bp_ratio + 1e-12 < self.config.min_10bp_index_ratio:
+                return False
+
+        single_end_data = 0.0
+        for item in test_libraries:
+            single_index_data = getattr(item, "single_index_data", None)
+            if single_index_data is not None and single_index_data > 0:
+                single_end_data += item.get_data_amount_gb()
+                continue
+            if self._is_single_end_index(getattr(item, "index_seq", "") or ""):
+                single_end_data += item.get_data_amount_gb()
+        if 0 < single_end_data < total_data:
+            single_end_ratio = single_end_data / total_data
+            if single_end_ratio + 1e-12 >= self.lane_validator.single_end_ratio_limit:
+                return False
+
+        imbalance_data = sum(
+            item.get_data_amount_gb()
+            for item in test_libraries
+            if item.is_base_imbalance()
+        )
+        if imbalance_data > 0:
+            imbalance_ratio = imbalance_data / total_data
+            if imbalance_ratio - 1e-12 > self.config.max_imbalance_ratio:
+                return False
+            if imbalance_data - 1e-6 > self.config.max_special_library_data_gb:
+                return False
+            if imbalance_data < total_data - 1e-6 and self.imbalance_handler:
+                is_compatible, _ = self.imbalance_handler.check_mix_compatibility(
+                    test_libraries,
+                    enforce_total_limit=False,
+                )
+                if not is_compatible:
+                    return False
+
+        if not self._check_peak_size_compatible(test_libraries):
+            return False
+
+        return True
 
     def _parse_scattered_mix_delete_date(self, lib: EnhancedLibraryInfo) -> Optional[float]:
         """解析散样混排的delete_date天数字段，数值越小表示越临近越优先。"""
@@ -4650,6 +5026,7 @@ class GreedyLaneScheduler:
         valid_lanes: List[LaneAssignment] = []
         failed_libraries: List[EnhancedLibraryInfo] = []  # 验证失败的文库
         remaining: List[EnhancedLibraryInfo] = list(libraries)
+        preconsume_input_order = {id(lib): idx for idx, lib in enumerate(remaining)}
         
         # 将字符串机器类型转换为枚举
         machine_type_enum = self._resolve_machine_type_enum(machine_type, libraries)
@@ -4658,10 +5035,36 @@ class GreedyLaneScheduler:
         
         # 逐条Lane排机
         while remaining:
-            # 散样混排策略优先于一般排序：临检 > YC > delete_date > 其他，尽量集中到连续Lane。
-            remaining = self._sort_remaining_for_scattered_mix_lane(remaining)
+            is_priority_preconsume_pool = any(
+                bool(getattr(lib, "_priority_preconsume_bucket", ""))
+                for lib in remaining
+            )
+            if is_priority_preconsume_pool:
+                bucket_rank = {
+                    "priority_1_1": 0,
+                    "priority_36t": 0,
+                    "filler_36t": 1,
+                    "filler_1_1": 1,
+                }
+                remaining = sorted(
+                    remaining,
+                    key=lambda lib: (
+                        bucket_rank.get(
+                            str(getattr(lib, "_priority_preconsume_bucket", "") or ""),
+                            2,
+                        ),
+                        preconsume_input_order.get(id(lib), len(preconsume_input_order)),
+                    ),
+                )
+            else:
+                # 散样混排策略优先于一般排序：临检 > YC > delete_date > 其他，尽量集中到连续Lane。
+                remaining = self._sort_remaining_for_scattered_mix_lane(remaining)
             seed_lib = remaining[0]
-            lane_candidate_order = self._sort_remaining_for_lane_seed(remaining, seed_lib)
+            lane_candidate_order = (
+                list(remaining)
+                if is_priority_preconsume_pool
+                else self._sort_remaining_for_lane_seed(remaining, seed_lib)
+            )
 
             seed_rule = self._get_scheduling_lane_capacity_range(
                 libraries=[seed_lib],
@@ -4700,6 +5103,15 @@ class GreedyLaneScheduler:
             current_lane.metadata["sequencing_mode"] = seed_rule.sequencing_mode
             current_lane.metadata["loading_method"] = seed_rule.loading_method
             current_lane.metadata["target_capacity_gb"] = target_capacity_gb
+            if priority_seed_lane and any(
+                bool(getattr(lib, "_priority_preconsume_bucket", ""))
+                for lib in remaining
+            ):
+                current_lane.metadata["dispatch_stage"] = "priority_preconsume_36t"
+                current_lane.metadata["selected_seq_mode"] = "3.6T-NEW"
+                current_lane.metadata["seq_mode"] = "3.6T-NEW"
+                current_lane.metadata["lcxms"] = "3.6T-NEW"
+                current_lane.metadata["priority_preconsume_defer_terminal_ratio_checks"] = True
             
             # 遍历剩余文库，尝试放入当前Lane
             next_remaining: List[EnhancedLibraryInfo] = []
@@ -4712,6 +5124,16 @@ class GreedyLaneScheduler:
                 if priority_seed_lane and bucket_index > 0 and not current_lane.libraries:
                     break
                 for lib in candidates:
+                    if (
+                        priority_seed_lane
+                        and bucket_index == 0
+                        and not self._priority_preconsume_profile_can_add_library(
+                            current_lane,
+                            lib,
+                        )
+                    ):
+                        deferred_remaining.append(lib)
+                        continue
                     # 检查是否能放入
                     if self._can_add_to_lane(current_lane, lib):
                         current_lane.add_library(lib)
@@ -4724,9 +5146,11 @@ class GreedyLaneScheduler:
                                 metadata=self._build_lane_validation_metadata(current_lane),
                             )
                             if current_lane.total_data_gb >= current_rule.effective_min_gb:
-                                break_index = lane_candidate_order.index(lib)
-                                stop_building = True
-                                break
+                                is_valid_now, _ = self._validate_completed_lane(current_lane)
+                                if is_valid_now:
+                                    break_index = lane_candidate_order.index(lib)
+                                    stop_building = True
+                                    break
                         elif current_lane.total_data_gb >= target_capacity_gb:
                             # 达到软目标，剩余文库留给下一条Lane
                             break_index = lane_candidate_order.index(lib)
@@ -4772,15 +5196,40 @@ class GreedyLaneScheduler:
                 if is_valid:
                     # 验证通过，保存并继续排下一条
                     valid_lanes.append(current_lane)
-                    logger.info(f"Lane {current_lane.lane_id} 通过验证 - "
+                    logger.debug(f"Lane {current_lane.lane_id} 通过验证 - "
                                f"文库数: {len(current_lane.libraries)}, "
                                f"数据量: {current_lane.total_data_gb:.1f}GB, "
                                f"规则: {completed_rule.rule_code}")
                     remaining = next_remaining
                 else:
+                    if priority_seed_lane:
+                        blocked_priority_libs = [
+                            lib for lib in current_lane.libraries
+                            if self._is_priority_core_library(lib)
+                        ]
+                        reusable_fillers = [
+                            lib for lib in current_lane.libraries
+                            if not self._is_priority_core_library(lib)
+                        ]
+                        self._log_priority_preconsume_failed_lane(
+                            current_lane,
+                            error_types,
+                            blocked_priority_libs,
+                            reusable_fillers,
+                        )
+                        failed_libraries.extend(blocked_priority_libs)
+                        remaining = reusable_fillers + next_remaining
+                        error_detail = f" ({', '.join(error_types)})" if error_types else ""
+                        logger.debug(
+                            f"Lane {current_lane.lane_id} 红线验证失败{error_detail}，"
+                            f"当前高优先级尾货{len(blocked_priority_libs)}个暂挂未分配，"
+                            f"普通补料{len(reusable_fillers)}个回池继续尝试"
+                        )
+                        continue
+
                     # 验证失败，当前Lane的文库标记为失败，用剩余文库继续排
                     error_detail = f" ({', '.join(error_types)})" if error_types else ""
-                    logger.warning(
+                    logger.debug(
                         f"Lane {current_lane.lane_id} 红线验证失败{error_detail}，"
                         f"{len(current_lane.libraries)} 个文库标记为无法分配"
                     )
@@ -4790,6 +5239,61 @@ class GreedyLaneScheduler:
                 # 高优先级优先占坑后，如果这条Lane仍达不到下限，说明这批高优先级尾货当前被硬约束卡住。
                 # 这时不能直接终止整个机型组排机，否则后续普通文库可形成的Lane也会被一并堵死。
                 if priority_seed_lane:
+                    supplemental_remaining: List[EnhancedLibraryInfo] = []
+                    for lib in next_remaining:
+                        if self._is_priority_core_library(lib):
+                            supplemental_remaining.append(lib)
+                            continue
+                        if self._can_add_to_lane(current_lane, lib):
+                            current_lane.add_library(lib)
+                            placed_ids.add(str(getattr(lib, "origrec", "") or id(lib)))
+                            completed_rule = self._get_scheduling_lane_capacity_range(
+                                libraries=current_lane.libraries,
+                                machine_type=machine_type_enum.value,
+                                metadata=self._build_lane_validation_metadata(current_lane),
+                            )
+                            if current_lane.total_data_gb >= completed_rule.effective_min_gb:
+                                break
+                        else:
+                            supplemental_remaining.append(lib)
+
+                    if current_lane.total_data_gb >= completed_rule.effective_min_gb:
+                        is_valid, error_types = self._validate_completed_lane(current_lane)
+                        if is_valid:
+                            valid_lanes.append(current_lane)
+                            remaining = supplemental_remaining
+                            logger.debug(
+                                f"Lane {current_lane.lane_id} 通过验证 - "
+                                f"文库数: {len(current_lane.libraries)}, "
+                                f"数据量: {current_lane.total_data_gb:.1f}GB, "
+                                f"规则: {completed_rule.rule_code}"
+                            )
+                            continue
+
+                        blocked_priority_libs = [
+                            lib for lib in current_lane.libraries
+                            if self._is_priority_core_library(lib)
+                        ]
+                        reusable_fillers = [
+                            lib for lib in current_lane.libraries
+                            if not self._is_priority_core_library(lib)
+                        ]
+                        self._log_priority_preconsume_failed_lane(
+                            current_lane,
+                            error_types,
+                            blocked_priority_libs,
+                            reusable_fillers,
+                        )
+                        failed_libraries.extend(blocked_priority_libs)
+                        remaining = reusable_fillers + supplemental_remaining
+                        error_detail = f" ({', '.join(error_types)})" if error_types else ""
+                        logger.debug(
+                            f"Lane {current_lane.lane_id} 红线验证失败{error_detail}，"
+                            f"当前高优先级尾货{len(blocked_priority_libs)}个暂挂未分配，"
+                            f"普通补料{len(reusable_fillers)}个回池继续尝试"
+                        )
+                        continue
+
                     blocked_priority_libs = [
                         lib for lib in current_lane.libraries
                         if self._is_priority_core_library(lib)
@@ -4800,7 +5304,7 @@ class GreedyLaneScheduler:
                     ]
                     failed_libraries.extend(blocked_priority_libs)
                     remaining = reusable_fillers + next_remaining
-                    logger.warning(
+                    logger.debug(
                         f"Lane {current_lane.lane_id} 数据量{current_lane.total_data_gb:.1f}G"
                         f"低于下限{completed_rule.effective_min_gb:.1f}G，"
                         f"当前高优先级尾货{len(blocked_priority_libs)}个暂挂未分配，继续尝试后续普通Lane"
@@ -4810,7 +5314,7 @@ class GreedyLaneScheduler:
                 # 普通Lane利用率不足，沿用原逻辑直接结束
                 # 当前Lane的文库 + 剩余文库 = 所有未分配文库
                 all_unassigned = current_lane.libraries + next_remaining
-                logger.warning(
+                logger.debug(
                     f"Lane {current_lane.lane_id} 数据量{current_lane.total_data_gb:.1f}G"
                     f"低于下限{completed_rule.effective_min_gb:.1f}G，"
                     f"{len(all_unassigned)} 个文库无法形成有效Lane"
@@ -4869,6 +5373,13 @@ class GreedyLaneScheduler:
         if new_split_family_id:
             for existing_lib in lane.libraries:
                 if self._get_split_family_id(existing_lib) == new_split_family_id:
+                    self._log_can_add_reject(
+                        "split_family_duplicate",
+                        f"同一拆分家族: {new_split_family_id}, existing={getattr(existing_lib, 'origrec', '')}",
+                        lane,
+                        lib,
+                        test_libraries,
+                    )
                     return False
         
         # 判断Lane类型
@@ -4881,9 +5392,23 @@ class GreedyLaneScheduler:
 
         if is_dl_lane:
             if not self._is_dedicated_imbalance_library(lib):
+                self._log_can_add_reject(
+                    "dl_lane_requires_imbalance",
+                    "DL专Lane只允许碱基不均衡文库",
+                    lane,
+                    lib,
+                    test_libraries,
+                )
                 return False
             existing_aidbids = {self._get_library_aidbid_key(item) for item in lane.libraries}
             if self._get_library_aidbid_key(lib) in existing_aidbids:
+                self._log_can_add_reject(
+                    "dl_lane_duplicate_aidbid",
+                    f"DL专Lane aidbid重复: {self._get_library_aidbid_key(lib)}",
+                    lane,
+                    lib,
+                    test_libraries,
+                )
                 return False
             if self._dedicated_imbalance_requires_single_sample_type(test_libraries):
                 existing_sample_types = {
@@ -4893,6 +5418,13 @@ class GreedyLaneScheduler:
                 }
                 lib_sample_type = self._get_library_sample_type_key(lib)
                 if existing_sample_types and lib_sample_type not in existing_sample_types:
+                    self._log_can_add_reject(
+                        "dl_lane_sample_type_mismatch",
+                        f"DL专Lane样本类型不一致: existing={sorted(existing_sample_types)}, candidate={lib_sample_type}",
+                        lane,
+                        lib,
+                        test_libraries,
+                    )
                     return False
         
         # 1. 容量上限检查
@@ -4904,13 +5436,32 @@ class GreedyLaneScheduler:
         )
         max_capacity = lane_rule.effective_max_gb
         if new_total > max_capacity:
+            self._log_can_add_reject(
+                "capacity_exceeded",
+                f"容量超上限: new_total={new_total:.1f}G > max={max_capacity:.1f}G, rule={getattr(lane_rule, 'rule_code', '')}",
+                lane,
+                lib,
+                test_libraries,
+            )
             return False
 
-        if self.scheduling_config.validate_lane_constraints(
+        defer_terminal_checks = bool(
+            lane.metadata.get("priority_preconsume_defer_terminal_ratio_checks")
+        )
+
+        constraint_messages = self.scheduling_config.validate_lane_constraints(
             libraries=test_libraries,
             machine_type=machine_type_str,
             metadata=lane_metadata,
-        ):
+        )
+        if constraint_messages:
+            self._log_can_add_reject(
+                "rule_matrix_constraint",
+                "统一配置规则拦截: " + " | ".join(str(msg) for msg in constraint_messages),
+                lane,
+                lib,
+                test_libraries,
+            )
             return False
         
         # 2. 机器类型兼容性检查
@@ -4918,53 +5469,133 @@ class GreedyLaneScheduler:
             existing_type_str = lane.machine_type.value if lane.machine_type else ""
             new_type_str = lib.eq_type or ""
             if existing_type_str and new_type_str and existing_type_str != new_type_str:
+                self._log_can_add_reject(
+                    "machine_type_mismatch",
+                    f"机型不一致: lane={existing_type_str}, candidate={new_type_str}",
+                    lane,
+                    lib,
+                    test_libraries,
+                )
                 return False
         
         # 3. Index冲突检查（硬性约束）
         # 使用增量检查：只验证新文库与已有文库的冲突（O(n)），不重复检查现有文库对（O(n²)）
         if self.config.enable_index_check:
             if not self.index_validator.validate_new_lib_quick(lane.libraries, lib):
+                self._log_can_add_reject(
+                    "index_conflict",
+                    "候选文库与Lane内已有文库Index冲突",
+                    lane,
+                    lib,
+                    test_libraries,
+                )
                 return False
         
-        # 4. 客户占比检查（按数据量计算，严格遵守规则）
-        if not self._check_customer_ratio_compatible_by_data(test_libraries):
-            return False
-        
-        # 5. 10bp Index占比检查（非NB Lane需要>=40%）
-        if not is_nb_lane:
-            if not self._check_10bp_index_ratio_compatible(test_libraries):
+        if not defer_terminal_checks:
+            # 4. 客户占比检查（按数据量计算，严格遵守规则）
+            if not self._check_customer_ratio_compatible_by_data(test_libraries):
+                self._log_can_add_reject(
+                    "customer_ratio",
+                    "客户文库占比规则不兼容",
+                    lane,
+                    lib,
+                    test_libraries,
+                )
                 return False
-        
-        # 6. 单端Index占比检查（按数据量，<30%）
-        if not self._check_single_end_ratio_compatible(test_libraries):
-            return False
-
-        # 7. 碱基不均衡占比检查（非DL Lane需要<=40%，按数据量计算）
-        if not is_dl_lane:
-            if not self._check_base_imbalance_compatible(test_libraries):
+            
+            # 5. 10bp Index占比检查（非NB Lane需要>=40%）
+            if not is_nb_lane:
+                if not self._check_10bp_index_ratio_compatible(test_libraries):
+                    self._log_can_add_reject(
+                        "ten_bp_index_ratio",
+                        "10bp Index占比规则不兼容",
+                        lane,
+                        lib,
+                        test_libraries,
+                    )
+                    return False
+            
+            # 6. 单端Index占比检查（按数据量，<30%）
+            if not self._check_single_end_ratio_compatible(test_libraries):
+                self._log_can_add_reject(
+                    "single_end_ratio",
+                    "单端Index占比规则不兼容",
+                    lane,
+                    lib,
+                    test_libraries,
+                )
                 return False
+    
+            # 7. 碱基不均衡占比检查（非DL Lane需要<=40%，按数据量计算）
+            if not is_dl_lane:
+                if not self._check_base_imbalance_compatible(test_libraries):
+                    self._log_can_add_reject(
+                        "base_imbalance_ratio",
+                        "碱基不均衡占比规则不兼容",
+                        lane,
+                        lib,
+                        test_libraries,
+                    )
+                    return False
         
         # 8. Peak Size兼容性检查
-        if not self._check_peak_size_compatible(test_libraries):
-            return False
+        if not defer_terminal_checks:
+            if not self._check_peak_size_compatible(test_libraries):
+                self._log_can_add_reject(
+                    "peak_size",
+                    "Peak Size兼容性规则不通过",
+                    lane,
+                    lib,
+                    test_libraries,
+                )
+                return False
 
         # 9. 特殊文库类型数量限制已取消
-        if not (is_dl_lane or is_nb_lane or is_bl_lane):
+        if not defer_terminal_checks and not (is_dl_lane or is_nb_lane or is_bl_lane):
             if not self._check_special_library_type_compatible(test_libraries):
+                self._log_can_add_reject(
+                    "special_library_type",
+                    "特殊文库类型数量/组合规则不兼容",
+                    lane,
+                    lib,
+                    test_libraries,
+                )
                 return False
 
-        # 10. 加测文库占比检查（严格模式下视为硬约束）
-        if not self._check_add_test_ratio_compatible(test_libraries):
-            return False
-        
-        # 11. 碱基不均衡混排规则检查
-        if self.config.enable_imbalance_check and self.imbalance_handler:
-            if not self._check_imbalance_compatibility(lane, lib):
+        if not defer_terminal_checks:
+            # 10. 加测文库占比检查（严格模式下视为硬约束）
+            if not self._check_add_test_ratio_compatible(test_libraries):
+                self._log_can_add_reject(
+                    "add_test_ratio",
+                    "加测文库占比规则不兼容",
+                    lane,
+                    lib,
+                    test_libraries,
+                )
                 return False
+            
+            # 11. 碱基不均衡混排规则检查
+            if self.config.enable_imbalance_check and self.imbalance_handler:
+                if not self._check_imbalance_compatibility(lane, lib):
+                    self._log_can_add_reject(
+                        "imbalance_mix",
+                        "碱基不均衡混排规则不兼容",
+                        lane,
+                        lib,
+                        test_libraries,
+                    )
+                    return False
         
         # 12. 文库对兼容性检查（使用RuleChecker检查新文库与现有文库的兼容性）
         if self.config.enable_rule_checker and self.rule_checker:
             if not self._check_pairwise_compatibility(lane, lib):
+                self._log_can_add_reject(
+                    "rule_checker_pairwise",
+                    "RuleChecker文库对硬约束不兼容，详见前后规则冲突日志",
+                    lane,
+                    lib,
+                    test_libraries,
+                )
                 return False
         
         return True
@@ -5037,12 +5668,19 @@ class GreedyLaneScheduler:
             # 检查是否有硬约束违反（规则0,1,2,10是硬约束）
             hard_constraint_indices = [0, 1, 2, 10]  # 机器类型、工序编码、Index冲突、测序策略
             has_hard_violation = False
+            violated_rule_indices: List[int] = []
             for idx in hard_constraint_indices:
                 if violations[idx] == 1:
-                    logger.debug(f"规则{idx}冲突: {lib.origrec} vs {existing_lib.origrec}")
+                    violated_rule_indices.append(idx)
                     has_hard_violation = True
-                    break
             if has_hard_violation:
+                logger.info(
+                    "RuleChecker文库对硬约束冲突: lane_id={}, candidate={}, existing={}, rules={}",
+                    getattr(lane, "lane_id", ""),
+                    getattr(lib, "origrec", ""),
+                    getattr(existing_lib, "origrec", ""),
+                    violated_rule_indices,
+                )
                 return False
         
         return True
@@ -5154,7 +5792,16 @@ class GreedyLaneScheduler:
 
         if not result.is_valid:
             error_types = [e.rule_type.value for e in result.errors]
-            logger.debug(f"Lane {lane.lane_id} LaneValidator验证失败: {error_types}")
+            error_details = [
+                f"{e.rule_type.value}: {e.message}"
+                for e in result.errors[:5]
+            ]
+            logger.debug(
+                "Lane {} LaneValidator验证失败: types={}, details={}",
+                lane.lane_id,
+                error_types,
+                error_details,
+            )
             self._completed_lane_validation_cache[cache_key] = (False, tuple(error_types))
             return False, error_types
 
@@ -5234,7 +5881,16 @@ class GreedyLaneScheduler:
                 if results.get(rule_key, 0) == 1:
                     violated_rules.append(rule_name)
             
-            logger.debug(f"Lane {lane.lane_id} RuleChecker验证失败: {violated_rules}")
+            logger.debug(
+                "Lane {} RuleChecker验证失败: rules={}, raw={}",
+                lane.lane_id,
+                violated_rules,
+                {
+                    key: results.get(key)
+                    for key in rule_mapping
+                    if results.get(key, 0) == 1
+                },
+            )
             return False
         
         return True
@@ -5284,8 +5940,16 @@ class GreedyLaneScheduler:
         
         # 收集可挪移的文库（记录每个文库来自哪个Lane，用于还原）
         moved_libs: List[EnhancedLibraryInfo] = []
-        moved_libs_source: Dict[str, LaneAssignment] = {}  # lib.origrec -> source_lane
+        moved_libs_source: Dict[str, LaneAssignment] = {}
         moved_data = 0.0
+
+        def _restore_moved_libraries() -> None:
+            for moved_lib in list(moved_libs):
+                source_lane = moved_libs_source.get(self._get_library_runtime_key(moved_lib))
+                if source_lane and moved_lib not in source_lane.libraries:
+                    source_lane.libraries.append(moved_lib)
+                    source_lane.total_data_gb = sum(l.get_data_amount_gb() for l in source_lane.libraries)
+                    logger.debug(f"挪移优化: 还原{moved_lib.origrec}到{source_lane.lane_id}")
         
         # 优先从NB Lane挪出（未分配的大多是客户文库、非10bp）
         lane_priority = []
@@ -5345,7 +6009,7 @@ class GreedyLaneScheduler:
                     continue
                 
                 moved_libs.append(lib)
-                moved_libs_source[lib.origrec] = lane  # 记录来源Lane
+                moved_libs_source[self._get_library_runtime_key(lib)] = lane
                 moved_data += lib_data
                 lane_moved += lib_data
                 to_remove.append(lib)
@@ -5371,7 +6035,7 @@ class GreedyLaneScheduler:
         # 如果挪出的数据量不足，放弃挪移（还原）
         if moved_data < needed_from_lanes * 0.9:  # 允许10%误差
             logger.warning(f"挪移优化: 挪出数据量{moved_data:.0f}GB不足，放弃挪移")
-            # 还原（这里简化处理，实际应该还原到原Lane）
+            _restore_moved_libraries()
             return unassigned, []
         
         # 合并成新Lane
@@ -5412,7 +6076,7 @@ class GreedyLaneScheduler:
                                 if len(temp_remaining) > 0 and self._validate_lane_after_removal(temp_remaining, lane):
                                     new_lane_libs.append(lib)
                                     moved_libs.append(lib)
-                                    moved_libs_source[lib.origrec] = lane  # 记录来源Lane
+                                    moved_libs_source[self._get_library_runtime_key(lib)] = lane
                                     lane.libraries.remove(lib)
                                     lane.total_data_gb = sum(l.get_data_amount_gb() for l in lane.libraries)
                                     new_lane_data = sum(l.get_data_amount_gb() for l in new_lane_libs)
@@ -5425,6 +6089,7 @@ class GreedyLaneScheduler:
                 # 如果仍然不足40%，无法形成有效Lane
                 if bp10_ratio < min_10bp_ratio:
                     logger.warning("挪移优化: 无法补充足够10bp文库，放弃创建新Lane")
+                    _restore_moved_libraries()
                     return unassigned, []
             
             lane_prefix = 'GL'
@@ -5496,13 +6161,7 @@ class GreedyLaneScheduler:
             return [], [new_lane]
         else:
             logger.warning(f"挪移优化: 新Lane {new_lane_id} 验证失败: {', '.join(validation_errors)}，放弃创建")
-            # 还原挪出的文库到原Lane
-            for lib in moved_libs:
-                source_lane = moved_libs_source.get(lib.origrec)
-                if source_lane and lib not in source_lane.libraries:
-                    source_lane.libraries.append(lib)
-                    source_lane.total_data_gb = sum(l.get_data_amount_gb() for l in source_lane.libraries)
-                    logger.debug(f"挪移优化: 还原{lib.origrec}到{source_lane.lane_id}")
+            _restore_moved_libraries()
             return unassigned, []
     
     def _try_form_lane_from_unassigned(
@@ -5809,6 +6468,8 @@ class GreedyLaneScheduler:
             balance_data = lane_metadata.get("required_balance_data_gb")
         if balance_data is not None:
             metadata["wkbalancedata"] = balance_data
+        if lane_metadata.get("dispatch_stage") == "priority_preconsume_36t":
+            metadata["dispatch_stage"] = "priority_preconsume_36t"
 
         metadata.update({
             'is_dedicated_imbalance_lane': lane.lane_id.startswith('DL_') or bool(lane_metadata.get('is_dedicated_imbalance_lane')),

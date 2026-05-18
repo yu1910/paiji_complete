@@ -11,6 +11,7 @@
 """
 
 from dataclasses import dataclass, field
+import math
 from typing import Any, Dict, List, Optional, Set, Tuple
 
 from loguru import logger
@@ -107,6 +108,8 @@ class ModeAllocator:
         for lib in libraries:
             origrec = getattr(lib, "origrec", "") or ""
             reason = self._check_1_1_forbidden(lib)
+            if hasattr(lib, "_mode_dispatch_reason"):
+                delattr(lib, "_mode_dispatch_reason")
 
             # 高优先级文库统一先进入3.6T-NEW预消耗候选池，即使其本身不满足1.1条件。
             if self._is_priority_for_36t(lib):
@@ -115,12 +118,14 @@ class ModeAllocator:
                     result.dispatch_reasons[origrec] = f"priority_for_36t|{reason}"
                 else:
                     result.dispatch_reasons[origrec] = "priority_for_36t"
+                lib._mode_dispatch_reason = result.dispatch_reasons[origrec]
                 continue
 
             if reason:
                 result.pool_1_1_forbidden.append(lib)
                 self._clear_mode_1_1_seed_hint(lib)
                 result.dispatch_reasons[origrec] = reason
+                lib._mode_dispatch_reason = reason
                 continue
 
             manual_override = self._resolve_manual_dispatch_override(lib)
@@ -130,6 +135,7 @@ class ModeAllocator:
                     result.pool_1_1_forbidden.append(lib)
                     self._clear_mode_1_1_seed_hint(lib)
                     result.dispatch_reasons[origrec] = override_reason
+                    lib._mode_dispatch_reason = override_reason
                     continue
 
                 self._set_mode_1_1_seed_hint(
@@ -139,11 +145,13 @@ class ModeAllocator:
                 )
                 first_round_1_1_candidates.append(lib)
                 result.dispatch_reasons[origrec] = override_reason
+                lib._mode_dispatch_reason = override_reason
                 continue
 
             self._set_mode_1_1_seed_hint(lib)
             first_round_1_1_candidates.append(lib)
             result.dispatch_reasons[origrec] = "allowed_for_1_1_by_default"
+            lib._mode_dispatch_reason = "allowed_for_1_1_by_default"
 
         priority_total_gb = sum(float(lib.contract_data_raw or 0) for lib in priority_candidates)
         max_36t_lanes = self._resolve_priority_36t_lane_count(priority_total_gb)
@@ -204,12 +212,18 @@ class ModeAllocator:
         if baleno or bagfcno:
             return "has_package_lane_or_fc"
 
+        if self._is_36t_only_secondary(lib):
+            return "secondary_priority_for_36t_only"
+
         return ""
 
     def _is_priority_for_36t(self, lib: EnhancedLibraryInfo) -> bool:
         """判断文库是否满足3.6T-NEW高优条件，数据类型条件优先于次级条件。"""
         dt = str(getattr(lib, "data_type", "") or "").strip()
         if dt in self._priority_data_types:
+            return True
+        manual_override = self._resolve_manual_dispatch_override(lib)
+        if manual_override is not None and manual_override[0] == "1.1":
             return True
         return self._has_1_1_secondary_eligibility(lib)
 
@@ -228,7 +242,7 @@ class ModeAllocator:
         prefix = self._resolve_sample_prefix(lib)
         if not prefix:
             return False
-        return any(prefix.startswith(ep) for ep in self._eligible_prefixes)
+        return len(prefix) >= 4 and prefix[1:4] == "DHE"
 
     def _matches_eligible_add_test_keyword(self, lib: EnhancedLibraryInfo) -> bool:
         remark = str(getattr(lib, "add_tests_remark", "") or "").strip()
@@ -237,11 +251,15 @@ class ModeAllocator:
         return any(keyword and keyword in remark for keyword in self._eligible_add_test_kw)
 
     def _has_1_1_secondary_eligibility(self, lib: EnhancedLibraryInfo) -> bool:
-        """规则11次级条件：FDHE 或 加测/混合。"""
+        """规则11次级条件：DHE(第2-4位) 或 加测/混合。"""
         return (
             self._matches_eligible_sample_prefix(lib)
             or self._matches_eligible_add_test_keyword(lib)
         )
+
+    def _is_36t_only_secondary(self, lib: EnhancedLibraryInfo) -> bool:
+        """DHE(第2-4位)/加测/混合文库只能进入3.6T-NEW，不允许进入1.1。"""
+        return self._has_1_1_secondary_eligibility(lib)
 
     def _apply_mode_1_1_quality_seed_hint(self, lib: EnhancedLibraryInfo) -> None:
         """为规则12的优先组合打首轮聚簇提示。"""
@@ -265,7 +283,7 @@ class ModeAllocator:
         dt = str(getattr(lib, "data_type", "") or "").strip()
         if dt not in self._eligible_data_types:
             return False
-        return self._has_1_1_secondary_eligibility(lib)
+        return not self._is_36t_only_secondary(lib)
 
     def _is_priority_overflow_candidate_for_1_1(self, lib: EnhancedLibraryInfo) -> bool:
         """优先池中允许少量溢出到1.1的候选。"""
@@ -284,15 +302,29 @@ class ModeAllocator:
         return max(0.0, self._priority_36t_preconsume_max_filler_gb_per_lane)
 
     def _resolve_priority_36t_lane_count(self, total_gb: float) -> int:
-        """根据临检/YC/SJ数据量总和，确定3.6T-NEW lane数上限"""
+        """根据高优数据量总和，确定3.6T-NEW预消耗lane数上限。
+
+        配置表内的分档保持原样；超过最后一档后不再沿用最后一个
+        max_lanes 硬封顶，而是按最后一档的单lane数据量继续外推。
+        """
         if total_gb <= 0:
             return 0
         max_lanes = 0
+        last_max_data = 0.0
         for rule in self._lane_limit_rules:
-            if total_gb <= rule.get("max_data_gb", 0):
+            max_data = float(rule.get("max_data_gb", 0) or 0)
+            if total_gb <= max_data:
                 return rule.get("max_lanes", 1)
             max_lanes = rule.get("max_lanes", max_lanes)
-        return max_lanes
+            last_max_data = max(last_max_data, max_data)
+
+        if max_lanes <= 0 or last_max_data <= 0:
+            return max_lanes
+
+        per_lane_gb = last_max_data / max_lanes
+        if per_lane_gb <= 0:
+            return max_lanes
+        return max(max_lanes, int(math.ceil(total_gb / per_lane_gb)))
 
     def _get_contract_data_gb(self, lib: EnhancedLibraryInfo) -> float:
         """读取文库合同量，统一成浮点数。"""

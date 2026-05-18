@@ -32,12 +32,12 @@
     "SJ"
   ],
   "priority_36t_preconsume_borrow_fillers_from_1_1": true,
-  "priority_36t_preconsume_max_filler_gb_per_lane": 250,
+  "priority_36t_preconsume_max_filler_gb_per_lane": 600,
   "first_round_priority_max_gb_per_lane": 150,
   "priority_data_types_to_1_1_overflow": {
     "enabled": true,
     "trigger_min_pool_gb": 1850,
-    "max_total_gb": 100
+    "max_total_gb": 150
   },
   "eligible_data_types_for_1_1": [
     "临检",
@@ -155,5 +155,7 @@
   "second_round_output_rate_threshold": 40.0,
   "second_round_default_pooling_factor": 2.5,
   "first_round_enable_post_fill_optimization": true,
-  "first_round_second_pass_enable_post_fill_optimization": true
+  "first_round_enable_rule_bucket_prescheduling": true,
+  "first_round_second_pass_enable_post_fill_optimization": true,
+  "first_round_second_pass_enable_rule_bucket_prescheduling": true
 }

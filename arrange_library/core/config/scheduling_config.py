@@ -1108,7 +1108,6 @@ class SchedulingConfigManager:
                     getattr(lib, 'seq_strategy', None),
                     getattr(lib, 'seq_scheme', None),
                     getattr(lib, 'test_no', None),
-                    getattr(lib, 'machine_note', None),
                     getattr(lib, '_lane_sj_mode_raw', None),
                 ]
             )
@@ -1125,7 +1124,7 @@ class SchedulingConfigManager:
             for lib in libraries
             for candidate in self._get_library_cached_signature(
                 lib,
-                raw_attrs=('seq_strategy', 'seq_scheme', 'test_no', 'machine_note', '_lane_sj_mode_raw'),
+                raw_attrs=('seq_strategy', 'seq_scheme', 'test_no', '_lane_sj_mode_raw'),
                 cache_attr='_scheduling_seq_strategy_signature_cache',
                 builder=self._build_normalized_keyword_signature,
             )

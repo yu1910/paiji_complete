@@ -361,12 +361,38 @@ class BaseImbalanceHandler:
         }
 
     def _build_type_map(self) -> Dict[str, str]:
-        """构建 类型 -> 分组ID 的映射"""
+        """构建 类型 -> 单一文库类型分组ID 的映射。
+
+        G53/G54 是组合混排分组，只能在 lane 组合上下文中判定；
+        单个文库类型必须保留其基础分组，例如 10X转录组-3'文库 为 G4。
+        """
         mapping = {}
         for gid, group in self.groups.items():
+            if gid in {"G53", "G54"}:
+                continue
             for lib_type in group.library_types:
-                mapping[self._normalize_type_name(lib_type)] = gid
+                normalized_type = self._normalize_type_name(lib_type)
+                mapping.setdefault(normalized_type, gid)
         return mapping
+
+    def _resolve_combination_group_for_types(self, types: Set[str]) -> Optional[str]:
+        """按 lane 内文库类型集合识别 G53/G54 组合混排分组。
+
+        单一类型不升级为组合分组；只有同一组合集合内出现多种文库类型时，
+        才按 G53/G54 的组合规则处理。
+        """
+        normalized_types = {
+            self._normalize_type_name(item)
+            for item in types
+            if self._normalize_type_name(item)
+        }
+        if len(normalized_types) <= 1:
+            return None
+        if normalized_types.issubset(self.group53_types_normalized):
+            return "G53"
+        if normalized_types.issubset(self.group54_types_normalized):
+            return "G54"
+        return None
         
     def identify_imbalance_type(self, lib: EnhancedLibraryInfo) -> Optional[str]:
         """识别文库是否为碱基不均衡，返回分组ID
@@ -390,15 +416,10 @@ class BaseImbalanceHandler:
             setattr(lib, "_imbalance_group_id_cache", "")
             return None  # 明确标记为非碱基不均衡
         
-        # 2. 根据文库类型查找分组（优先53/54组合映射）
+        # 2. 根据文库类型查找基础分组。G53/G54 是组合混排分组，
+        # 不能在单文库识别阶段覆盖 G4/G5 等基础分组。
         lib_type = self._get_library_type(lib)
         if lib_type:
-            if lib_type in self.group53_types_normalized:
-                setattr(lib, "_imbalance_group_id_cache", "G53")
-                return "G53"
-            if lib_type in self.group54_types_normalized:
-                setattr(lib, "_imbalance_group_id_cache", "G54")
-                return "G54"
             group_id = self.type_to_group_map.get(lib_type)
             if group_id:
                 setattr(lib, "_imbalance_group_id_cache", group_id)
@@ -570,6 +591,10 @@ class BaseImbalanceHandler:
         if not imbalance_libs:
             return True, "No imbalance libraries"
         has_balanced = bool(balanced_libs)
+        combination_group_id = self._resolve_combination_group_for_types(types)
+        if combination_group_id:
+            group_ids = {combination_group_id}
+
         if "G53" in group_ids and "G54" in group_ids:
             return False, "分组53与分组54不可同Lane混排"
 
