@@ -13,6 +13,7 @@
 """
 
 import copy
+import re
 import uuid
 from dataclasses import dataclass, field, replace
 from enum import Enum
@@ -303,6 +304,41 @@ class PackageLaneScheduler:
         split_values[-1] = float(total_data) - average * (split_count - 1)
         return split_values
 
+    @staticmethod
+    def _expand_consecutive_package_lane_numbers(start_number: str, count: int) -> List[str]:
+        """按末尾数字扩展连续包Lane编号，如 C2611046783 -> C2611046783...C2611046790。"""
+        text = str(start_number or '').strip()
+        if count <= 1 or not text:
+            return [text] if text else []
+        match = re.match(r"^(.*?)(\d+)$", text)
+        if not match:
+            return [text]
+        prefix, numeric_text = match.groups()
+        width = len(numeric_text)
+        start_value = int(numeric_text)
+        return [f"{prefix}{start_value + offset:0{width}d}" for offset in range(count)]
+
+    @staticmethod
+    def _infer_existing_package_lane_split_count(lib: EnhancedLibraryInfo) -> int:
+        """从已拆分标记和总合同量推断包Lane连续拆分份数。"""
+        is_split = str(getattr(lib, 'wkissplit', '') or '').strip().lower() in {'yes', 'y', 'true', '1', '是'}
+        if not is_split:
+            return 1
+        current_data = float(getattr(lib, 'contract_data_raw', 0.0) or 0.0)
+        total_data = float(
+            getattr(lib, 'wktotalcontractdata', None)
+            or getattr(lib, 'total_contract_data', None)
+            or current_data
+            or 0.0
+        )
+        if current_data <= 0 or total_data <= current_data + 1e-6:
+            return 1
+        ratio = total_data / current_data
+        rounded = int(round(ratio))
+        if rounded > 1 and abs(ratio - rounded) <= 1e-6:
+            return rounded
+        return 1
+
     def _build_multi_package_lane_family_id(
         self,
         lib: EnhancedLibraryInfo,
@@ -336,18 +372,25 @@ class PackageLaneScheduler:
         for lib in libraries:
             raw_package_lane = getattr(lib, 'package_lane_number', None) or getattr(lib, 'baleno', None)
             package_lane_numbers = self._parse_package_lane_numbers(raw_package_lane)
+            if len(package_lane_numbers) == 1:
+                inferred_count = self._infer_existing_package_lane_split_count(lib)
+                if inferred_count > 1:
+                    package_lane_numbers = self._expand_consecutive_package_lane_numbers(
+                        package_lane_numbers[0],
+                        inferred_count,
+                    )
 
             if len(package_lane_numbers) <= 1:
                 if package_lane_numbers:
                     normalized_pkg = package_lane_numbers[0]
                     lib.package_lane_number = normalized_pkg
-                    lib.baleno = normalized_pkg
+                    lib._package_lane_output_baleno = str(raw_package_lane).strip()
                     lib.is_package_lane = '是'
                 expanded_libraries.append(lib)
                 continue
 
             lib.package_lane_number = str(raw_package_lane).strip()
-            lib.baleno = lib.package_lane_number
+            lib._package_lane_output_baleno = lib.package_lane_number
             lib.is_package_lane = '是'
 
             source_label = (
@@ -378,6 +421,13 @@ class PackageLaneScheduler:
             )
 
             total_contract_data = float(getattr(lib, 'contract_data_raw', 0.0) or 0.0)
+            declared_total_contract_data = float(
+                getattr(lib, 'wktotalcontractdata', None)
+                or getattr(lib, 'total_contract_data', None)
+                or 0.0
+            )
+            if declared_total_contract_data > total_contract_data:
+                total_contract_data = declared_total_contract_data
             split_values = self._split_contract_data_evenly(total_contract_data, len(package_lane_numbers))
             original_library_id = (
                 str(getattr(lib, 'fragment_id', '') or '').strip()
@@ -404,7 +454,7 @@ class PackageLaneScheduler:
                 fragment = copy.deepcopy(lib)
                 fragment.contract_data_raw = split_value
                 fragment.package_lane_number = package_lane_number
-                fragment.baleno = package_lane_number
+                fragment._package_lane_output_baleno = str(raw_package_lane).strip()
                 fragment.is_package_lane = '是'
                 fragment.is_split = True
                 fragment.wkissplit = 'yes'
@@ -919,14 +969,47 @@ class PackageLaneScheduler:
     def _pack_lanes_to_runs(self, lanes: List[LaneResult]) -> List[RunResult]:
         """将独立Lane打包成Run"""
         runs = []
-        
-        # 按机器类型分组
-        lanes_by_machine = defaultdict(list)
+
+        # 同一包FC号下的包Lane必须固定进入同一个Run。
+        package_fc_lane_groups = defaultdict(list)
+        lanes_without_package_fc = []
         for lane in lanes:
+            if lane.libraries:
+                package_fc_number = str(
+                    getattr(lane.libraries[0], 'package_fc_number', None)
+                    or getattr(lane.libraries[0], 'bagfcno', None)
+                    or getattr(lane.libraries[0], 'fc_number', None)
+                    or getattr(lane.libraries[0], 'flowcell_id', None)
+                    or ''
+                ).strip()
+                if package_fc_number:
+                    package_fc_lane_groups[package_fc_number].append(lane)
+                else:
+                    lanes_without_package_fc.append(lane)
+
+        for package_fc_number, fc_lanes in package_fc_lane_groups.items():
+            first_lane_libs = fc_lanes[0].libraries if fc_lanes else []
+            machine_type = getattr(first_lane_libs[0], 'eq_type', '') if first_lane_libs else ''
+            machine_type = machine_type or 'Novaseq'
+            total_data = sum(lane.total_data_gb for lane in fc_lanes)
+            runs.append(
+                RunResult(
+                    run_id=self._generate_run_id(),
+                    fc_id=package_fc_number,
+                    lanes=fc_lanes,
+                    machine_type=machine_type,
+                    run_cycle="",
+                    total_data_gb=total_data
+                )
+            )
+
+        # 其余独立Lane按机器类型和规则lane数打包。
+        lanes_by_machine = defaultdict(list)
+        for lane in lanes_without_package_fc:
             if lane.libraries:
                 machine_type = getattr(lane.libraries[0], 'eq_type', '') or 'Novaseq'
                 lanes_by_machine[machine_type].append(lane)
-        
+
         for machine_type, machine_lanes in lanes_by_machine.items():
             first_lane_libs = machine_lanes[0].libraries if machine_lanes else []
             lane_rule = self._get_scheduling_lane_capacity_range(

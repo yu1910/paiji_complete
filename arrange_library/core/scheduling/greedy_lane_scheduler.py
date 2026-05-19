@@ -960,8 +960,17 @@ class GreedyLaneScheduler:
         - 目标碱基不均衡数据量 = Lane容量 × 分组数据量占比
         - 目标平衡文库数据量 = Lane容量 - 碱基不均衡数据量
         """
-        imbalance_libs = [lib for lib in failed if lib.is_base_imbalance()]
-        neutral_libs = [lib for lib in failed if not lib.is_base_imbalance()]
+        def _is_priority_data_type(lib: EnhancedLibraryInfo) -> bool:
+            return str(getattr(lib, 'data_type', '') or '').strip() in {'临检', 'YC', 'SJ'}
+
+        imbalance_libs = [
+            lib for lib in failed
+            if lib.is_base_imbalance() and not _is_priority_data_type(lib)
+        ]
+        neutral_libs = [
+            lib for lib in failed
+            if (not lib.is_base_imbalance()) or _is_priority_data_type(lib)
+        ]
         if not imbalance_libs:
             return [], failed
 
@@ -1072,7 +1081,9 @@ class GreedyLaneScheduler:
                 for lib in libs:
                     jjbj = getattr(lib, 'jjbj', None)
                     is_imbalance = (jjbj is not None and str(jjbj).strip() == '是')
-                    if is_imbalance:
+                    data_type = str(getattr(lib, 'data_type', '') or '').strip()
+                    should_skip_dedicated = data_type in {'临检', 'YC', 'SJ'}
+                    if is_imbalance and not should_skip_dedicated:
                         imbalance_libs.append(lib)
                     else:
                         balanced_libs.append(lib)
