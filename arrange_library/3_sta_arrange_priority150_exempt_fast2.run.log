@@ -1,0 +1,1457 @@
+2026-05-20 14:55:39.969 | INFO     | arrange_library.core.constraints.index_validator_verified:__init__:75 - Index校验器初始化完成（真实数据验证版本）
+2026-05-20 14:55:40.467 | INFO     | arrange_library.core.constraints.index_validator_verified:__init__:75 - Index校验器初始化完成（真实数据验证版本）
+[32m2026-05-20 14:55:40[0m | [1mINFO    [0m | [1m================================================================================[0m
+[32m2026-05-20 14:55:40[0m | [1mINFO    [0m | [1marrange_library: 端到端排机流程 - 排机与 Pooling 预测[0m
+[32m2026-05-20 14:55:40[0m | [1mINFO    [0m | [1m================================================================================[0m
+[32m2026-05-20 14:55:40[0m | [1mINFO    [0m | [1m调用时间: 2026-05-20 14:55:40[0m
+[32m2026-05-20 14:55:40[0m | [1mINFO    [0m | [1m随机种子: 42 (固定，确保可复现)[0m
+[32m2026-05-20 14:55:40[0m | [1mINFO    [0m | [1m运行模式: arrange[0m
+[32m2026-05-20 14:55:40[0m | [1mINFO    [0m | [1m
+使用数据文件: arrange_library/3_sta.csv[0m
+[32m2026-05-20 14:55:40[0m | [1mINFO    [0m | [1m从标准化CSV文件加载数据: arrange_library/3_sta.csv[0m
+[32m2026-05-20 14:55:40[0m | [1mINFO    [0m | [1m读取 951 行数据[0m
+[32m2026-05-20 14:55:40[0m | [1mINFO    [0m | [1m成功创建 951 个文库对象[0m
+[32m2026-05-20 14:55:40[0m | [1mINFO    [0m | [1m成功转换 951 个测试文库[0m
+[32m2026-05-20 14:55:40[0m | [1mINFO    [0m | [1mAI可排文库筛选完成: 可排=951，不可排=0，机型排除=0[0m
+[32m2026-05-20 14:55:40[0m | [1mINFO    [0m | [1m统一排机规则配置已加载: profiles=7, constraints=2, loading_rules=4[0m
+[32m2026-05-20 14:55:40[0m | [1mINFO    [0m | [1m1.1模式规则配置加载完成: /data/work/yuyongpeng/liblane_v2_deepseek/paiji_complete2/paiji_complete/arrange_library/config/mode_1_1_rules.json[0m
+[32m2026-05-20 14:55:40[0m | [1mINFO    [0m | [1m排机配置管理器初始化完成[0m
+[32m2026-05-20 14:55:40[0m | [1mINFO    [0m | [1m
+================================================================================[0m
+[32m2026-05-20 14:55:40[0m | [1mINFO    [0m | [1m步骤0.9: 提前处理1.1第二轮历史固定组合文库[0m
+[32m2026-05-20 14:55:40[0m | [1mINFO    [0m | [1m================================================================================[0m
+[32m2026-05-20 14:55:40[0m | [1mINFO    [0m | [1m1.1第二轮候选识别: 无符合条件的候选文库[0m
+[32m2026-05-20 14:55:40[0m | [1mINFO    [0m | [1m1.1第二轮历史Lane前置直出: 无候选文库[0m
+[32m2026-05-20 14:55:40[0m | [1mINFO    [0m | [1m
+================================================================================[0m
+[32m2026-05-20 14:55:40[0m | [1mINFO    [0m | [1m步骤1: 处理包Lane文库（wkbaleno字段有值的文库）[0m
+[32m2026-05-20 14:55:40[0m | [1mINFO    [0m | [1m================================================================================[0m
+[32m2026-05-20 14:55:40[0m | [1mINFO    [0m | [1m包Lane文库数: 6[0m
+[32m2026-05-20 14:55:40[0m | [1mINFO    [0m | [1m普通文库数: 945[0m
+[32m2026-05-20 14:55:40[0m | [1mINFO    [0m | [1m
+使用PackageLaneScheduler处理包Lane文库...[0m
+[32m2026-05-20 14:55:40[0m | [33m[1mWARNING [0m | [33m[1mPooling配置表不存在: /data/work/yuyongpeng/liblane_v2_deepseek/data/wktype_pooling_config.xlsx，将使用默认策略[0m
+[32m2026-05-20 14:55:40[0m | [1mINFO    [0m | [1m产出效率修正表不存在: /data/work/yuyongpeng/liblane_v2_deepseek/data/production_efficiency_correction.csv，跳过后校准[0m
+[32m2026-05-20 14:55:40[0m | [33m[1mWARNING [0m | [33m[1m模型文件不存在: models/loutput_pre_lane_v5/lightgbm_model.pkl[0m
+[32m2026-05-20 14:55:40[0m | [33m[1mWARNING [0m | [33m[1mloutput预测器不可用，将使用规则降级策略[0m
+[32m2026-05-20 14:55:40[0m | [1mINFO    [0m | [1m包Lane/FC排机程序初始化完成[0m
+[32m2026-05-20 14:55:40[0m | [1mINFO    [0m | [1m============================================================[0m
+[32m2026-05-20 14:55:40[0m | [1mINFO    [0m | [1m 开始包Lane/FC排机[0m
+[32m2026-05-20 14:55:40[0m | [1mINFO    [0m | [1m============================================================[0m
+[32m2026-05-20 14:55:40[0m | [1mINFO    [0m | [1m待排机文库总数: 6[0m
+[32m2026-05-20 14:55:40[0m | [1mINFO    [0m | [1m文库 12532195 检测到多个包Lane编号 ['C2611046783', 'C2611046784', 'C2611046785', 'C2611046786', 'C2611046787', 'C2611046788', 'C2611046789', 'C2611046790']，按8份执行专用拆分[0m
+[32m2026-05-20 14:55:40[0m | [1mINFO    [0m | [1m  包Lane文库: 13[0m
+[32m2026-05-20 14:55:40[0m | [1mINFO    [0m | [1m  Lane ID文库: 0[0m
+[32m2026-05-20 14:55:40[0m | [1mINFO    [0m | [1m  包FC文库: 0[0m
+[32m2026-05-20 14:55:40[0m | [1mINFO    [0m | [1m  RunCycle文库: 0[0m
+[32m2026-05-20 14:55:40[0m | [1mINFO    [0m | [1m  普通文库: 0[0m
+[32m2026-05-20 14:55:40[0m | [1mINFO    [0m | [1mIndex校验器初始化完成（真实数据验证版本）[0m
+[32m2026-05-20 14:55:40[0m | [1mINFO    [0m | [1mIndex校验器初始化完成（真实数据验证版本）[0m
+[32m2026-05-20 14:55:40[0m | [1mINFO    [0m | [1mIndex校验器初始化完成（真实数据验证版本）[0m
+[32m2026-05-20 14:55:40[0m | [1mINFO    [0m | [1mIndex校验器初始化完成（真实数据验证版本）[0m
+[32m2026-05-20 14:55:40[0m | [1mINFO    [0m | [1mIndex校验器初始化完成（真实数据验证版本）[0m
+[32m2026-05-20 14:55:40[0m | [1mINFO    [0m | [1mIndex校验器初始化完成（真实数据验证版本）[0m
+[32m2026-05-20 14:55:40[0m | [1mINFO    [0m | [1mIndex校验器初始化完成（真实数据验证版本）[0m
+[32m2026-05-20 14:55:40[0m | [1mINFO    [0m | [1mIndex校验器初始化完成（真实数据验证版本）[0m
+[32m2026-05-20 14:55:40[0m | [1mINFO    [0m | [1mIndex校验器初始化完成（真实数据验证版本）[0m
+[32m2026-05-20 14:55:40[0m | [1mINFO    [0m | [1m------------------------------------------------------------[0m
+[32m2026-05-20 14:55:40[0m | [1mINFO    [0m | [1m 包Lane/FC排机结果:[0m
+[32m2026-05-20 14:55:40[0m | [1mINFO    [0m | [1m  生成Run数: 2[0m
+[32m2026-05-20 14:55:40[0m | [1mINFO    [0m | [1m  生成Lane数: 9[0m
+[32m2026-05-20 14:55:40[0m | [1mINFO    [0m | [1m  排机文库数: 13[0m
+[32m2026-05-20 14:55:40[0m | [1mINFO    [0m | [1m  剩余文库数: 0[0m
+[32m2026-05-20 14:55:40[0m | [1mINFO    [0m | [1m============================================================[0m
+[32m2026-05-20 14:55:40[0m | [1mINFO    [0m | [1m包Lane处理结果:[0m
+[32m2026-05-20 14:55:40[0m | [1mINFO    [0m | [1m  - 成功生成Run数: 2[0m
+[32m2026-05-20 14:55:40[0m | [1mINFO    [0m | [1m  - 成功生成Lane数: 9[0m
+[32m2026-05-20 14:55:40[0m | [1mINFO    [0m | [1m  - 已分配文库数: 13[0m
+[32m2026-05-20 14:55:40[0m | [1mINFO    [0m | [1m  - 失败包数: 0[0m
+[32m2026-05-20 14:55:40[0m | [1mINFO    [0m | [1m  - 剩余未分配: 0[0m
+[32m2026-05-20 14:55:40[0m | [1mINFO    [0m | [1m
+包Lane处理完成，形成9条包Lane[0m
+[32m2026-05-20 14:55:40[0m | [1mINFO    [0m | [1m剩余945个文库进入普通排机流程[0m
+[32m2026-05-20 14:55:40[0m | [1mINFO    [0m | [1m
+================================================================================[0m
+[32m2026-05-20 14:55:40[0m | [1mINFO    [0m | [1m步骤1.2: 处理10+24 Lane seq文库[0m
+[32m2026-05-20 14:55:40[0m | [1mINFO    [0m | [1m================================================================================[0m
+[32m2026-05-20 14:55:40[0m | [1mINFO    [0m | [1m10+24 Lane seq成Lane成功: lane=LS_NovaX-25B_001, 文库数=5, 合同量=950.000G, 平衡文库=50.000G, 有效总量=1000.000G[0m
+[32m2026-05-20 14:55:40[0m | [1mINFO    [0m | [1m10+24 Lane seq成Lane成功: lane=LS_NovaX-25B_002, 文库数=13, 合同量=949.500G, 平衡文库=49.974G, 有效总量=999.474G[0m
+[32m2026-05-20 14:55:40[0m | [1mINFO    [0m | [1m10+24 Lane seq处理完成: 输入文库=18, 生成Lane=2, 未分配=0[0m
+[32m2026-05-20 14:55:40[0m | [1mINFO    [0m | [1m步骤1.3: 跳过1.1前全局碱基不均衡专Lane预抽取，普通文库先进入1.1尝试[0m
+[32m2026-05-20 14:55:40[0m | [1mINFO    [0m | [1m
+================================================================================[0m
+[32m2026-05-20 14:55:40[0m | [1mINFO    [0m | [1m步骤1.5: 三阶段未成Lane池顺序消耗[0m
+[32m2026-05-20 14:55:40[0m | [1mINFO    [0m | [1m================================================================================[0m
+[32m2026-05-20 14:55:40[0m | [1mINFO    [0m | [1m命中拆分规则且当前合同量>500G的原始文库9个：从1.1候选池移出，保留到3.6T-NEW流程拆分与排机[0m
+[32m2026-05-20 14:55:40[0m | [1mINFO    [0m | [1m3.6T-NEW高优预消耗跳过拆分高优文库: 20个/4862.0G，仅使用非拆分高优作为core[0m
+[32m2026-05-20 14:55:40[0m | [1mINFO    [0m | [1m3.6T-NEW高优预消耗跳过需拆分普通补料原始文库: 68个，保留到后续1.1/3.6T流程[0m
+[32m2026-05-20 14:55:40[0m | [1mINFO    [0m | [1m步骤1.5-1: 3.6T-NEW高优预消耗使用当前未成Lane全集: 高优=376个/5943.0G, 普通补料候选=454个, lane上限=8[0m
+[32m2026-05-20 14:55:41[0m | [1mINFO    [0m | [1mIndex校验器初始化完成（真实数据验证版本）[0m
+[32m2026-05-20 14:55:41[0m | [1mINFO    [0m | [1mIndex校验器初始化完成（真实数据验证版本）[0m
+[32m2026-05-20 14:55:41[0m | [1mINFO    [0m | [1m成Lane校验程序初始化完成 (严格模式: True, 碱基不均衡上限: 35%, 特殊文库关键词: 9个)[0m
+[32m2026-05-20 14:55:41[0m | [33m[1mWARNING [0m | [33m[1mPooling配置表不存在: /data/work/yuyongpeng/liblane_v2_deepseek/data/wktype_pooling_config.xlsx，将使用默认策略[0m
+[32m2026-05-20 14:55:41[0m | [1mINFO    [0m | [1m产出效率修正表不存在: /data/work/yuyongpeng/liblane_v2_deepseek/data/production_efficiency_correction.csv，跳过后校准[0m
+[32m2026-05-20 14:55:41[0m | [33m[1mWARNING [0m | [33m[1m模型文件不存在: models/loutput_pre_lane_v5/lightgbm_model.pkl[0m
+[32m2026-05-20 14:55:41[0m | [33m[1mWARNING [0m | [33m[1mloutput预测器不可用，将使用规则降级策略[0m
+[32m2026-05-20 14:55:41[0m | [1mINFO    [0m | [1m逐Lane贪心排机器初始化完成 - 基础容量: 985.0GB, 利用率区间: [100%, 100%], 配置模式: 按机型自动[0m
+[32m2026-05-20 14:55:41[0m | [1mINFO    [0m | [1m启用检查: Index=True, 碱基不均衡=True, 规则检查器=False[0m
+[32m2026-05-20 14:55:44[0m | [1mINFO    [0m | [1m3.6T-NEW高优预消耗画像成Lane: lane=GL_Nova X-25B_045, 高优=9个/908.5G, 临检=9个, 总量=1001.5G, 10bp=100.0%, 单端=0.0%, 碱基不均=0.0%, 客户=0.0%[0m
+[32m2026-05-20 14:55:44[0m | [1mINFO    [0m | [1m3.6T-NEW高优先级预消耗完成: 高优输入=12, 36T禁排高优=0, 36T补料=0, 1.1补料=49, 保留Lane=1, 剩余高优回1.1=3, 剩余高优留36T=0, 剩余36T补料=0, 剩余1.1补料=40[0m
+[32m2026-05-20 14:55:44[0m | [1mINFO    [0m | [1m3.6T-NEW高优先级预消耗批次成功: 策略=profile_window_1100, 代表高优=1100.0G, 补位目标=0G, 新增Lane=1, 累计Lane=1, 剩余高优=5034.5G[0m
+[32m2026-05-20 14:55:44[0m | [1mINFO    [0m | [1mIndex校验器初始化完成（真实数据验证版本）[0m
+[32m2026-05-20 14:55:44[0m | [1mINFO    [0m | [1mIndex校验器初始化完成（真实数据验证版本）[0m
+[32m2026-05-20 14:55:44[0m | [1mINFO    [0m | [1m成Lane校验程序初始化完成 (严格模式: True, 碱基不均衡上限: 35%, 特殊文库关键词: 9个)[0m
+[32m2026-05-20 14:55:44[0m | [33m[1mWARNING [0m | [33m[1mPooling配置表不存在: /data/work/yuyongpeng/liblane_v2_deepseek/data/wktype_pooling_config.xlsx，将使用默认策略[0m
+[32m2026-05-20 14:55:44[0m | [1mINFO    [0m | [1m产出效率修正表不存在: /data/work/yuyongpeng/liblane_v2_deepseek/data/production_efficiency_correction.csv，跳过后校准[0m
+[32m2026-05-20 14:55:44[0m | [33m[1mWARNING [0m | [33m[1m模型文件不存在: models/loutput_pre_lane_v5/lightgbm_model.pkl[0m
+[32m2026-05-20 14:55:44[0m | [33m[1mWARNING [0m | [33m[1mloutput预测器不可用，将使用规则降级策略[0m
+[32m2026-05-20 14:55:44[0m | [1mINFO    [0m | [1m逐Lane贪心排机器初始化完成 - 基础容量: 985.0GB, 利用率区间: [100%, 100%], 配置模式: 按机型自动[0m
+[32m2026-05-20 14:55:44[0m | [1mINFO    [0m | [1m启用检查: Index=True, 碱基不均衡=True, 规则检查器=False[0m
+[32m2026-05-20 14:55:48[0m | [1mINFO    [0m | [1m3.6T-NEW高优预消耗画像成Lane: lane=GL_Nova X-25B_010, 高优=28个/873.8G, 临检=28个, 总量=995.9G, 10bp=100.0%, 单端=0.0%, 碱基不均=0.0%, 客户=0.0%[0m
+[32m2026-05-20 14:55:48[0m | [1mINFO    [0m | [1m3.6T-NEW高优先级预消耗完成: 高优输入=33, 36T禁排高优=0, 36T补料=0, 1.1补料=43, 保留Lane=1, 剩余高优回1.1=5, 剩余高优留36T=0, 剩余36T补料=0, 剩余1.1补料=20[0m
+[32m2026-05-20 14:55:48[0m | [1mINFO    [0m | [1m3.6T-NEW高优先级预消耗批次成功: 策略=profile_window_1099, 代表高优=1099.3G, 补位目标=0G, 新增Lane=1, 累计Lane=2, 剩余高优=4160.7G[0m
+[32m2026-05-20 14:55:48[0m | [1mINFO    [0m | [1mIndex校验器初始化完成（真实数据验证版本）[0m
+[32m2026-05-20 14:55:48[0m | [1mINFO    [0m | [1mIndex校验器初始化完成（真实数据验证版本）[0m
+[32m2026-05-20 14:55:48[0m | [1mINFO    [0m | [1m成Lane校验程序初始化完成 (严格模式: True, 碱基不均衡上限: 35%, 特殊文库关键词: 9个)[0m
+[32m2026-05-20 14:55:48[0m | [33m[1mWARNING [0m | [33m[1mPooling配置表不存在: /data/work/yuyongpeng/liblane_v2_deepseek/data/wktype_pooling_config.xlsx，将使用默认策略[0m
+[32m2026-05-20 14:55:48[0m | [1mINFO    [0m | [1m产出效率修正表不存在: /data/work/yuyongpeng/liblane_v2_deepseek/data/production_efficiency_correction.csv，跳过后校准[0m
+[32m2026-05-20 14:55:48[0m | [33m[1mWARNING [0m | [33m[1m模型文件不存在: models/loutput_pre_lane_v5/lightgbm_model.pkl[0m
+[32m2026-05-20 14:55:48[0m | [33m[1mWARNING [0m | [33m[1mloutput预测器不可用，将使用规则降级策略[0m
+[32m2026-05-20 14:55:48[0m | [1mINFO    [0m | [1m逐Lane贪心排机器初始化完成 - 基础容量: 985.0GB, 利用率区间: [100%, 100%], 配置模式: 按机型自动[0m
+[32m2026-05-20 14:55:48[0m | [1mINFO    [0m | [1m启用检查: Index=True, 碱基不均衡=True, 规则检查器=False[0m
+[32m2026-05-20 14:55:50[0m | [1mINFO    [0m | [1mIndex校验器初始化完成（真实数据验证版本）[0m
+[32m2026-05-20 14:55:50[0m | [1mINFO    [0m | [1mIndex校验器初始化完成（真实数据验证版本）[0m
+[32m2026-05-20 14:55:50[0m | [1mINFO    [0m | [1m成Lane校验程序初始化完成 (严格模式: True, 碱基不均衡上限: 35%, 特殊文库关键词: 9个)[0m
+[32m2026-05-20 14:55:50[0m | [33m[1mWARNING [0m | [33m[1mPooling配置表不存在: /data/work/yuyongpeng/liblane_v2_deepseek/data/wktype_pooling_config.xlsx，将使用默认策略[0m
+[32m2026-05-20 14:55:50[0m | [1mINFO    [0m | [1m产出效率修正表不存在: /data/work/yuyongpeng/liblane_v2_deepseek/data/production_efficiency_correction.csv，跳过后校准[0m
+[32m2026-05-20 14:55:50[0m | [33m[1mWARNING [0m | [33m[1m模型文件不存在: models/loutput_pre_lane_v5/lightgbm_model.pkl[0m
+[32m2026-05-20 14:55:50[0m | [33m[1mWARNING [0m | [33m[1mloutput预测器不可用，将使用规则降级策略[0m
+[32m2026-05-20 14:55:50[0m | [1mINFO    [0m | [1m逐Lane贪心排机器初始化完成 - 基础容量: 985.0GB, 利用率区间: [100%, 100%], 配置模式: 按机型自动[0m
+[32m2026-05-20 14:55:50[0m | [1mINFO    [0m | [1m启用检查: Index=True, 碱基不均衡=True, 规则检查器=False[0m
+[32m2026-05-20 14:55:51[0m | [1mINFO    [0m | [1m3.6T-NEW高优预消耗画像成Lane: lane=GL_Nova X-25B_010, 高优=59个/470.7G, 临检=59个, 总量=1040.3G, 10bp=100.0%, 单端=0.0%, 碱基不均=0.0%, 客户=0.0%[0m
+[32m2026-05-20 14:55:52[0m | [1mINFO    [0m | [1m3.6T-NEW高优先级预消耗完成: 高优输入=132, 36T禁排高优=0, 36T补料=0, 1.1补料=20, 保留Lane=1, 剩余高优回1.1=73, 剩余高优留36T=0, 剩余36T补料=0, 剩余1.1补料=2[0m
+[32m2026-05-20 14:55:52[0m | [1mINFO    [0m | [1m3.6T-NEW高优先级预消耗批次成功: 策略=profile_window_863, 代表高优=862.7G, 补位目标=132G, 新增Lane=1, 累计Lane=3, 剩余高优=3690.0G[0m
+[32m2026-05-20 14:55:52[0m | [1mINFO    [0m | [1mIndex校验器初始化完成（真实数据验证版本）[0m
+[32m2026-05-20 14:55:52[0m | [1mINFO    [0m | [1mIndex校验器初始化完成（真实数据验证版本）[0m
+[32m2026-05-20 14:55:52[0m | [1mINFO    [0m | [1m成Lane校验程序初始化完成 (严格模式: True, 碱基不均衡上限: 35%, 特殊文库关键词: 9个)[0m
+[32m2026-05-20 14:55:52[0m | [33m[1mWARNING [0m | [33m[1mPooling配置表不存在: /data/work/yuyongpeng/liblane_v2_deepseek/data/wktype_pooling_config.xlsx，将使用默认策略[0m
+[32m2026-05-20 14:55:52[0m | [1mINFO    [0m | [1m产出效率修正表不存在: /data/work/yuyongpeng/liblane_v2_deepseek/data/production_efficiency_correction.csv，跳过后校准[0m
+[32m2026-05-20 14:55:52[0m | [33m[1mWARNING [0m | [33m[1m模型文件不存在: models/loutput_pre_lane_v5/lightgbm_model.pkl[0m
+[32m2026-05-20 14:55:52[0m | [33m[1mWARNING [0m | [33m[1mloutput预测器不可用，将使用规则降级策略[0m
+[32m2026-05-20 14:55:52[0m | [1mINFO    [0m | [1m逐Lane贪心排机器初始化完成 - 基础容量: 985.0GB, 利用率区间: [100%, 100%], 配置模式: 按机型自动[0m
+[32m2026-05-20 14:55:52[0m | [1mINFO    [0m | [1m启用检查: Index=True, 碱基不均衡=True, 规则检查器=False[0m
+[32m2026-05-20 14:55:53[0m | [1mINFO    [0m | [1mIndex校验器初始化完成（真实数据验证版本）[0m
+[32m2026-05-20 14:55:53[0m | [1mINFO    [0m | [1mIndex校验器初始化完成（真实数据验证版本）[0m
+[32m2026-05-20 14:55:53[0m | [1mINFO    [0m | [1m成Lane校验程序初始化完成 (严格模式: True, 碱基不均衡上限: 35%, 特殊文库关键词: 9个)[0m
+[32m2026-05-20 14:55:53[0m | [33m[1mWARNING [0m | [33m[1mPooling配置表不存在: /data/work/yuyongpeng/liblane_v2_deepseek/data/wktype_pooling_config.xlsx，将使用默认策略[0m
+[32m2026-05-20 14:55:53[0m | [1mINFO    [0m | [1m产出效率修正表不存在: /data/work/yuyongpeng/liblane_v2_deepseek/data/production_efficiency_correction.csv，跳过后校准[0m
+[32m2026-05-20 14:55:53[0m | [33m[1mWARNING [0m | [33m[1m模型文件不存在: models/loutput_pre_lane_v5/lightgbm_model.pkl[0m
+[32m2026-05-20 14:55:53[0m | [33m[1mWARNING [0m | [33m[1mloutput预测器不可用，将使用规则降级策略[0m
+[32m2026-05-20 14:55:53[0m | [1mINFO    [0m | [1m逐Lane贪心排机器初始化完成 - 基础容量: 985.0GB, 利用率区间: [100%, 100%], 配置模式: 按机型自动[0m
+[32m2026-05-20 14:55:53[0m | [1mINFO    [0m | [1m启用检查: Index=True, 碱基不均衡=True, 规则检查器=False[0m
+[32m2026-05-20 14:55:54[0m | [1mINFO    [0m | [1mIndex校验器初始化完成（真实数据验证版本）[0m
+[32m2026-05-20 14:55:54[0m | [1mINFO    [0m | [1mIndex校验器初始化完成（真实数据验证版本）[0m
+[32m2026-05-20 14:55:54[0m | [1mINFO    [0m | [1m成Lane校验程序初始化完成 (严格模式: True, 碱基不均衡上限: 35%, 特殊文库关键词: 9个)[0m
+[32m2026-05-20 14:55:54[0m | [33m[1mWARNING [0m | [33m[1mPooling配置表不存在: /data/work/yuyongpeng/liblane_v2_deepseek/data/wktype_pooling_config.xlsx，将使用默认策略[0m
+[32m2026-05-20 14:55:54[0m | [1mINFO    [0m | [1m产出效率修正表不存在: /data/work/yuyongpeng/liblane_v2_deepseek/data/production_efficiency_correction.csv，跳过后校准[0m
+[32m2026-05-20 14:55:54[0m | [33m[1mWARNING [0m | [33m[1m模型文件不存在: models/loutput_pre_lane_v5/lightgbm_model.pkl[0m
+[32m2026-05-20 14:55:54[0m | [33m[1mWARNING [0m | [33m[1mloutput预测器不可用，将使用规则降级策略[0m
+[32m2026-05-20 14:55:54[0m | [1mINFO    [0m | [1m逐Lane贪心排机器初始化完成 - 基础容量: 985.0GB, 利用率区间: [100%, 100%], 配置模式: 按机型自动[0m
+[32m2026-05-20 14:55:54[0m | [1mINFO    [0m | [1m启用检查: Index=True, 碱基不均衡=True, 规则检查器=False[0m
+[32m2026-05-20 14:55:54[0m | [1mINFO    [0m | [1mIndex校验器初始化完成（真实数据验证版本）[0m
+[32m2026-05-20 14:55:54[0m | [1mINFO    [0m | [1mIndex校验器初始化完成（真实数据验证版本）[0m
+[32m2026-05-20 14:55:54[0m | [1mINFO    [0m | [1m成Lane校验程序初始化完成 (严格模式: True, 碱基不均衡上限: 35%, 特殊文库关键词: 9个)[0m
+[32m2026-05-20 14:55:54[0m | [33m[1mWARNING [0m | [33m[1mPooling配置表不存在: /data/work/yuyongpeng/liblane_v2_deepseek/data/wktype_pooling_config.xlsx，将使用默认策略[0m
+[32m2026-05-20 14:55:54[0m | [1mINFO    [0m | [1m产出效率修正表不存在: /data/work/yuyongpeng/liblane_v2_deepseek/data/production_efficiency_correction.csv，跳过后校准[0m
+[32m2026-05-20 14:55:54[0m | [33m[1mWARNING [0m | [33m[1m模型文件不存在: models/loutput_pre_lane_v5/lightgbm_model.pkl[0m
+[32m2026-05-20 14:55:54[0m | [33m[1mWARNING [0m | [33m[1mloutput预测器不可用，将使用规则降级策略[0m
+[32m2026-05-20 14:55:54[0m | [1mINFO    [0m | [1m逐Lane贪心排机器初始化完成 - 基础容量: 985.0GB, 利用率区间: [100%, 100%], 配置模式: 按机型自动[0m
+[32m2026-05-20 14:55:54[0m | [1mINFO    [0m | [1m启用检查: Index=True, 碱基不均衡=True, 规则检查器=False[0m
+[32m2026-05-20 14:55:54[0m | [1mINFO    [0m | [1mIndex校验器初始化完成（真实数据验证版本）[0m
+[32m2026-05-20 14:55:54[0m | [1mINFO    [0m | [1mIndex校验器初始化完成（真实数据验证版本）[0m
+[32m2026-05-20 14:55:54[0m | [1mINFO    [0m | [1m成Lane校验程序初始化完成 (严格模式: True, 碱基不均衡上限: 35%, 特殊文库关键词: 9个)[0m
+[32m2026-05-20 14:55:54[0m | [33m[1mWARNING [0m | [33m[1mPooling配置表不存在: /data/work/yuyongpeng/liblane_v2_deepseek/data/wktype_pooling_config.xlsx，将使用默认策略[0m
+[32m2026-05-20 14:55:54[0m | [1mINFO    [0m | [1m产出效率修正表不存在: /data/work/yuyongpeng/liblane_v2_deepseek/data/production_efficiency_correction.csv，跳过后校准[0m
+[32m2026-05-20 14:55:54[0m | [33m[1mWARNING [0m | [33m[1m模型文件不存在: models/loutput_pre_lane_v5/lightgbm_model.pkl[0m
+[32m2026-05-20 14:55:54[0m | [33m[1mWARNING [0m | [33m[1mloutput预测器不可用，将使用规则降级策略[0m
+[32m2026-05-20 14:55:54[0m | [1mINFO    [0m | [1m逐Lane贪心排机器初始化完成 - 基础容量: 985.0GB, 利用率区间: [100%, 100%], 配置模式: 按机型自动[0m
+[32m2026-05-20 14:55:54[0m | [1mINFO    [0m | [1m启用检查: Index=True, 碱基不均衡=True, 规则检查器=False[0m
+[32m2026-05-20 14:55:54[0m | [1mINFO    [0m | [1mIndex校验器初始化完成（真实数据验证版本）[0m
+[32m2026-05-20 14:55:54[0m | [1mINFO    [0m | [1mIndex校验器初始化完成（真实数据验证版本）[0m
+[32m2026-05-20 14:55:54[0m | [1mINFO    [0m | [1m成Lane校验程序初始化完成 (严格模式: True, 碱基不均衡上限: 35%, 特殊文库关键词: 9个)[0m
+[32m2026-05-20 14:55:54[0m | [33m[1mWARNING [0m | [33m[1mPooling配置表不存在: /data/work/yuyongpeng/liblane_v2_deepseek/data/wktype_pooling_config.xlsx，将使用默认策略[0m
+[32m2026-05-20 14:55:54[0m | [1mINFO    [0m | [1m产出效率修正表不存在: /data/work/yuyongpeng/liblane_v2_deepseek/data/production_efficiency_correction.csv，跳过后校准[0m
+[32m2026-05-20 14:55:54[0m | [33m[1mWARNING [0m | [33m[1m模型文件不存在: models/loutput_pre_lane_v5/lightgbm_model.pkl[0m
+[32m2026-05-20 14:55:54[0m | [33m[1mWARNING [0m | [33m[1mloutput预测器不可用，将使用规则降级策略[0m
+[32m2026-05-20 14:55:54[0m | [1mINFO    [0m | [1m逐Lane贪心排机器初始化完成 - 基础容量: 985.0GB, 利用率区间: [100%, 100%], 配置模式: 按机型自动[0m
+[32m2026-05-20 14:55:54[0m | [1mINFO    [0m | [1m启用检查: Index=True, 碱基不均衡=True, 规则检查器=False[0m
+[32m2026-05-20 14:55:54[0m | [1mINFO    [0m | [1mIndex校验器初始化完成（真实数据验证版本）[0m
+[32m2026-05-20 14:55:54[0m | [1mINFO    [0m | [1mIndex校验器初始化完成（真实数据验证版本）[0m
+[32m2026-05-20 14:55:54[0m | [1mINFO    [0m | [1m成Lane校验程序初始化完成 (严格模式: True, 碱基不均衡上限: 35%, 特殊文库关键词: 9个)[0m
+[32m2026-05-20 14:55:54[0m | [33m[1mWARNING [0m | [33m[1mPooling配置表不存在: /data/work/yuyongpeng/liblane_v2_deepseek/data/wktype_pooling_config.xlsx，将使用默认策略[0m
+[32m2026-05-20 14:55:54[0m | [1mINFO    [0m | [1m产出效率修正表不存在: /data/work/yuyongpeng/liblane_v2_deepseek/data/production_efficiency_correction.csv，跳过后校准[0m
+[32m2026-05-20 14:55:54[0m | [33m[1mWARNING [0m | [33m[1m模型文件不存在: models/loutput_pre_lane_v5/lightgbm_model.pkl[0m
+[32m2026-05-20 14:55:54[0m | [33m[1mWARNING [0m | [33m[1mloutput预测器不可用，将使用规则降级策略[0m
+[32m2026-05-20 14:55:54[0m | [1mINFO    [0m | [1m逐Lane贪心排机器初始化完成 - 基础容量: 985.0GB, 利用率区间: [100%, 100%], 配置模式: 按机型自动[0m
+[32m2026-05-20 14:55:54[0m | [1mINFO    [0m | [1m启用检查: Index=True, 碱基不均衡=True, 规则检查器=False[0m
+[32m2026-05-20 14:55:56[0m | [1mINFO    [0m | [1mIndex校验器初始化完成（真实数据验证版本）[0m
+[32m2026-05-20 14:55:56[0m | [1mINFO    [0m | [1mIndex校验器初始化完成（真实数据验证版本）[0m
+[32m2026-05-20 14:55:56[0m | [1mINFO    [0m | [1m成Lane校验程序初始化完成 (严格模式: True, 碱基不均衡上限: 35%, 特殊文库关键词: 9个)[0m
+[32m2026-05-20 14:55:56[0m | [33m[1mWARNING [0m | [33m[1mPooling配置表不存在: /data/work/yuyongpeng/liblane_v2_deepseek/data/wktype_pooling_config.xlsx，将使用默认策略[0m
+[32m2026-05-20 14:55:56[0m | [1mINFO    [0m | [1m产出效率修正表不存在: /data/work/yuyongpeng/liblane_v2_deepseek/data/production_efficiency_correction.csv，跳过后校准[0m
+[32m2026-05-20 14:55:56[0m | [33m[1mWARNING [0m | [33m[1m模型文件不存在: models/loutput_pre_lane_v5/lightgbm_model.pkl[0m
+[32m2026-05-20 14:55:56[0m | [33m[1mWARNING [0m | [33m[1mloutput预测器不可用，将使用规则降级策略[0m
+[32m2026-05-20 14:55:56[0m | [1mINFO    [0m | [1m逐Lane贪心排机器初始化完成 - 基础容量: 985.0GB, 利用率区间: [100%, 100%], 配置模式: 按机型自动[0m
+[32m2026-05-20 14:55:56[0m | [1mINFO    [0m | [1m启用检查: Index=True, 碱基不均衡=True, 规则检查器=False[0m
+[32m2026-05-20 14:55:57[0m | [1mINFO    [0m | [1mIndex校验器初始化完成（真实数据验证版本）[0m
+[32m2026-05-20 14:55:57[0m | [1mINFO    [0m | [1mIndex校验器初始化完成（真实数据验证版本）[0m
+[32m2026-05-20 14:55:57[0m | [1mINFO    [0m | [1m成Lane校验程序初始化完成 (严格模式: True, 碱基不均衡上限: 35%, 特殊文库关键词: 9个)[0m
+[32m2026-05-20 14:55:57[0m | [33m[1mWARNING [0m | [33m[1mPooling配置表不存在: /data/work/yuyongpeng/liblane_v2_deepseek/data/wktype_pooling_config.xlsx，将使用默认策略[0m
+[32m2026-05-20 14:55:57[0m | [1mINFO    [0m | [1m产出效率修正表不存在: /data/work/yuyongpeng/liblane_v2_deepseek/data/production_efficiency_correction.csv，跳过后校准[0m
+[32m2026-05-20 14:55:57[0m | [33m[1mWARNING [0m | [33m[1m模型文件不存在: models/loutput_pre_lane_v5/lightgbm_model.pkl[0m
+[32m2026-05-20 14:55:57[0m | [33m[1mWARNING [0m | [33m[1mloutput预测器不可用，将使用规则降级策略[0m
+[32m2026-05-20 14:55:57[0m | [1mINFO    [0m | [1m逐Lane贪心排机器初始化完成 - 基础容量: 985.0GB, 利用率区间: [100%, 100%], 配置模式: 按机型自动[0m
+[32m2026-05-20 14:55:57[0m | [1mINFO    [0m | [1m启用检查: Index=True, 碱基不均衡=True, 规则检查器=False[0m
+[32m2026-05-20 14:55:57[0m | [1mINFO    [0m | [1mIndex校验器初始化完成（真实数据验证版本）[0m
+[32m2026-05-20 14:55:57[0m | [1mINFO    [0m | [1mIndex校验器初始化完成（真实数据验证版本）[0m
+[32m2026-05-20 14:55:57[0m | [1mINFO    [0m | [1m成Lane校验程序初始化完成 (严格模式: True, 碱基不均衡上限: 35%, 特殊文库关键词: 9个)[0m
+[32m2026-05-20 14:55:57[0m | [33m[1mWARNING [0m | [33m[1mPooling配置表不存在: /data/work/yuyongpeng/liblane_v2_deepseek/data/wktype_pooling_config.xlsx，将使用默认策略[0m
+[32m2026-05-20 14:55:57[0m | [1mINFO    [0m | [1m产出效率修正表不存在: /data/work/yuyongpeng/liblane_v2_deepseek/data/production_efficiency_correction.csv，跳过后校准[0m
+[32m2026-05-20 14:55:57[0m | [33m[1mWARNING [0m | [33m[1m模型文件不存在: models/loutput_pre_lane_v5/lightgbm_model.pkl[0m
+[32m2026-05-20 14:55:57[0m | [33m[1mWARNING [0m | [33m[1mloutput预测器不可用，将使用规则降级策略[0m
+[32m2026-05-20 14:55:57[0m | [1mINFO    [0m | [1m逐Lane贪心排机器初始化完成 - 基础容量: 985.0GB, 利用率区间: [100%, 100%], 配置模式: 按机型自动[0m
+[32m2026-05-20 14:55:57[0m | [1mINFO    [0m | [1m启用检查: Index=True, 碱基不均衡=True, 规则检查器=False[0m
+[32m2026-05-20 14:55:57[0m | [1mINFO    [0m | [1mIndex校验器初始化完成（真实数据验证版本）[0m
+[32m2026-05-20 14:55:57[0m | [1mINFO    [0m | [1mIndex校验器初始化完成（真实数据验证版本）[0m
+[32m2026-05-20 14:55:57[0m | [1mINFO    [0m | [1m成Lane校验程序初始化完成 (严格模式: True, 碱基不均衡上限: 35%, 特殊文库关键词: 9个)[0m
+[32m2026-05-20 14:55:57[0m | [33m[1mWARNING [0m | [33m[1mPooling配置表不存在: /data/work/yuyongpeng/liblane_v2_deepseek/data/wktype_pooling_config.xlsx，将使用默认策略[0m
+[32m2026-05-20 14:55:57[0m | [1mINFO    [0m | [1m产出效率修正表不存在: /data/work/yuyongpeng/liblane_v2_deepseek/data/production_efficiency_correction.csv，跳过后校准[0m
+[32m2026-05-20 14:55:57[0m | [33m[1mWARNING [0m | [33m[1m模型文件不存在: models/loutput_pre_lane_v5/lightgbm_model.pkl[0m
+[32m2026-05-20 14:55:57[0m | [33m[1mWARNING [0m | [33m[1mloutput预测器不可用，将使用规则降级策略[0m
+[32m2026-05-20 14:55:57[0m | [1mINFO    [0m | [1m逐Lane贪心排机器初始化完成 - 基础容量: 985.0GB, 利用率区间: [100%, 100%], 配置模式: 按机型自动[0m
+[32m2026-05-20 14:55:57[0m | [1mINFO    [0m | [1m启用检查: Index=True, 碱基不均衡=True, 规则检查器=False[0m
+[32m2026-05-20 14:55:58[0m | [1mINFO    [0m | [1mIndex校验器初始化完成（真实数据验证版本）[0m
+[32m2026-05-20 14:55:58[0m | [1mINFO    [0m | [1mIndex校验器初始化完成（真实数据验证版本）[0m
+[32m2026-05-20 14:55:58[0m | [1mINFO    [0m | [1m成Lane校验程序初始化完成 (严格模式: True, 碱基不均衡上限: 35%, 特殊文库关键词: 9个)[0m
+[32m2026-05-20 14:55:58[0m | [33m[1mWARNING [0m | [33m[1mPooling配置表不存在: /data/work/yuyongpeng/liblane_v2_deepseek/data/wktype_pooling_config.xlsx，将使用默认策略[0m
+[32m2026-05-20 14:55:58[0m | [1mINFO    [0m | [1m产出效率修正表不存在: /data/work/yuyongpeng/liblane_v2_deepseek/data/production_efficiency_correction.csv，跳过后校准[0m
+[32m2026-05-20 14:55:58[0m | [33m[1mWARNING [0m | [33m[1m模型文件不存在: models/loutput_pre_lane_v5/lightgbm_model.pkl[0m
+[32m2026-05-20 14:55:58[0m | [33m[1mWARNING [0m | [33m[1mloutput预测器不可用，将使用规则降级策略[0m
+[32m2026-05-20 14:55:58[0m | [1mINFO    [0m | [1m逐Lane贪心排机器初始化完成 - 基础容量: 985.0GB, 利用率区间: [100%, 100%], 配置模式: 按机型自动[0m
+[32m2026-05-20 14:55:58[0m | [1mINFO    [0m | [1m启用检查: Index=True, 碱基不均衡=True, 规则检查器=False[0m
+[32m2026-05-20 14:55:59[0m | [1mINFO    [0m | [1mIndex校验器初始化完成（真实数据验证版本）[0m
+[32m2026-05-20 14:55:59[0m | [1mINFO    [0m | [1mIndex校验器初始化完成（真实数据验证版本）[0m
+[32m2026-05-20 14:55:59[0m | [1mINFO    [0m | [1m成Lane校验程序初始化完成 (严格模式: True, 碱基不均衡上限: 35%, 特殊文库关键词: 9个)[0m
+[32m2026-05-20 14:55:59[0m | [33m[1mWARNING [0m | [33m[1mPooling配置表不存在: /data/work/yuyongpeng/liblane_v2_deepseek/data/wktype_pooling_config.xlsx，将使用默认策略[0m
+[32m2026-05-20 14:55:59[0m | [1mINFO    [0m | [1m产出效率修正表不存在: /data/work/yuyongpeng/liblane_v2_deepseek/data/production_efficiency_correction.csv，跳过后校准[0m
+[32m2026-05-20 14:55:59[0m | [33m[1mWARNING [0m | [33m[1m模型文件不存在: models/loutput_pre_lane_v5/lightgbm_model.pkl[0m
+[32m2026-05-20 14:55:59[0m | [33m[1mWARNING [0m | [33m[1mloutput预测器不可用，将使用规则降级策略[0m
+[32m2026-05-20 14:55:59[0m | [1mINFO    [0m | [1m逐Lane贪心排机器初始化完成 - 基础容量: 985.0GB, 利用率区间: [100%, 100%], 配置模式: 按机型自动[0m
+[32m2026-05-20 14:55:59[0m | [1mINFO    [0m | [1m启用检查: Index=True, 碱基不均衡=True, 规则检查器=False[0m
+[32m2026-05-20 14:56:00[0m | [1mINFO    [0m | [1mIndex校验器初始化完成（真实数据验证版本）[0m
+[32m2026-05-20 14:56:00[0m | [1mINFO    [0m | [1mIndex校验器初始化完成（真实数据验证版本）[0m
+[32m2026-05-20 14:56:00[0m | [1mINFO    [0m | [1m成Lane校验程序初始化完成 (严格模式: True, 碱基不均衡上限: 35%, 特殊文库关键词: 9个)[0m
+[32m2026-05-20 14:56:00[0m | [33m[1mWARNING [0m | [33m[1mPooling配置表不存在: /data/work/yuyongpeng/liblane_v2_deepseek/data/wktype_pooling_config.xlsx，将使用默认策略[0m
+[32m2026-05-20 14:56:00[0m | [1mINFO    [0m | [1m产出效率修正表不存在: /data/work/yuyongpeng/liblane_v2_deepseek/data/production_efficiency_correction.csv，跳过后校准[0m
+[32m2026-05-20 14:56:00[0m | [33m[1mWARNING [0m | [33m[1m模型文件不存在: models/loutput_pre_lane_v5/lightgbm_model.pkl[0m
+[32m2026-05-20 14:56:00[0m | [33m[1mWARNING [0m | [33m[1mloutput预测器不可用，将使用规则降级策略[0m
+[32m2026-05-20 14:56:00[0m | [1mINFO    [0m | [1m逐Lane贪心排机器初始化完成 - 基础容量: 985.0GB, 利用率区间: [100%, 100%], 配置模式: 按机型自动[0m
+[32m2026-05-20 14:56:00[0m | [1mINFO    [0m | [1m启用检查: Index=True, 碱基不均衡=True, 规则检查器=False[0m
+[32m2026-05-20 14:56:02[0m | [1mINFO    [0m | [1mIndex校验器初始化完成（真实数据验证版本）[0m
+[32m2026-05-20 14:56:02[0m | [1mINFO    [0m | [1mIndex校验器初始化完成（真实数据验证版本）[0m
+[32m2026-05-20 14:56:02[0m | [1mINFO    [0m | [1m成Lane校验程序初始化完成 (严格模式: True, 碱基不均衡上限: 35%, 特殊文库关键词: 9个)[0m
+[32m2026-05-20 14:56:02[0m | [33m[1mWARNING [0m | [33m[1mPooling配置表不存在: /data/work/yuyongpeng/liblane_v2_deepseek/data/wktype_pooling_config.xlsx，将使用默认策略[0m
+[32m2026-05-20 14:56:02[0m | [1mINFO    [0m | [1m产出效率修正表不存在: /data/work/yuyongpeng/liblane_v2_deepseek/data/production_efficiency_correction.csv，跳过后校准[0m
+[32m2026-05-20 14:56:02[0m | [33m[1mWARNING [0m | [33m[1m模型文件不存在: models/loutput_pre_lane_v5/lightgbm_model.pkl[0m
+[32m2026-05-20 14:56:02[0m | [33m[1mWARNING [0m | [33m[1mloutput预测器不可用，将使用规则降级策略[0m
+[32m2026-05-20 14:56:02[0m | [1mINFO    [0m | [1m逐Lane贪心排机器初始化完成 - 基础容量: 985.0GB, 利用率区间: [100%, 100%], 配置模式: 按机型自动[0m
+[32m2026-05-20 14:56:02[0m | [1mINFO    [0m | [1m启用检查: Index=True, 碱基不均衡=True, 规则检查器=False[0m
+[32m2026-05-20 14:56:03[0m | [1mINFO    [0m | [1mIndex校验器初始化完成（真实数据验证版本）[0m
+[32m2026-05-20 14:56:03[0m | [1mINFO    [0m | [1mIndex校验器初始化完成（真实数据验证版本）[0m
+[32m2026-05-20 14:56:03[0m | [1mINFO    [0m | [1m成Lane校验程序初始化完成 (严格模式: True, 碱基不均衡上限: 35%, 特殊文库关键词: 9个)[0m
+[32m2026-05-20 14:56:03[0m | [33m[1mWARNING [0m | [33m[1mPooling配置表不存在: /data/work/yuyongpeng/liblane_v2_deepseek/data/wktype_pooling_config.xlsx，将使用默认策略[0m
+[32m2026-05-20 14:56:03[0m | [1mINFO    [0m | [1m产出效率修正表不存在: /data/work/yuyongpeng/liblane_v2_deepseek/data/production_efficiency_correction.csv，跳过后校准[0m
+[32m2026-05-20 14:56:03[0m | [33m[1mWARNING [0m | [33m[1m模型文件不存在: models/loutput_pre_lane_v5/lightgbm_model.pkl[0m
+[32m2026-05-20 14:56:03[0m | [33m[1mWARNING [0m | [33m[1mloutput预测器不可用，将使用规则降级策略[0m
+[32m2026-05-20 14:56:03[0m | [1mINFO    [0m | [1m逐Lane贪心排机器初始化完成 - 基础容量: 985.0GB, 利用率区间: [100%, 100%], 配置模式: 按机型自动[0m
+[32m2026-05-20 14:56:03[0m | [1mINFO    [0m | [1m启用检查: Index=True, 碱基不均衡=True, 规则检查器=False[0m
+[32m2026-05-20 14:56:05[0m | [1mINFO    [0m | [1mIndex校验器初始化完成（真实数据验证版本）[0m
+[32m2026-05-20 14:56:05[0m | [1mINFO    [0m | [1mIndex校验器初始化完成（真实数据验证版本）[0m
+[32m2026-05-20 14:56:05[0m | [1mINFO    [0m | [1m成Lane校验程序初始化完成 (严格模式: True, 碱基不均衡上限: 35%, 特殊文库关键词: 9个)[0m
+[32m2026-05-20 14:56:05[0m | [33m[1mWARNING [0m | [33m[1mPooling配置表不存在: /data/work/yuyongpeng/liblane_v2_deepseek/data/wktype_pooling_config.xlsx，将使用默认策略[0m
+[32m2026-05-20 14:56:05[0m | [1mINFO    [0m | [1m产出效率修正表不存在: /data/work/yuyongpeng/liblane_v2_deepseek/data/production_efficiency_correction.csv，跳过后校准[0m
+[32m2026-05-20 14:56:05[0m | [33m[1mWARNING [0m | [33m[1m模型文件不存在: models/loutput_pre_lane_v5/lightgbm_model.pkl[0m
+[32m2026-05-20 14:56:05[0m | [33m[1mWARNING [0m | [33m[1mloutput预测器不可用，将使用规则降级策略[0m
+[32m2026-05-20 14:56:05[0m | [1mINFO    [0m | [1m逐Lane贪心排机器初始化完成 - 基础容量: 985.0GB, 利用率区间: [100%, 100%], 配置模式: 按机型自动[0m
+[32m2026-05-20 14:56:05[0m | [1mINFO    [0m | [1m启用检查: Index=True, 碱基不均衡=True, 规则检查器=False[0m
+[32m2026-05-20 14:56:06[0m | [1mINFO    [0m | [1mIndex校验器初始化完成（真实数据验证版本）[0m
+[32m2026-05-20 14:56:06[0m | [1mINFO    [0m | [1mIndex校验器初始化完成（真实数据验证版本）[0m
+[32m2026-05-20 14:56:06[0m | [1mINFO    [0m | [1m成Lane校验程序初始化完成 (严格模式: True, 碱基不均衡上限: 35%, 特殊文库关键词: 9个)[0m
+[32m2026-05-20 14:56:06[0m | [33m[1mWARNING [0m | [33m[1mPooling配置表不存在: /data/work/yuyongpeng/liblane_v2_deepseek/data/wktype_pooling_config.xlsx，将使用默认策略[0m
+[32m2026-05-20 14:56:06[0m | [1mINFO    [0m | [1m产出效率修正表不存在: /data/work/yuyongpeng/liblane_v2_deepseek/data/production_efficiency_correction.csv，跳过后校准[0m
+[32m2026-05-20 14:56:06[0m | [33m[1mWARNING [0m | [33m[1m模型文件不存在: models/loutput_pre_lane_v5/lightgbm_model.pkl[0m
+[32m2026-05-20 14:56:06[0m | [33m[1mWARNING [0m | [33m[1mloutput预测器不可用，将使用规则降级策略[0m
+[32m2026-05-20 14:56:06[0m | [1mINFO    [0m | [1m逐Lane贪心排机器初始化完成 - 基础容量: 985.0GB, 利用率区间: [100%, 100%], 配置模式: 按机型自动[0m
+[32m2026-05-20 14:56:06[0m | [1mINFO    [0m | [1m启用检查: Index=True, 碱基不均衡=True, 规则检查器=False[0m
+[32m2026-05-20 14:56:07[0m | [1mINFO    [0m | [1mIndex校验器初始化完成（真实数据验证版本）[0m
+[32m2026-05-20 14:56:07[0m | [1mINFO    [0m | [1mIndex校验器初始化完成（真实数据验证版本）[0m
+[32m2026-05-20 14:56:07[0m | [1mINFO    [0m | [1m成Lane校验程序初始化完成 (严格模式: True, 碱基不均衡上限: 35%, 特殊文库关键词: 9个)[0m
+[32m2026-05-20 14:56:07[0m | [33m[1mWARNING [0m | [33m[1mPooling配置表不存在: /data/work/yuyongpeng/liblane_v2_deepseek/data/wktype_pooling_config.xlsx，将使用默认策略[0m
+[32m2026-05-20 14:56:07[0m | [1mINFO    [0m | [1m产出效率修正表不存在: /data/work/yuyongpeng/liblane_v2_deepseek/data/production_efficiency_correction.csv，跳过后校准[0m
+[32m2026-05-20 14:56:07[0m | [33m[1mWARNING [0m | [33m[1m模型文件不存在: models/loutput_pre_lane_v5/lightgbm_model.pkl[0m
+[32m2026-05-20 14:56:07[0m | [33m[1mWARNING [0m | [33m[1mloutput预测器不可用，将使用规则降级策略[0m
+[32m2026-05-20 14:56:07[0m | [1mINFO    [0m | [1m逐Lane贪心排机器初始化完成 - 基础容量: 985.0GB, 利用率区间: [100%, 100%], 配置模式: 按机型自动[0m
+[32m2026-05-20 14:56:07[0m | [1mINFO    [0m | [1m启用检查: Index=True, 碱基不均衡=True, 规则检查器=False[0m
+[32m2026-05-20 14:56:08[0m | [1mINFO    [0m | [1mIndex校验器初始化完成（真实数据验证版本）[0m
+[32m2026-05-20 14:56:08[0m | [1mINFO    [0m | [1mIndex校验器初始化完成（真实数据验证版本）[0m
+[32m2026-05-20 14:56:08[0m | [1mINFO    [0m | [1m成Lane校验程序初始化完成 (严格模式: True, 碱基不均衡上限: 35%, 特殊文库关键词: 9个)[0m
+[32m2026-05-20 14:56:08[0m | [33m[1mWARNING [0m | [33m[1mPooling配置表不存在: /data/work/yuyongpeng/liblane_v2_deepseek/data/wktype_pooling_config.xlsx，将使用默认策略[0m
+[32m2026-05-20 14:56:08[0m | [1mINFO    [0m | [1m产出效率修正表不存在: /data/work/yuyongpeng/liblane_v2_deepseek/data/production_efficiency_correction.csv，跳过后校准[0m
+[32m2026-05-20 14:56:08[0m | [33m[1mWARNING [0m | [33m[1m模型文件不存在: models/loutput_pre_lane_v5/lightgbm_model.pkl[0m
+[32m2026-05-20 14:56:08[0m | [33m[1mWARNING [0m | [33m[1mloutput预测器不可用，将使用规则降级策略[0m
+[32m2026-05-20 14:56:08[0m | [1mINFO    [0m | [1m逐Lane贪心排机器初始化完成 - 基础容量: 985.0GB, 利用率区间: [100%, 100%], 配置模式: 按机型自动[0m
+[32m2026-05-20 14:56:08[0m | [1mINFO    [0m | [1m启用检查: Index=True, 碱基不均衡=True, 规则检查器=False[0m
+[32m2026-05-20 14:56:09[0m | [1mINFO    [0m | [1mIndex校验器初始化完成（真实数据验证版本）[0m
+[32m2026-05-20 14:56:09[0m | [1mINFO    [0m | [1mIndex校验器初始化完成（真实数据验证版本）[0m
+[32m2026-05-20 14:56:09[0m | [1mINFO    [0m | [1m成Lane校验程序初始化完成 (严格模式: True, 碱基不均衡上限: 35%, 特殊文库关键词: 9个)[0m
+[32m2026-05-20 14:56:09[0m | [33m[1mWARNING [0m | [33m[1mPooling配置表不存在: /data/work/yuyongpeng/liblane_v2_deepseek/data/wktype_pooling_config.xlsx，将使用默认策略[0m
+[32m2026-05-20 14:56:09[0m | [1mINFO    [0m | [1m产出效率修正表不存在: /data/work/yuyongpeng/liblane_v2_deepseek/data/production_efficiency_correction.csv，跳过后校准[0m
+[32m2026-05-20 14:56:09[0m | [33m[1mWARNING [0m | [33m[1m模型文件不存在: models/loutput_pre_lane_v5/lightgbm_model.pkl[0m
+[32m2026-05-20 14:56:09[0m | [33m[1mWARNING [0m | [33m[1mloutput预测器不可用，将使用规则降级策略[0m
+[32m2026-05-20 14:56:09[0m | [1mINFO    [0m | [1m逐Lane贪心排机器初始化完成 - 基础容量: 985.0GB, 利用率区间: [100%, 100%], 配置模式: 按机型自动[0m
+[32m2026-05-20 14:56:09[0m | [1mINFO    [0m | [1m启用检查: Index=True, 碱基不均衡=True, 规则检查器=False[0m
+[32m2026-05-20 14:56:10[0m | [1mINFO    [0m | [1mIndex校验器初始化完成（真实数据验证版本）[0m
+[32m2026-05-20 14:56:10[0m | [1mINFO    [0m | [1mIndex校验器初始化完成（真实数据验证版本）[0m
+[32m2026-05-20 14:56:10[0m | [1mINFO    [0m | [1m成Lane校验程序初始化完成 (严格模式: True, 碱基不均衡上限: 35%, 特殊文库关键词: 9个)[0m
+[32m2026-05-20 14:56:10[0m | [33m[1mWARNING [0m | [33m[1mPooling配置表不存在: /data/work/yuyongpeng/liblane_v2_deepseek/data/wktype_pooling_config.xlsx，将使用默认策略[0m
+[32m2026-05-20 14:56:10[0m | [1mINFO    [0m | [1m产出效率修正表不存在: /data/work/yuyongpeng/liblane_v2_deepseek/data/production_efficiency_correction.csv，跳过后校准[0m
+[32m2026-05-20 14:56:10[0m | [33m[1mWARNING [0m | [33m[1m模型文件不存在: models/loutput_pre_lane_v5/lightgbm_model.pkl[0m
+[32m2026-05-20 14:56:10[0m | [33m[1mWARNING [0m | [33m[1mloutput预测器不可用，将使用规则降级策略[0m
+[32m2026-05-20 14:56:10[0m | [1mINFO    [0m | [1m逐Lane贪心排机器初始化完成 - 基础容量: 985.0GB, 利用率区间: [100%, 100%], 配置模式: 按机型自动[0m
+[32m2026-05-20 14:56:10[0m | [1mINFO    [0m | [1m启用检查: Index=True, 碱基不均衡=True, 规则检查器=False[0m
+[32m2026-05-20 14:56:12[0m | [1mINFO    [0m | [1mIndex校验器初始化完成（真实数据验证版本）[0m
+[32m2026-05-20 14:56:12[0m | [1mINFO    [0m | [1mIndex校验器初始化完成（真实数据验证版本）[0m
+[32m2026-05-20 14:56:12[0m | [1mINFO    [0m | [1m成Lane校验程序初始化完成 (严格模式: True, 碱基不均衡上限: 35%, 特殊文库关键词: 9个)[0m
+[32m2026-05-20 14:56:12[0m | [33m[1mWARNING [0m | [33m[1mPooling配置表不存在: /data/work/yuyongpeng/liblane_v2_deepseek/data/wktype_pooling_config.xlsx，将使用默认策略[0m
+[32m2026-05-20 14:56:12[0m | [1mINFO    [0m | [1m产出效率修正表不存在: /data/work/yuyongpeng/liblane_v2_deepseek/data/production_efficiency_correction.csv，跳过后校准[0m
+[32m2026-05-20 14:56:12[0m | [33m[1mWARNING [0m | [33m[1m模型文件不存在: models/loutput_pre_lane_v5/lightgbm_model.pkl[0m
+[32m2026-05-20 14:56:12[0m | [33m[1mWARNING [0m | [33m[1mloutput预测器不可用，将使用规则降级策略[0m
+[32m2026-05-20 14:56:12[0m | [1mINFO    [0m | [1m逐Lane贪心排机器初始化完成 - 基础容量: 985.0GB, 利用率区间: [100%, 100%], 配置模式: 按机型自动[0m
+[32m2026-05-20 14:56:12[0m | [1mINFO    [0m | [1m启用检查: Index=True, 碱基不均衡=True, 规则检查器=False[0m
+[32m2026-05-20 14:56:13[0m | [1mINFO    [0m | [1mIndex校验器初始化完成（真实数据验证版本）[0m
+[32m2026-05-20 14:56:13[0m | [1mINFO    [0m | [1mIndex校验器初始化完成（真实数据验证版本）[0m
+[32m2026-05-20 14:56:13[0m | [1mINFO    [0m | [1m成Lane校验程序初始化完成 (严格模式: True, 碱基不均衡上限: 35%, 特殊文库关键词: 9个)[0m
+[32m2026-05-20 14:56:13[0m | [33m[1mWARNING [0m | [33m[1mPooling配置表不存在: /data/work/yuyongpeng/liblane_v2_deepseek/data/wktype_pooling_config.xlsx，将使用默认策略[0m
+[32m2026-05-20 14:56:13[0m | [1mINFO    [0m | [1m产出效率修正表不存在: /data/work/yuyongpeng/liblane_v2_deepseek/data/production_efficiency_correction.csv，跳过后校准[0m
+[32m2026-05-20 14:56:13[0m | [33m[1mWARNING [0m | [33m[1m模型文件不存在: models/loutput_pre_lane_v5/lightgbm_model.pkl[0m
+[32m2026-05-20 14:56:13[0m | [33m[1mWARNING [0m | [33m[1mloutput预测器不可用，将使用规则降级策略[0m
+[32m2026-05-20 14:56:13[0m | [1mINFO    [0m | [1m逐Lane贪心排机器初始化完成 - 基础容量: 985.0GB, 利用率区间: [100%, 100%], 配置模式: 按机型自动[0m
+[32m2026-05-20 14:56:13[0m | [1mINFO    [0m | [1m启用检查: Index=True, 碱基不均衡=True, 规则检查器=False[0m
+[32m2026-05-20 14:56:14[0m | [1mINFO    [0m | [1mIndex校验器初始化完成（真实数据验证版本）[0m
+[32m2026-05-20 14:56:14[0m | [1mINFO    [0m | [1mIndex校验器初始化完成（真实数据验证版本）[0m
+[32m2026-05-20 14:56:14[0m | [1mINFO    [0m | [1m成Lane校验程序初始化完成 (严格模式: True, 碱基不均衡上限: 35%, 特殊文库关键词: 9个)[0m
+[32m2026-05-20 14:56:14[0m | [33m[1mWARNING [0m | [33m[1mPooling配置表不存在: /data/work/yuyongpeng/liblane_v2_deepseek/data/wktype_pooling_config.xlsx，将使用默认策略[0m
+[32m2026-05-20 14:56:14[0m | [1mINFO    [0m | [1m产出效率修正表不存在: /data/work/yuyongpeng/liblane_v2_deepseek/data/production_efficiency_correction.csv，跳过后校准[0m
+[32m2026-05-20 14:56:14[0m | [33m[1mWARNING [0m | [33m[1m模型文件不存在: models/loutput_pre_lane_v5/lightgbm_model.pkl[0m
+[32m2026-05-20 14:56:14[0m | [33m[1mWARNING [0m | [33m[1mloutput预测器不可用，将使用规则降级策略[0m
+[32m2026-05-20 14:56:14[0m | [1mINFO    [0m | [1m逐Lane贪心排机器初始化完成 - 基础容量: 985.0GB, 利用率区间: [100%, 100%], 配置模式: 按机型自动[0m
+[32m2026-05-20 14:56:14[0m | [1mINFO    [0m | [1m启用检查: Index=True, 碱基不均衡=True, 规则检查器=False[0m
+[32m2026-05-20 14:56:15[0m | [1mINFO    [0m | [1mIndex校验器初始化完成（真实数据验证版本）[0m
+[32m2026-05-20 14:56:15[0m | [1mINFO    [0m | [1mIndex校验器初始化完成（真实数据验证版本）[0m
+[32m2026-05-20 14:56:15[0m | [1mINFO    [0m | [1m成Lane校验程序初始化完成 (严格模式: True, 碱基不均衡上限: 35%, 特殊文库关键词: 9个)[0m
+[32m2026-05-20 14:56:15[0m | [33m[1mWARNING [0m | [33m[1mPooling配置表不存在: /data/work/yuyongpeng/liblane_v2_deepseek/data/wktype_pooling_config.xlsx，将使用默认策略[0m
+[32m2026-05-20 14:56:15[0m | [1mINFO    [0m | [1m产出效率修正表不存在: /data/work/yuyongpeng/liblane_v2_deepseek/data/production_efficiency_correction.csv，跳过后校准[0m
+[32m2026-05-20 14:56:15[0m | [33m[1mWARNING [0m | [33m[1m模型文件不存在: models/loutput_pre_lane_v5/lightgbm_model.pkl[0m
+[32m2026-05-20 14:56:15[0m | [33m[1mWARNING [0m | [33m[1mloutput预测器不可用，将使用规则降级策略[0m
+[32m2026-05-20 14:56:15[0m | [1mINFO    [0m | [1m逐Lane贪心排机器初始化完成 - 基础容量: 985.0GB, 利用率区间: [100%, 100%], 配置模式: 按机型自动[0m
+[32m2026-05-20 14:56:15[0m | [1mINFO    [0m | [1m启用检查: Index=True, 碱基不均衡=True, 规则检查器=False[0m
+[32m2026-05-20 14:56:16[0m | [1mINFO    [0m | [1m3.6T-NEW高优先级预消耗达到尝试批次上限30，停止后续探测[0m
+[32m2026-05-20 14:56:16[0m | [1mINFO    [0m | [1m3.6T-NEW高优先级预消耗窗口策略未新增Lane，停止后续窗口尝试[0m
+[32m2026-05-20 14:56:16[0m | [1mINFO    [0m | [1m3.6T-NEW高优先级预消耗汇总: 累计Lane=3, 剩余高优回1.1=280, 剩余高优留36T=0, 剩余36T补料=0, 剩余1.1补料=404[0m
+[32m2026-05-20 14:56:16[0m | [1mINFO    [0m | [1m步骤1.5-1完成: 3.6T-NEW高优预消耗Lane=3, 消耗文库=146个, 剩余未成Lane池=772个[0m
+[32m2026-05-20 14:56:16[0m | [1mINFO    [0m | [1mDHE(第2-4位)/加测/混合文库22个禁止进入1.1，保留到3.6T-NEW流程[0m
+[32m2026-05-20 14:56:16[0m | [1mINFO    [0m | [1m步骤1.5-2: 1.1首轮使用剩余未成Lane全集，候选750个文库[0m
+[32m2026-05-20 14:56:16[0m | [1mINFO    [0m | [1m1.1首轮策略: expensive_rescue=True, peak_window_mixed=False, post_fill_optimization=True, rule_bucket_prescheduling=True[0m
+[32m2026-05-20 14:56:16[0m | [1mINFO    [0m | [1m
+================================================================================[0m
+[32m2026-05-20 14:56:16[0m | [1mINFO    [0m | [1m排机流程：纯规则排机[0m
+[32m2026-05-20 14:56:16[0m | [1mINFO    [0m | [1m================================================================================[0m
+[32m2026-05-20 14:56:16[0m | [1mINFO    [0m | [1mIndex校验器初始化完成（真实数据验证版本）[0m
+[32m2026-05-20 14:56:16[0m | [1mINFO    [0m | [1mIndex校验器初始化完成（真实数据验证版本）[0m
+[32m2026-05-20 14:56:16[0m | [1mINFO    [0m | [1m成Lane校验程序初始化完成 (严格模式: True, 碱基不均衡上限: 35%, 特殊文库关键词: 9个)[0m
+[32m2026-05-20 14:56:16[0m | [33m[1mWARNING [0m | [33m[1mPooling配置表不存在: /data/work/yuyongpeng/liblane_v2_deepseek/data/wktype_pooling_config.xlsx，将使用默认策略[0m
+[32m2026-05-20 14:56:16[0m | [1mINFO    [0m | [1m产出效率修正表不存在: /data/work/yuyongpeng/liblane_v2_deepseek/data/production_efficiency_correction.csv，跳过后校准[0m
+[32m2026-05-20 14:56:16[0m | [33m[1mWARNING [0m | [33m[1m模型文件不存在: models/loutput_pre_lane_v5/lightgbm_model.pkl[0m
+[32m2026-05-20 14:56:16[0m | [33m[1mWARNING [0m | [33m[1mloutput预测器不可用，将使用规则降级策略[0m
+[32m2026-05-20 14:56:16[0m | [1mINFO    [0m | [1m逐Lane贪心排机器初始化完成 - 基础容量: 985.0GB, 利用率区间: [100%, 100%], 配置模式: 按机型自动[0m
+[32m2026-05-20 14:56:16[0m | [1mINFO    [0m | [1m启用检查: Index=True, 碱基不均衡=True, 规则检查器=False[0m
+[32m2026-05-20 14:56:16[0m | [1mINFO    [0m | [1m排机阶段：Pooling优化器已禁用（V6流程不需要）[0m
+[32m2026-05-20 14:56:16[0m | [1mINFO    [0m | [1mIndex校验器初始化完成（真实数据验证版本）[0m
+[32m2026-05-20 14:56:16[0m | [1mINFO    [0m | [1m成Lane校验程序初始化完成 (严格模式: True, 碱基不均衡上限: 35%, 特殊文库关键词: 9个)[0m
+[32m2026-05-20 14:56:16[0m | [1mINFO    [0m | [1m严格校验容量区间改为按统一配置表动态解析[0m
+[32m2026-05-20 14:56:16[0m | [1mINFO    [0m | [1m主流程前置拆分完成: 无需拆分[0m
+[32m2026-05-20 14:56:16[0m | [1mINFO    [0m | [1mPeak窗口混排预构Lane已按调用方要求关闭[0m
+[32m2026-05-20 14:56:16[0m | [1mINFO    [0m | [1m主流程规则分桶预调度: bucket=manual_or_risk:（极速周期）清华项目1000个自建库测序+2000个RNA文库测序技术服务（委托）合同|S|客户-真核普通转录组文库|NA|MANUAL_RISK, count=29, data=2145.5G[0m
+[32m2026-05-20 14:56:16[0m | [1mINFO    [0m | [1m开始逐Lane贪心排机 - 文库数: 29[0m
+[32m2026-05-20 14:56:16[0m | [1mINFO    [0m | [1m预拆分完成: 使用外层已拆分文库[0m
+[32m2026-05-20 14:56:16[0m | [1mINFO    [0m | [1m===== 批次全局分析报告 =====[0m
+[32m2026-05-20 14:56:16[0m | [1mINFO    [0m | [1m机器类型: Nova X-25B[0m
+[32m2026-05-20 14:56:16[0m | [1mINFO    [0m | [1m文库总数: 29[0m
+[32m2026-05-20 14:56:16[0m | [1mINFO    [0m | [1m总数据量: 2145.5 GB[0m
+[32m2026-05-20 14:56:16[0m | [1mINFO    [0m | [1m预估Lane数: 1~2[0m
+[32m2026-05-20 14:56:16[0m | [1mINFO    [0m | [1m--- 特征标记 ---[0m
+[32m2026-05-20 14:56:16[0m | [1mINFO    [0m | [1m  包Lane文库: 无[0m
+[32m2026-05-20 14:56:16[0m | [1mINFO    [0m | [1m  碱基不均衡: 无[0m
+[32m2026-05-20 14:56:16[0m | [1mINFO    [0m | [1m  客户文库:   无[0m
+[32m2026-05-20 14:56:16[0m | [1mINFO    [0m | [1m  10bp文库:   有[0m
+[32m2026-05-20 14:56:16[0m | [1mINFO    [0m | [1m  非10bp文库: 无[0m
+[32m2026-05-20 14:56:16[0m | [1mINFO    [0m | [1m  特殊组合:   无[0m
+[32m2026-05-20 14:56:16[0m | [1mINFO    [0m | [1m--- 分组画像 ---[0m
+[32m2026-05-20 14:56:16[0m | [1mINFO    [0m | [1m  [10bp] 10碱基文库: 29个文库, 2145.5GB, 预估1~2条Lane[0m
+[32m2026-05-20 14:56:16[0m | [1mINFO    [0m | [1m  [all] 全部文库: 29个文库, 2145.5GB, 预估1~2条Lane[0m
+[32m2026-05-20 14:56:16[0m | [1mINFO    [0m | [1m--- 策略建议 ---[0m
+[32m2026-05-20 14:56:16[0m | [1mINFO    [0m | [1m  - 数据分布较均匀，可按常规贪心排机流程处理[0m
+[32m2026-05-20 14:56:16[0m | [1mINFO    [0m | [1m===== 报告结束 =====[0m
+[32m2026-05-20 14:56:16[0m | [1mINFO    [0m | [1m保留外部传入的策略执行计划，仅使用批次分析报告[0m
+[32m2026-05-20 14:56:16[0m | [1mINFO    [0m | [1m处理机器类型 Nova X-25B - 文库数: 26 - Lane容量: 1050.0GB, 利用率区间: [100%, 100%], 特殊文库上限: 350GB[0m
+[32m2026-05-20 14:56:16[0m | [1mINFO    [0m | [1m处理机器类型 NovaSeq X Plus - 文库数: 3 - Lane容量: 1100GB, 利用率区间: [100%, 100%], 特殊文库上限: 350GB[0m
+[32m2026-05-20 14:56:16[0m | [1mINFO    [0m | [1m剩余池总量2.3GB不足最小成Lane门槛2095.0GB，跳过后续随机重试[0m
+[32m2026-05-20 14:56:16[0m | [1mINFO    [0m | [1m最后填充策略: 尝试将3个未分配文库塞入已有Lane[0m
+[32m2026-05-20 14:56:16[0m | [1mINFO    [0m | [1m最后填充策略: 成功塞入2个文库，踢出0个违反规则的文库，剩余1个无法分配[0m
+[32m2026-05-20 14:56:16[0m | [1mINFO    [0m | [1m挪移优化: 未分配1个文库(1GB)，需要从现有Lane挪出2094GB[0m
+[32m2026-05-20 14:56:16[0m | [33m[1mWARNING [0m | [33m[1m挪移优化: 挪出数据量46GB不足，放弃挪移[0m
+[32m2026-05-20 14:56:16[0m | [1mINFO    [0m | [1m逐Lane贪心排机完成 - Lane数: 1, 已分配: 28/29, 未分配: 1, 平均利用率: 98.6%, 耗时: 0.04秒[0m
+[32m2026-05-20 14:56:16[0m | [1mINFO    [0m | [1mIndex校验器初始化完成（真实数据验证版本）[0m
+[32m2026-05-20 14:56:16[0m | [1mINFO    [0m | [1m成Lane校验程序初始化完成 (严格模式: False, 碱基不均衡上限: 35%, 特殊文库关键词: 9个)[0m
+[32m2026-05-20 14:56:16[0m | [1mINFO    [0m | [1m最终验证结果: 1条Lane通过，1个文库未分配[0m
+[32m2026-05-20 14:56:16[0m | [1mINFO    [0m | [1m主流程规则分桶预调度: bucket=manual_or_risk:YC2025年武汉序拓生物自建库PE150测序技术服务（委托）合同|S|客户-ATAC-SEQ文库|NA|SCATTERED+MANUAL_RISK+IMBALANCE, count=5, data=2100.0G[0m
+[32m2026-05-20 14:56:16[0m | [1mINFO    [0m | [1m开始逐Lane贪心排机 - 文库数: 5[0m
+[32m2026-05-20 14:56:16[0m | [1mINFO    [0m | [1m预拆分完成: 使用外层已拆分文库[0m
+[32m2026-05-20 14:56:16[0m | [1mINFO    [0m | [1m使用外部传入的全局分析报告（全量文库），跳过内部分析[0m
+[32m2026-05-20 14:56:16[0m | [1mINFO    [0m | [1m处理机器类型 Nova X-25B - 文库数: 5 - Lane容量: 1050.0GB, 利用率区间: [100%, 100%], 特殊文库上限: 350GB[0m
+[32m2026-05-20 14:56:16[0m | [33m[1mWARNING [0m | [33m[1m剩余 5 个文库无法分配（全部有约束冲突）[0m
+[32m2026-05-20 14:56:16[0m | [1mINFO    [0m | [1m逐Lane贪心排机完成 - Lane数: 0, 已分配: 0/5, 未分配: 5, 平均利用率: 0.0%, 耗时: 0.00秒[0m
+[32m2026-05-20 14:56:16[0m | [1mINFO    [0m | [1mIndex校验器初始化完成（真实数据验证版本）[0m
+[32m2026-05-20 14:56:16[0m | [1mINFO    [0m | [1m成Lane校验程序初始化完成 (严格模式: False, 碱基不均衡上限: 35%, 特殊文库关键词: 9个)[0m
+[32m2026-05-20 14:56:16[0m | [1mINFO    [0m | [1m最终验证结果: 0条Lane通过，5个文库未分配[0m
+[32m2026-05-20 14:56:16[0m | [1mINFO    [0m | [1m主流程规则分桶跳过: bucket=manual_or_risk:中药所9个单细胞+9个转录组分析技术服务（委托）合同|S|墨卓转录组-3端文库|NA|MANUAL_RISK+IMBALANCE, count=9, reason=总量900.0G低于最小门槛1995.0G[0m
+[32m2026-05-20 14:56:16[0m | [1mINFO    [0m | [1m主流程规则分桶跳过: bucket=manual_or_risk:YC-（极速周期）2025年上海近岸生物年度框架协议分析技术服务（委托）合同|S|客户-METHYLATION文库|NA|SCATTERED+MANUAL_RISK+IMBALANCE, count=5, reason=总量500.0G低于最小门槛2074.1G[0m
+[32m2026-05-20 14:56:16[0m | [1mINFO    [0m | [1m主流程规则分桶跳过: bucket=manual_or_risk:四川农业大学100个样本单细胞建库测序技术服务（委托）合同|S|墨卓转录组-3端文库|NA|MANUAL_RISK+IMBALANCE, count=4, reason=总量400.0G低于最小门槛1995.0G[0m
+[32m2026-05-20 14:56:16[0m | [1mINFO    [0m | [1m主流程规则分桶跳过: bucket=manual_or_risk:（极速周期）北大SH自建库散样XP建库测序技术服务（委托）合同|S|客户-真核普通转录组文库|NA|SCATTERED+MANUAL_RISK, count=2, reason=总量400.0G低于最小门槛2095.0G[0m
+[32m2026-05-20 14:56:16[0m | [1mINFO    [0m | [1m主流程规则分桶跳过: bucket=manual_or_risk:医学委托科服混样子项目|S|全基因组文库|NA|SCATTERED+MANUAL_RISK, count=73, reason=总量392.5G低于最小门槛2095.0G[0m
+[32m2026-05-20 14:56:16[0m | [1mINFO    [0m | [1m主流程规则分桶跳过: bucket=manual_or_risk:YC宏微特斯测序技术服务（委托）合同2025|S|客户-META文库|NA|SCATTERED+MANUAL_RISK, count=14, reason=总量381.0G低于最小门槛2095.0G[0m
+[32m2026-05-20 14:56:16[0m | [1mINFO    [0m | [1m主流程规则分桶跳过: bucket=manual_or_risk:YC-中国科学院北京基因组研究所20000G自建库文库测序技术服务（委托）合同|S|客户-METHYLATION文库|NA|SCATTERED+MANUAL_RISK+IMBALANCE, count=3, reason=总量300.0G低于最小门槛2074.1G[0m
+[32m2026-05-20 14:56:16[0m | [1mINFO    [0m | [1m主流程规则分桶跳过: bucket=manual_or_risk:国科大自建库测序NOVA X PLUS技术服务（委托）合同-2|S|客户-HI-C文库|NA|MANUAL_RISK, count=4, reason=总量253.7G低于最小门槛2095.0G[0m
+[32m2026-05-20 14:56:16[0m | [1mINFO    [0m | [1m主流程规则分桶跳过: bucket=manual_or_risk:YC项目1000个自建库测序数据质控技术服务（委托）合同|S|客户-其他碱基均衡文库|NA|SCATTERED+MANUAL_RISK, count=14, reason=总量204.8G低于最小门槛2095.0G[0m
+[32m2026-05-20 14:56:16[0m | [1mINFO    [0m | [1m主流程规则分桶跳过: bucket=manual_or_risk:YC大连晶泰测序技术服务（委托）合同2025|S|客户-METHYLATION文库|NA|SCATTERED+MANUAL_RISK+IMBALANCE, count=2, reason=总量200.0G低于最小门槛2074.1G[0m
+[32m2026-05-20 14:56:16[0m | [1mINFO    [0m | [1m主流程规则分桶跳过: bucket=manual_or_risk:2025年未知君自建库测序分析技术服务（委托）合同|S|客户-META文库|NA|MANUAL_RISK, count=1, reason=总量192.0G低于最小门槛2095.0G[0m
+[32m2026-05-20 14:56:16[0m | [1mINFO    [0m | [1m主流程规则分桶跳过: bucket=manual_or_risk:医学委托科服混样子项目|S|IDT全外文库|NA|SCATTERED+MANUAL_RISK, count=1, reason=总量121.5G低于最小门槛2095.0G[0m
+[32m2026-05-20 14:56:16[0m | [1mINFO    [0m | [1m主流程规则分桶跳过: bucket=manual_or_risk:广妇儿15例墨卓单细胞带矩阵分析技术服务（委托）合同|S|墨卓转录组-3端文库|NA|MANUAL_RISK+IMBALANCE, count=1, reason=总量100.0G低于最小门槛1995.0G[0m
+[32m2026-05-20 14:56:16[0m | [1mINFO    [0m | [1m主流程规则分桶跳过: bucket=manual_or_risk:西北农林科技大学4例样本单细胞转录组（墨卓平台）建库测序技术服务（委托）合同|S|墨卓转录组-3端文库|NA|MANUAL_RISK+IMBALANCE, count=1, reason=总量100.0G低于最小门槛1995.0G[0m
+[32m2026-05-20 14:56:16[0m | [1mINFO    [0m | [1m主流程规则分桶跳过: bucket=manual_or_risk:YC大连基恩测序技术服务（委托）合同2025|S|客户-人重测序文库|NA|SCATTERED+MANUAL_RISK, count=6, reason=总量87.6G低于最小门槛2095.0G[0m
+[32m2026-05-20 14:56:16[0m | [1mINFO    [0m | [1m主流程规则分桶跳过: bucket=manual_or_risk:YC郑州大学2025年自建库测序技术服务（委托）合同|S|客户-扩增子文库|NA|SCATTERED+MANUAL_RISK+IMBALANCE, count=4, reason=总量72.0G低于最小门槛1466.5G[0m
+[32m2026-05-20 14:56:16[0m | [1mINFO    [0m | [1m主流程规则分桶跳过: bucket=manual_or_risk:YC（极速周期）2025年泛因生物自建库合同分析技术服务（委托）合同|S|客户-PCR产物|NA|SCATTERED+MANUAL_RISK+IMBALANCE, count=2, reason=总量50.0G低于最小门槛1257.0G[0m
+[32m2026-05-20 14:56:16[0m | [1mINFO    [0m | [1m主流程规则分桶跳过: bucket=manual_or_risk:YC宏微特斯测序技术服务（委托）合同2025|S|客户-人外显子文库|NA|SCATTERED+MANUAL_RISK, count=3, reason=总量47.7G低于最小门槛2095.0G[0m
+[32m2026-05-20 14:56:16[0m | [1mINFO    [0m | [1m主流程规则分桶跳过: bucket=manual_or_risk:YC-中国科学院北京基因组研究所（专用）25000G自建库文库测序技术服务（委托）合同-YYG|S|客户-真核普通转录组文库|NA|SCATTERED+MANUAL_RISK, count=6, reason=总量43.0G低于最小门槛2095.0G[0m
+[32m2026-05-20 14:56:16[0m | [1mINFO    [0m | [1m主流程规则分桶跳过: bucket=manual_or_risk:24.12.27华中农业大学X-PLUS平台自建库测序技术服务（委托）合同|S|客户-动植物全基因组重测序文库|NA|MANUAL_RISK, count=7, reason=总量42.0G低于最小门槛2095.0G[0m
+[32m2026-05-20 14:56:16[0m | [1mINFO    [0m | [1m主流程规则分桶跳过: bucket=manual_or_risk:YC因诺惟康纯测序技术服务（委托）合同2025|S|客户-DNA PCR FREE（人）|NA|SCATTERED+MANUAL_RISK, count=4, reason=总量40.0G低于最小门槛2095.0G[0m
+[32m2026-05-20 14:56:16[0m | [1mINFO    [0m | [1m主流程规则分桶跳过: bucket=manual_or_risk:YC宏微特斯测序技术服务（委托）合同2025|S|客户-扩增子文库|NA|SCATTERED+MANUAL_RISK+IMBALANCE, count=13, reason=总量39.0G低于最小门槛1466.5G[0m
+[32m2026-05-20 14:56:16[0m | [1mINFO    [0m | [1m主流程规则分桶跳过: bucket=manual_or_risk:YC2025年武汉序拓生物自建库PE150测序技术服务（委托）合同|S|客户-SMALL RNA文库|NA|SCATTERED+MANUAL_RISK, count=9, reason=总量36.0G低于最小门槛2095.0G[0m
+[32m2026-05-20 14:56:16[0m | [1mINFO    [0m | [1m主流程规则分桶跳过: bucket=manual_or_risk:中南大学湘雅二医院18个ATAC自建库测序分析技术服务（委托）合同|S|客户-ATAC-SEQ文库|NA|MANUAL_RISK+IMBALANCE, count=3, reason=总量36.0G低于最小门槛1676.0G[0m
+[32m2026-05-20 14:56:16[0m | [1mINFO    [0m | [1m主流程规则分桶跳过: bucket=manual_or_risk:YC-25-上海桐树医学检验实验室散文库纯测序技术服务（委托）补充合同|S|客户-METHYLATION文库|NA|SCATTERED+MANUAL_RISK+IMBALANCE, count=2, reason=总量32.0G低于最小门槛2074.1G[0m
+[32m2026-05-20 14:56:16[0m | [1mINFO    [0m | [1m主流程规则分桶跳过: bucket=manual_or_risk:红杨树X PLUS自建库测序技术服务（委托）合同|S|客户-ATAC-SEQ文库|NA|MANUAL_RISK+IMBALANCE, count=3, reason=总量30.0G低于最小门槛1676.0G[0m
+[32m2026-05-20 14:56:16[0m | [1mINFO    [0m | [1m主流程规则分桶跳过: bucket=manual_or_risk:凌恩-RNA 甲基化-测序分析技术服务(委托)合同|S|低起始量RNA甲基化文库-INPUT(人)|NA|MANUAL_RISK+IMBALANCE, count=2, reason=总量25.0G低于最小门槛2095.0G[0m
+[32m2026-05-20 14:56:16[0m | [1mINFO    [0m | [1m主流程规则分桶跳过: bucket=manual_or_risk:YC项目1000个自建库测序数据质控技术服务（委托）合同|S|客户-CHIP-SEQ文库|NA|SCATTERED+MANUAL_RISK, count=7, reason=总量23.2G低于最小门槛2095.0G[0m
+[32m2026-05-20 14:56:16[0m | [1mINFO    [0m | [1m主流程规则分桶跳过: bucket=manual_or_risk:医学委托科服混样子项目|S|客户DNA文库|NA|SCATTERED+MANUAL_RISK, count=9, reason=总量20.9G低于最小门槛2095.0G[0m
+[32m2026-05-20 14:56:16[0m | [1mINFO    [0m | [1m主流程规则分桶跳过: bucket=manual_or_risk:YC厦门大学2025年-自建库测序项目-补充协议|S|客户-人重测序文库|NA|SCATTERED+MANUAL_RISK, count=4, reason=总量20.0G低于最小门槛2095.0G[0m
+[32m2026-05-20 14:56:16[0m | [1mINFO    [0m | [1m主流程规则分桶跳过: bucket=manual_or_risk:YC派真生物-2025自建库测序技术服务（委托）合同分析技术服务（委托）合同|S|客户-PCR产物|NA|SCATTERED+MANUAL_RISK+IMBALANCE, count=2, reason=总量20.0G低于最小门槛1257.0G[0m
+[32m2026-05-20 14:56:16[0m | [1mINFO    [0m | [1m主流程规则分桶跳过: bucket=manual_or_risk:YC银丰基因自建库测序技术服务（委托）合同2025|S|客户-人外显子文库|NA|SCATTERED+MANUAL_RISK, count=2, reason=总量20.0G低于最小门槛2095.0G[0m
+[32m2026-05-20 14:56:16[0m | [1mINFO    [0m | [1m主流程规则分桶跳过: bucket=manual_or_risk:YC（极速周期）2025年深圳易基因自建库测序分析技术服务（委托）合同|S|客户-METHYLATION文库|NA|SCATTERED+MANUAL_RISK+IMBALANCE, count=1, reason=总量20.0G低于最小门槛2074.1G[0m
+[32m2026-05-20 14:56:16[0m | [1mINFO    [0m | [1m主流程规则分桶跳过: bucket=manual_or_risk:YC项目1000个自建库测序数据质控技术服务（委托）合同|S|客户-动植物全基因组重测序文库|NA|SCATTERED+MANUAL_RISK, count=2, reason=总量18.2G低于最小门槛2095.0G[0m
+[32m2026-05-20 14:56:16[0m | [1mINFO    [0m | [1m主流程规则分桶跳过: bucket=manual_or_risk:YC郑州大学2025年自建库测序技术服务（委托）合同|S|客户-人外显子文库|NA|SCATTERED+MANUAL_RISK, count=3, reason=总量18.0G低于最小门槛2095.0G[0m
+[32m2026-05-20 14:56:16[0m | [1mINFO    [0m | [1m主流程规则分桶跳过: bucket=manual_or_risk:自建库测序散样分析技术服务（委托）合同|S|客户-动植物全基因组重测序文库|NA|SCATTERED+MANUAL_RISK, count=2, reason=总量12.0G低于最小门槛2095.0G[0m
+[32m2026-05-20 14:56:16[0m | [1mINFO    [0m | [1m主流程规则分桶跳过: bucket=manual_or_risk:YC-中国科学院北京基因组研究所20000G自建库文库测序技术服务（委托）合同|S|客户-真核普通转录组文库|NA|SCATTERED+MANUAL_RISK, count=2, reason=总量10.0G低于最小门槛2095.0G[0m
+[32m2026-05-20 14:56:16[0m | [1mINFO    [0m | [1m主流程规则分桶跳过: bucket=manual_or_risk:工生所XPLUS自建库测序分析技术服务（委托）合同|S|客户-动植物全基因组重测序文库|NA|MANUAL_RISK, count=1, reason=总量10.0G低于最小门槛2095.0G[0m
+[32m2026-05-20 14:56:16[0m | [1mINFO    [0m | [1m主流程规则分桶跳过: bucket=manual_or_risk:YC项目1000个自建库测序数据质控技术服务（委托）合同|S|客户-其他碱基不均衡文库|NA|SCATTERED+MANUAL_RISK+IMBALANCE, count=4, reason=总量9.3G低于最小门槛1676.0G[0m
+[32m2026-05-20 14:56:16[0m | [1mINFO    [0m | [1m主流程规则分桶跳过: bucket=manual_or_risk:湖大100例自建库测序XPLUS分析技术服务（委托）合同|S|客户-其他碱基均衡文库|NA|MANUAL_RISK, count=1, reason=总量9.0G低于最小门槛2095.0G[0m
+[32m2026-05-20 14:56:16[0m | [1mINFO    [0m | [1m主流程规则分桶跳过: bucket=manual_or_risk:YC2025年凯德维斯医学XPLUS自建库测序技术服务（委托）合同|S|客户-人重测序文库|NA|SCATTERED+MANUAL_RISK, count=1, reason=总量8.4G低于最小门槛2095.0G[0m
+[32m2026-05-20 14:56:16[0m | [1mINFO    [0m | [1m主流程规则分桶跳过: bucket=manual_or_risk:YC-25-上海桐树医学检验实验室散文库纯测序技术服务（委托）补充合同|S|客户-人目标区域文库|NA|SCATTERED+MANUAL_RISK, count=2, reason=总量6.1G低于最小门槛2095.0G[0m
+[32m2026-05-20 14:56:16[0m | [1mINFO    [0m | [1m主流程规则分桶跳过: bucket=manual_or_risk:YC项目1000个自建库测序数据质控技术服务（委托）合同|S|客户-真核普通转录组文库|NA|SCATTERED+MANUAL_RISK, count=1, reason=总量6.0G低于最小门槛2095.0G[0m
+[32m2026-05-20 14:56:16[0m | [1mINFO    [0m | [1m主流程规则分桶跳过: bucket=manual_or_risk:（极速周期）北生所300例文库测序技术服务（委托）合同|S|客户-CUT-TAG文库|NA|MANUAL_RISK+IMBALANCE, count=1, reason=总量6.0G低于最小门槛1676.0G[0m
+[32m2026-05-20 14:56:16[0m | [1mINFO    [0m | [1m主流程规则分桶跳过: bucket=manual_or_risk:YC（极速周期）2025年深圳易基因自建库测序分析技术服务（委托）合同|S|客户-CHIP-SEQ文库|NA|SCATTERED+MANUAL_RISK, count=4, reason=总量5.6G低于最小门槛2095.0G[0m
+[32m2026-05-20 14:56:16[0m | [1mINFO    [0m | [1m主流程规则分桶跳过: bucket=manual_or_risk:YC-中国科学院北京基因组研究所20000G自建库文库测序技术服务（委托）合同|S|客户-人重测序文库|NA|SCATTERED+MANUAL_RISK, count=2, reason=总量4.0G低于最小门槛2095.0G[0m
+[32m2026-05-20 14:56:16[0m | [1mINFO    [0m | [1m主流程规则分桶跳过: bucket=manual_or_risk:YC宏微特斯测序技术服务（委托）合同2025|S|客户-其他碱基不均衡文库|NA|SCATTERED+MANUAL_RISK+IMBALANCE, count=3, reason=总量3.0G低于最小门槛1676.0G[0m
+[32m2026-05-20 14:56:16[0m | [1mINFO    [0m | [1m主流程规则分桶跳过: bucket=manual_or_risk:（极速周期）吉林大学自建库新平台500个样本技术服务（委托）合同|S|客户-动植物全基因组重测序文库|NA|MANUAL_RISK, count=1, reason=总量3.0G低于最小门槛2095.0G[0m
+[32m2026-05-20 14:56:16[0m | [1mINFO    [0m | [1m主流程规则分桶跳过: bucket=manual_or_risk:YC-第三医学中心麦老师自建库测序技术服务（委托）合同|S|客户-真核普通转录组文库|NA|SCATTERED+MANUAL_RISK, count=1, reason=总量2.7G低于最小门槛2095.0G[0m
+[32m2026-05-20 14:56:16[0m | [1mINFO    [0m | [1m主流程规则分桶跳过: bucket=manual_or_risk:YC高博博仁医院测序技术服务（委托）合同2025|S|客户-动植物全基因组重测序文库|NA|SCATTERED+MANUAL_RISK, count=1, reason=总量2.5G低于最小门槛2095.0G[0m
+[32m2026-05-20 14:56:16[0m | [1mINFO    [0m | [1m主流程规则分桶跳过: bucket=manual_or_risk:H101SC241104YC（极速周期）自建库测序技术服务（委托）合同-2|S|客户-PCR产物|NA|SCATTERED+MANUAL_RISK+IMBALANCE, count=1, reason=总量2.2G低于最小门槛1257.0G[0m
+[32m2026-05-20 14:56:16[0m | [1mINFO    [0m | [1m主流程规则分桶跳过: bucket=manual_or_risk:YC（极速周期）动物所自建库 XPLUS 测序技术服务（委托）合同-LL|S|客户-真核普通转录组文库|NA|SCATTERED+MANUAL_RISK, count=2, reason=总量2.1G低于最小门槛2095.0G[0m
+[32m2026-05-20 14:56:16[0m | [1mINFO    [0m | [1m主流程规则分桶跳过: bucket=manual_or_risk:工生所200例自建库测序技术服务（委托）合同|S|客户-动植物全基因组重测序文库|NA|MANUAL_RISK, count=1, reason=总量2.0G低于最小门槛2095.0G[0m
+[32m2026-05-20 14:56:16[0m | [1mINFO    [0m | [1m主流程规则分桶跳过: bucket=manual_or_risk:南京林业大学-40个自建库库检+测序-尹慧娟分析技术服务（委托）合同|S|客户-真核普通转录组文库|NA|MANUAL_RISK, count=1, reason=总量1.8G低于最小门槛2095.0G[0m
+[32m2026-05-20 14:56:16[0m | [1mINFO    [0m | [1m主流程规则分桶跳过: bucket=manual_or_risk:YC北京优吉测序技术服务（委托）合同2025|S|客户-PCR产物|NA|SCATTERED+MANUAL_RISK+IMBALANCE, count=1, reason=总量1.0G低于最小门槛1257.0G[0m
+[32m2026-05-20 14:56:16[0m | [1mINFO    [0m | [1m主流程规则分桶跳过: bucket=manual_or_risk:浙江农林大学10个自建库测序X技术服务（委托）合同|S|客户-动植物全基因组重测序文库|NA|MANUAL_RISK, count=1, reason=总量1.0G低于最小门槛2095.0G[0m
+[32m2026-05-20 14:56:16[0m | [1mINFO    [0m | [1m主流程规则分桶跳过: bucket=manual_or_risk:YC北京爱普益纯测序技术服务（委托）合同2025|S|客户-其他碱基均衡文库|NA|SCATTERED+MANUAL_RISK, count=1, reason=总量0.8G低于最小门槛2095.0G[0m
+[32m2026-05-20 14:56:16[0m | [1mINFO    [0m | [1m主流程规则分桶跳过: bucket=manual_or_risk:YC（极速周期）2025年深圳易基因自建库测序分析技术服务（委托）合同|S|客户-真核普通转录组文库|NA|SCATTERED+MANUAL_RISK, count=1, reason=总量0.8G低于最小门槛2095.0G[0m
+[32m2026-05-20 14:56:16[0m | [1mINFO    [0m | [1m主流程规则分桶跳过: bucket=manual_or_risk:（极速周期）清华50例文库技术服务（委托）合同|S|客户-其他碱基均衡文库|NA|MANUAL_RISK, count=1, reason=总量0.8G低于最小门槛2095.0G[0m
+[32m2026-05-20 14:56:16[0m | [1mINFO    [0m | [1m主流程规则分桶跳过: bucket=ten_x:南方科技大学20例单细胞测序分析技术服务（委托）合同|S|10X转录组-3'文库|NA|TENX+MANUAL_RISK+IMBALANCE, count=3, reason=总量354.0G低于最小门槛1995.0G[0m
+[32m2026-05-20 14:56:16[0m | [1mINFO    [0m | [1m主流程规则分桶跳过: bucket=ten_x:浙江大学国际健康医学研究院肿瘤完整基因组图谱计划一期（第一批）分析技术服务（委托）合同|S|10X转录组-3'文库|NA|TENX+MANUAL_RISK+IMBALANCE, count=4, reason=总量305.3G低于最小门槛1995.0G[0m
+[32m2026-05-20 14:56:16[0m | [1mINFO    [0m | [1m主流程规则分桶跳过: bucket=ten_x:中山大学5个10X GENOMICS 3'单细胞转录组分析技术服务（委托）合同|S|10X转录组-3'文库|NA|TENX+MANUAL_RISK+IMBALANCE, count=4, reason=总量210.0G低于最小门槛1995.0G[0m
+[32m2026-05-20 14:56:16[0m | [1mINFO    [0m | [1m主流程规则分桶跳过: bucket=ten_x:吉大中日联谊医院单细胞转录组测序分析技术服务（委托）合同|S|10X转录组-3'文库|NA|TENX+MANUAL_RISK+IMBALANCE, count=1, reason=总量120.0G低于最小门槛1995.0G[0m
+[32m2026-05-20 14:56:16[0m | [1mINFO    [0m | [1m主流程规则分桶跳过: bucket=ten_x:中山眼科35例单细胞转录组分析技术服务（委托）合同|S|10X转录组-3'文库|NA|TENX+MANUAL_RISK+IMBALANCE, count=2, reason=总量111.8G低于最小门槛1995.0G[0m
+[32m2026-05-20 14:56:16[0m | [1mINFO    [0m | [1m主流程规则分桶跳过: bucket=ten_x:山东大学16个单细胞测序分析技术服务（委托）合同-张晓鲁|S|10X转录组-3'文库|NA|TENX+MANUAL_RISK+IMBALANCE, count=2, reason=总量110.0G低于最小门槛1995.0G[0m
+[32m2026-05-20 14:56:16[0m | [1mINFO    [0m | [1m主流程规则分桶跳过: bucket=ten_x:3个单细胞分析技术服务（委托）合同|S|10X转录组-3'文库|NA|TENX+MANUAL_RISK+IMBALANCE, count=1, reason=总量100.0G低于最小门槛1995.0G[0m
+[32m2026-05-20 14:56:16[0m | [1mINFO    [0m | [1m主流程规则分桶跳过: bucket=ten_x:LXL-单细胞转录组测序分析技术服务（委托）合同|S|10X转录组-3'文库|NA|TENX+MANUAL_RISK+IMBALANCE, count=1, reason=总量100.0G低于最小门槛1995.0G[0m
+[32m2026-05-20 14:56:16[0m | [1mINFO    [0m | [1m主流程规则分桶跳过: bucket=ten_x:南科大6个单细胞转录组分析技术服务（委托）合同|S|10X转录组-3'文库|NA|TENX+MANUAL_RISK+IMBALANCE, count=1, reason=总量100.0G低于最小门槛1995.0G[0m
+[32m2026-05-20 14:56:16[0m | [1mINFO    [0m | [1m主流程规则分桶跳过: bucket=ten_x:厦门大学100个单细胞转录组+50个单细胞ATAC测序技术服务（委托）合同|S|10X转录组-3'文库|NA|TENX+MANUAL_RISK+IMBALANCE, count=1, reason=总量100.0G低于最小门槛1995.0G[0m
+[32m2026-05-20 14:56:16[0m | [1mINFO    [0m | [1m主流程规则分桶跳过: bucket=ten_x:四川大学华西医院6例软骨10X3端单细胞转录组分析技术服务（委托）合同|S|10X转录组-3'文库|NA|TENX+MANUAL_RISK+IMBALANCE, count=1, reason=总量100.0G低于最小门槛1995.0G[0m
+[32m2026-05-20 14:56:16[0m | [1mINFO    [0m | [1m主流程规则分桶跳过: bucket=ten_x:北京大学第一医院自建库测序技术服务（委托）合同|S|客户-单细胞文库|NA|TENX+MANUAL_RISK+IMBALANCE, count=1, reason=总量42.8G低于最小门槛1843.6G[0m
+[32m2026-05-20 14:56:16[0m | [1mINFO    [0m | [1m主流程规则分桶跳过: bucket=ten_x:YC苏州德运康瑞-2025年度自建库项目技术服务（委托）合同|S|客户-单细胞文库|NA|TENX+SCATTERED+MANUAL_RISK+IMBALANCE, count=4, reason=总量40.0G低于最小门槛1843.6G[0m
+[32m2026-05-20 14:56:16[0m | [1mINFO    [0m | [1m主流程规则分桶跳过: bucket=ten_x:JQ_华西医院10X单细胞建库测序分析技术服务（委托）合同|S|10X转录组-3'文库|NA|TENX+MANUAL_RISK+IMBALANCE, count=2, reason=总量7.9G低于最小门槛1995.0G[0m
+[32m2026-05-20 14:56:16[0m | [1mINFO    [0m | [1m主流程规则分桶跳过: bucket=ten_x:22个10X单细胞建库测序150G CELL RANGER分析技术服务（委托）合同|S|10X转录组-3'文库|NA|TENX+MANUAL_RISK+IMBALANCE, count=1, reason=总量4.9G低于最小门槛1995.0G[0m
+[32m2026-05-20 14:56:16[0m | [1mINFO    [0m | [1m主流程规则分桶跳过: bucket=ten_x:四川大学华西医院5例肺癌组织单细胞建库测序分析技术服务（委托）合同|S|10X转录组-3'文库|NA|TENX+MANUAL_RISK+IMBALANCE, count=1, reason=总量3.1G低于最小门槛1995.0G[0m
+[32m2026-05-20 14:56:16[0m | [1mINFO    [0m | [1m主流程规则分桶预调度: bucket=general:林大300个样本的DNA小片段建库测序分析技术服务（委托）合同|Z|微生物常规小片段文库|NA|NORMAL, count=53, data=15150.0G[0m
+[32m2026-05-20 14:56:16[0m | [1mINFO    [0m | [1m开始逐Lane贪心排机 - 文库数: 53[0m
+[32m2026-05-20 14:56:16[0m | [1mINFO    [0m | [1m预拆分完成: 使用外层已拆分文库[0m
+[32m2026-05-20 14:56:16[0m | [1mINFO    [0m | [1m使用外部传入的全局分析报告（全量文库），跳过内部分析[0m
+[32m2026-05-20 14:56:16[0m | [1mINFO    [0m | [1m处理机器类型 NovaSeq X Plus - 文库数: 53 - Lane容量: 1100GB, 利用率区间: [100%, 100%], 特殊文库上限: 350GB[0m
+[32m2026-05-20 14:56:16[0m | [1mINFO    [0m | [1m剩余池总量1800.0GB不足最小成Lane门槛2095.0GB，跳过后续随机重试[0m
+[32m2026-05-20 14:56:16[0m | [1mINFO    [0m | [1m最后填充策略: 尝试将10个未分配文库塞入已有Lane[0m
+[32m2026-05-20 14:56:16[0m | [1mINFO    [0m | [1m挪移优化: 未分配10个文库(1800GB)，需要从现有Lane挪出295GB[0m
+[32m2026-05-20 14:56:16[0m | [33m[1mWARNING [0m | [33m[1m挪移优化: 挪出数据量0GB不足，放弃挪移[0m
+[32m2026-05-20 14:56:16[0m | [1mINFO    [0m | [1m逐Lane贪心排机完成 - Lane数: 6, 已分配: 43/53, 未分配: 10, 平均利用率: 102.3%, 耗时: 0.04秒[0m
+[32m2026-05-20 14:56:16[0m | [1mINFO    [0m | [1mIndex校验器初始化完成（真实数据验证版本）[0m
+[32m2026-05-20 14:56:16[0m | [1mINFO    [0m | [1m成Lane校验程序初始化完成 (严格模式: False, 碱基不均衡上限: 35%, 特殊文库关键词: 9个)[0m
+[32m2026-05-20 14:56:16[0m | [1mINFO    [0m | [1m最终验证结果: 6条Lane通过，10个文库未分配[0m
+[32m2026-05-20 14:56:16[0m | [1mINFO    [0m | [1m主流程规则分桶预调度: bucket=general:黑龙江省疾控100个微生物全基因组分析技术服务（委托）合同|Z|微生物常规小片段文库|NA|NORMAL, count=7, data=3150.0G[0m
+[32m2026-05-20 14:56:16[0m | [1mINFO    [0m | [1m开始逐Lane贪心排机 - 文库数: 7[0m
+[32m2026-05-20 14:56:16[0m | [1mINFO    [0m | [1m预拆分完成: 使用外层已拆分文库[0m
+[32m2026-05-20 14:56:16[0m | [1mINFO    [0m | [1m使用外部传入的全局分析报告（全量文库），跳过内部分析[0m
+[32m2026-05-20 14:56:16[0m | [1mINFO    [0m | [1m处理机器类型 NovaSeq X Plus - 文库数: 7 - Lane容量: 1100GB, 利用率区间: [100%, 100%], 特殊文库上限: 350GB[0m
+[32m2026-05-20 14:56:16[0m | [1mINFO    [0m | [1m剩余池总量900.0GB不足最小成Lane门槛2095.0GB，跳过后续随机重试[0m
+[32m2026-05-20 14:56:16[0m | [1mINFO    [0m | [1m最后填充策略: 尝试将2个未分配文库塞入已有Lane[0m
+[32m2026-05-20 14:56:16[0m | [1mINFO    [0m | [1m挪移优化: 未分配2个文库(900GB)，需要从现有Lane挪出1195GB[0m
+[32m2026-05-20 14:56:16[0m | [33m[1mWARNING [0m | [33m[1m挪移优化: 挪出数据量0GB不足，放弃挪移[0m
+[32m2026-05-20 14:56:16[0m | [1mINFO    [0m | [1m逐Lane贪心排机完成 - Lane数: 1, 已分配: 5/7, 未分配: 2, 平均利用率: 103.4%, 耗时: 0.00秒[0m
+[32m2026-05-20 14:56:16[0m | [1mINFO    [0m | [1mIndex校验器初始化完成（真实数据验证版本）[0m
+[32m2026-05-20 14:56:16[0m | [1mINFO    [0m | [1m成Lane校验程序初始化完成 (严格模式: False, 碱基不均衡上限: 35%, 特殊文库关键词: 9个)[0m
+[32m2026-05-20 14:56:16[0m | [1mINFO    [0m | [1m最终验证结果: 1条Lane通过，2个文库未分配[0m
+[32m2026-05-20 14:56:16[0m | [1mINFO    [0m | [1m主流程规则分桶预调度: bucket=general:1183个样本二代框架图建库测序组装技术服务（委托）合同|Z|DNA小片段文库|NA|NORMAL, count=298, data=2383.0G[0m
+[32m2026-05-20 14:56:16[0m | [1mINFO    [0m | [1m开始逐Lane贪心排机 - 文库数: 298[0m
+[32m2026-05-20 14:56:16[0m | [1mINFO    [0m | [1m预拆分完成: 使用外层已拆分文库[0m
+[32m2026-05-20 14:56:16[0m | [1mINFO    [0m | [1m使用外部传入的全局分析报告（全量文库），跳过内部分析[0m
+[32m2026-05-20 14:56:16[0m | [1mINFO    [0m | [1m处理机器类型 Nova X-25B - 文库数: 298 - Lane容量: 1050.0GB, 利用率区间: [100%, 100%], 特殊文库上限: 350GB[0m
+[32m2026-05-20 14:56:17[0m | [1mINFO    [0m | [1m剩余池总量206.0GB不足最小成Lane门槛2095.0GB，跳过后续随机重试[0m
+[32m2026-05-20 14:56:17[0m | [1mINFO    [0m | [1m最后填充策略: 尝试将23个未分配文库塞入已有Lane[0m
+[32m2026-05-20 14:56:18[0m | [1mINFO    [0m | [1m最后填充策略: 成功塞入8个文库，踢出0个违反规则的文库，剩余15个无法分配[0m
+[32m2026-05-20 14:56:18[0m | [1mINFO    [0m | [1m挪移优化: 未分配15个文库(130GB)，需要从现有Lane挪出1965GB[0m
+[32m2026-05-20 14:56:26[0m | [33m[1mWARNING [0m | [33m[1m挪移优化: 挪出数据量153GB不足，放弃挪移[0m
+[32m2026-05-20 14:56:26[0m | [1mINFO    [0m | [1m逐Lane贪心排机完成 - Lane数: 1, 已分配: 283/298, 未分配: 15, 平均利用率: 103.6%, 耗时: 9.54秒[0m
+[32m2026-05-20 14:56:26[0m | [1mINFO    [0m | [1mIndex校验器初始化完成（真实数据验证版本）[0m
+[32m2026-05-20 14:56:26[0m | [1mINFO    [0m | [1m成Lane校验程序初始化完成 (严格模式: False, 碱基不均衡上限: 35%, 特殊文库关键词: 9个)[0m
+[32m2026-05-20 14:56:26[0m | [1mINFO    [0m | [1m最终验证结果: 1条Lane通过，15个文库未分配[0m
+[32m2026-05-20 14:56:26[0m | [1mINFO    [0m | [1m主流程规则分桶跳过: bucket=general:交医68个PCR-小片段建库测序XPLUS技术服务（委托）合同|Z|动植物全基因组重测序文库|NA|NORMAL, count=4, reason=总量1800.0G低于最小门槛2095.0G[0m
+[32m2026-05-20 14:56:26[0m | [1mINFO    [0m | [1m主流程规则分桶跳过: bucket=general:河南大学三亚研究院戚赛鸽398个花生重测序育种分析技术服务（委托）合同|Z|DNA小片段文库|NA|NORMAL, count=37, reason=总量925.0G低于最小门槛2095.0G[0m
+[32m2026-05-20 14:56:26[0m | [1mINFO    [0m | [1m主流程规则分桶跳过: bucket=general:生物所54例宏基因组测序技术服务（委托）合同|Z|META文库|NA|NORMAL, count=6, reason=总量600.0G低于最小门槛2095.0G[0m
+[32m2026-05-20 14:56:26[0m | [1mINFO    [0m | [1m主流程规则分桶跳过: bucket=general:西南科大120个宏基因测序分析技术服务（委托）合同|Z|META文库|NA|NORMAL, count=1, reason=总量100.0G低于最小门槛2095.0G[0m
+[32m2026-05-20 14:56:26[0m | [1mINFO    [0m | [1m主流程规则分桶跳过: bucket=general:500份样本宏基因组建库测序技术服务（委托）合同|Z|DNA小片段文库|NA|NORMAL, count=8, reason=总量80.0G低于最小门槛2095.0G[0m
+[32m2026-05-20 14:56:26[0m | [1mINFO    [0m | [1m主流程规则分桶跳过: bucket=general:四川大学50个宏基因建库测序需CLEAN分析技术服务（委托）合同|Z|DNA小片段文库|NA|NORMAL, count=2, reason=总量30.0G低于最小门槛2095.0G[0m
+[32m2026-05-20 14:56:26[0m | [1mINFO    [0m | [1m主流程规则分桶跳过: bucket=general:JL-样本建库测序分析技术服务（委托）合同|Z|DNA小片段文库|NA|NORMAL, count=5, reason=总量5.0G低于最小门槛2095.0G[0m
+[32m2026-05-20 14:56:26[0m | [1mINFO    [0m | [1m主流程规则分桶预调度完成: 分桶=87，桶后尾货=391个/15576.6G[0m
+[32m2026-05-20 14:56:26[0m | [1mINFO    [0m | [1m主流程尾货统一补排启动: count=391, data=15576.6G[0m
+[32m2026-05-20 14:56:26[0m | [1mINFO    [0m | [1m开始逐Lane贪心排机 - 文库数: 391[0m
+[32m2026-05-20 14:56:26[0m | [1mINFO    [0m | [1m预拆分完成: 使用外层已拆分文库[0m
+[32m2026-05-20 14:56:26[0m | [1mINFO    [0m | [1m使用外部传入的全局分析报告（全量文库），跳过内部分析[0m
+[32m2026-05-20 14:56:26[0m | [1mINFO    [0m | [1m处理机器类型 NovaSeq X Plus - 文库数: 113 - Lane容量: 1100GB, 利用率区间: [100%, 100%], 特殊文库上限: 350GB[0m
+[32m2026-05-20 14:56:26[0m | [1mINFO    [0m | [1m碱基不均衡专用Lane策略: 43个碱基不均衡文库[0m
+[32m2026-05-20 14:56:26[0m | [1mINFO    [0m | [1m专用Lane分组G31剩余合同量42.8G无法满足1.1或3.6T-NEW有效容量下限[0m
+[32m2026-05-20 14:56:26[0m | [1mINFO    [0m | [1mIndex校验器初始化完成（真实数据验证版本）[0m
+[32m2026-05-20 14:56:26[0m | [1mINFO    [0m | [1m成Lane校验程序初始化完成 (严格模式: False, 碱基不均衡上限: 35%, 特殊文库关键词: 9个)[0m
+[32m2026-05-20 14:56:26[0m | [1mINFO    [0m | [1m专用Lane DL_NovaSeq X Plus_001 形成成功 - 分组=G4, 碱基不均衡=1037.5G, 平衡文库=0.0G, 总量(含平衡)=1037.5G, 模式=3.6T-NEW, 容量规则=tj_1595_special_combo_36t[0m
+[32m2026-05-20 14:56:26[0m | [1mINFO    [0m | [1m专用Lane分组G4剩余合同量689.4G无法满足1.1或3.6T-NEW有效容量下限[0m
+[32m2026-05-20 14:56:26[0m | [1mINFO    [0m | [1mIndex校验器初始化完成（真实数据验证版本）[0m
+[32m2026-05-20 14:56:26[0m | [1mINFO    [0m | [1m成Lane校验程序初始化完成 (严格模式: False, 碱基不均衡上限: 35%, 特殊文库关键词: 9个)[0m
+[32m2026-05-20 14:56:26[0m | [1mINFO    [0m | [1m专用Lane DL_NovaSeq X Plus_002 形成成功 - 分组=G34, 碱基不均衡=1000.0G, 平衡文库=0.0G, 总量(含平衡)=1000.0G, 模式=3.6T-NEW, 容量规则=tj_1595_special_combo_36t[0m
+[32m2026-05-20 14:56:26[0m | [1mINFO    [0m | [1m专用Lane分组G34剩余合同量500.0G无法满足1.1或3.6T-NEW有效容量下限[0m
+[32m2026-05-20 14:56:26[0m | [1mINFO    [0m | [1m形成2条专用Lane，剩余22个碱基不均衡文库[0m
+[32m2026-05-20 14:56:26[0m | [1mINFO    [0m | [1m第二轮排机: 92 个未分配文库（随机顺序）[0m
+[32m2026-05-20 14:56:26[0m | [1mINFO    [0m | [1m第三轮排机: 92 个未分配文库（小文库优先）[0m
+[32m2026-05-20 14:56:26[0m | [1mINFO    [0m | [1m连续5轮无新Lane且未分配池不变，提前结束无效重试[0m
+[32m2026-05-20 14:56:26[0m | [1mINFO    [0m | [1m专用Lane分组G31剩余合同量42.8G无法满足1.1或3.6T-NEW有效容量下限[0m
+[32m2026-05-20 14:56:26[0m | [1mINFO    [0m | [1m专用Lane分组G34剩余合同量500.0G无法满足1.1或3.6T-NEW有效容量下限[0m
+[32m2026-05-20 14:56:26[0m | [1mINFO    [0m | [1m专用Lane分组G4剩余合同量689.4G无法满足1.1或3.6T-NEW有效容量下限[0m
+[32m2026-05-20 14:56:26[0m | [1mINFO    [0m | [1m专用Lane创建完成: 0条Lane, 22个碱基不均衡文库待分配, 70个中性文库待分配[0m
+[32m2026-05-20 14:56:26[0m | [1mINFO    [0m | [1m处理机器类型 Nova X-25B - 文库数: 278 - Lane容量: 1050.0GB, 利用率区间: [100%, 100%], 特殊文库上限: 350GB[0m
+[32m2026-05-20 14:56:26[0m | [1mINFO    [0m | [1m碱基不均衡专用Lane策略: 7个碱基不均衡文库[0m
+[32m2026-05-20 14:56:26[0m | [1mINFO    [0m | [1m专用Lane分组G25剩余合同量66.0G无法满足1.1或3.6T-NEW有效容量下限[0m
+[32m2026-05-20 14:56:26[0m | [1mINFO    [0m | [1m专用Lane分组G26剩余合同量6.0G无法满足1.1或3.6T-NEW有效容量下限[0m
+[32m2026-05-20 14:56:26[0m | [1mINFO    [0m | [1m形成0条专用Lane，剩余7个碱基不均衡文库[0m
+[32m2026-05-20 14:56:26[0m | [1mINFO    [0m | [1m第二轮排机: 278 个未分配文库（随机顺序）[0m
+[32m2026-05-20 14:56:26[0m | [1mINFO    [0m | [1m第三轮排机: 278 个未分配文库（小文库优先）[0m
+[32m2026-05-20 14:56:27[0m | [1mINFO    [0m | [1m连续5轮无新Lane且未分配池不变，提前结束无效重试[0m
+[32m2026-05-20 14:56:27[0m | [1mINFO    [0m | [1m专用Lane分组G25剩余合同量66.0G无法满足1.1或3.6T-NEW有效容量下限[0m
+[32m2026-05-20 14:56:27[0m | [1mINFO    [0m | [1m专用Lane分组G26剩余合同量6.0G无法满足1.1或3.6T-NEW有效容量下限[0m
+[32m2026-05-20 14:56:27[0m | [1mINFO    [0m | [1m专用Lane创建完成: 0条Lane, 7个碱基不均衡文库待分配, 271个中性文库待分配[0m
+[32m2026-05-20 14:56:27[0m | [1mINFO    [0m | [1m最后填充策略: 尝试将370个未分配文库塞入已有Lane[0m
+[32m2026-05-20 14:56:27[0m | [1mINFO    [0m | [1m挪移优化: 未分配数据量13539GB已足够，尝试精选组建新Lane[0m
+[32m2026-05-20 14:56:27[0m | [1mINFO    [0m | [1m残余精选: 内部185个, 客户185个[0m
+[32m2026-05-20 14:56:27[0m | [1mINFO    [0m | [1mIndex校验器初始化完成（真实数据验证版本）[0m
+[32m2026-05-20 14:56:27[0m | [1mINFO    [0m | [1m成Lane校验程序初始化完成 (严格模式: True, 碱基不均衡上限: 35%, 特殊文库关键词: 9个)[0m
+[32m2026-05-20 14:56:27[0m | [1mINFO    [0m | [1m残余精选: 验证失败 - ValidationError(rule_type=<ValidationRuleType.CUSTOMER_PRODUCTION_MIX_RATIO: 'customer_production_mix_ratio'>, severity=<ValidationSeverity.ERROR: 'error'>, message='手工/客户侧与产线混合Lane少数侧占比0.2%不符合规则(应>=5%)', current_value=0.0022137550820579407, threshold_value=0.05, affected_libraries=[])[0m
+[32m2026-05-20 14:56:27[0m | [1mINFO    [0m | [1m挪移优化: 精选组建失败，继续尝试挪移策略[0m
+[32m2026-05-20 14:56:27[0m | [1mINFO    [0m | [1m挪移优化: 未分配370个文库(13539GB)，需要从现有Lane挪出-11444GB[0m
+[32m2026-05-20 14:56:27[0m | [33m[1mWARNING [0m | [33m[1m挪移优化: 新Lane GL_Nova X-25B_009 验证失败: 容量超限: 13539.1GB > 2255.0GB，放弃创建[0m
+[32m2026-05-20 14:56:27[0m | [1mINFO    [0m | [1m逐Lane贪心排机完成 - Lane数: 2, 已分配: 21/391, 未分配: 370, 平均利用率: 92.6%, 耗时: 0.90秒[0m
+[32m2026-05-20 14:56:27[0m | [1mINFO    [0m | [1mIndex校验器初始化完成（真实数据验证版本）[0m
+[32m2026-05-20 14:56:27[0m | [1mINFO    [0m | [1m成Lane校验程序初始化完成 (严格模式: False, 碱基不均衡上限: 35%, 特殊文库关键词: 9个)[0m
+[32m2026-05-20 14:56:27[0m | [1mINFO    [0m | [1m最终验证结果: 2条Lane通过，370个文库未分配[0m
+[32m2026-05-20 14:56:27[0m | [1mINFO    [0m | [1mwkspecialsplits边排边检查完成: 无需调整[0m
+[32m2026-05-20 14:56:27[0m | [33m[1mWARNING [0m | [33m[1mLane GL_Nova X-25B_001 验证失败 - 错误: ['capacity'], 警告: [][0m
+[32m2026-05-20 14:56:27[0m | [1mINFO    [0m | [1m验证完成：10条Lane通过验证[0m
+[32m2026-05-20 14:56:27[0m | [1mINFO    [0m | [1m57规则二次改排救援已关闭，失败Lane文库回收到未分配池[0m
+[32m2026-05-20 14:56:27[0m | [1mINFO    [0m | [1m高成本救援(EX/RB)跳过: 未分配池过大=398个/15683.8G，优先保证主排机时效[0m
+[32m2026-05-20 14:56:27[0m | [1mINFO    [0m | [1m全局优先级硬约束跳过整Lane移除 GL_NovaSeq X Plus_001: 当前允许P0/P1(临检/SJ+YC)参与，但高优先级池无法重组出合法Lane，保留原Lane[0m
+[32m2026-05-20 14:56:27[0m | [1mINFO    [0m | [1m全局优先级硬约束跳过整Lane移除 GL_NovaSeq X Plus_002: 当前允许P0/P1(临检/SJ+YC)参与，但高优先级池无法重组出合法Lane，保留原Lane[0m
+[32m2026-05-20 14:56:27[0m | [1mINFO    [0m | [1m全局优先级硬约束跳过整Lane移除 GL_NovaSeq X Plus_003: 当前允许P0/P1(临检/SJ+YC)参与，但高优先级池无法重组出合法Lane，保留原Lane[0m
+[32m2026-05-20 14:56:27[0m | [1mINFO    [0m | [1m全局优先级硬约束跳过整Lane移除 GL_NovaSeq X Plus_004: 当前允许P0/P1(临检/SJ+YC)参与，但高优先级池无法重组出合法Lane，保留原Lane[0m
+[32m2026-05-20 14:56:27[0m | [1mINFO    [0m | [1m全局优先级硬约束跳过整Lane移除 GL_NovaSeq X Plus_005: 当前允许P0/P1(临检/SJ+YC)参与，但高优先级池无法重组出合法Lane，保留原Lane[0m
+[32m2026-05-20 14:56:27[0m | [1mINFO    [0m | [1m全局优先级硬约束跳过整Lane移除 GL_NovaSeq X Plus_006: 当前允许P0/P1(临检/SJ+YC)参与，但高优先级池无法重组出合法Lane，保留原Lane[0m
+[32m2026-05-20 14:56:27[0m | [1mINFO    [0m | [1m全局优先级硬约束跳过整Lane移除 GL_NovaSeq X Plus_001: 当前允许P0/P1(临检/SJ+YC)参与，但高优先级池无法重组出合法Lane，保留原Lane[0m
+[32m2026-05-20 14:56:27[0m | [1mINFO    [0m | [1m全局优先级硬约束跳过整Lane移除 GL_Nova X-25B_001: 当前允许P0/P1(临检/SJ+YC)参与，但高优先级池无法重组出合法Lane，保留原Lane[0m
+[32m2026-05-20 14:56:27[0m | [1mINFO    [0m | [1m全局优先级硬约束跳过整Lane移除 DL_NovaSeq X Plus_001: 当前允许P0/P1(临检/SJ+YC)参与，但高优先级池无法重组出合法Lane，保留原Lane[0m
+[32m2026-05-20 14:56:27[0m | [1mINFO    [0m | [1m全局优先级硬约束跳过整Lane移除 DL_NovaSeq X Plus_002: 当前允许P0/P1(临检/SJ+YC)参与，但高优先级池无法重组出合法Lane，保留原Lane[0m
+[32m2026-05-20 14:56:27[0m | [1mINFO    [0m | [1m全局优先级硬约束收口完成: 调整Lane=10，移除Lane=0，暂缓较低优先级文库=0[0m
+[32m2026-05-20 14:56:27[0m | [1mINFO    [0m | [1m全局优先级硬约束收口后: 最终Lane数=10，未分配文库=398[0m
+[32m2026-05-20 14:56:27[0m | [1mINFO    [0m | [1m分层重组救援（大池降配）: 未分配=398个/15683.8G，每机台每阶段限 4 条[0m
+[32m2026-05-20 14:56:27[0m | [1mINFO    [0m | [1m补Lane尝试: variant=manual_or_risk:（极速周期）清华项目1000个自建库测序+2000个RNA文库测序技术服务（委托）合同|S|客户-真核普通转录组文库|NA|MANUAL_RISK, lane_prefix=MG, pool_size=29, pool_data=2145.495G, prioritize_scattered_mix=True[0m
+[32m2026-05-20 14:56:27[0m | [1mINFO    [0m | [1m补Lane尝试: variant=non_clinical_relaxed, lane_prefix=MG, pool_size=29, pool_data=2145.495G, prioritize_scattered_mix=False[0m
+[32m2026-05-20 14:56:29[0m | [1mINFO    [0m | [1m补Lane尝试: variant=manual_or_risk:YC2025年武汉序拓生物自建库PE150测序技术服务（委托）合同|S|客户-ATAC-SEQ文库|NA|SCATTERED+MANUAL_RISK+IMBALANCE, lane_prefix=MG, pool_size=5, pool_data=2100.000G, prioritize_scattered_mix=True[0m
+[32m2026-05-20 14:56:29[0m | [1mINFO    [0m | [1m补Lane尝试: variant=non_clinical_relaxed, lane_prefix=MG, pool_size=5, pool_data=2100.000G, prioritize_scattered_mix=False[0m
+[32m2026-05-20 14:56:29[0m | [1mINFO    [0m | [1m未分配大簇专项regroup跳过: machine=Nova X-25B, count=37, data=925.0G, reason=总量925.0G低于最小门槛2095.0G[0m
+[32m2026-05-20 14:56:29[0m | [1mINFO    [0m | [1m未分配大簇专项regroup跳过: machine=Nova X-25B, count=73, data=392.5G, reason=总量392.5G低于最小门槛2095.0G[0m
+[32m2026-05-20 14:56:29[0m | [1mINFO    [0m | [1m补Lane尝试: variant=manual_or_risk:YC2025年武汉序拓生物自建库PE150测序技术服务（委托）合同|S|客户-ATAC-SEQ文库|NA|SCATTERED+MANUAL_RISK+IMBALANCE, lane_prefix=PG, pool_size=5, pool_data=2100.000G, prioritize_scattered_mix=True[0m
+[32m2026-05-20 14:56:29[0m | [1mINFO    [0m | [1m补Lane尝试: variant=non_clinical_relaxed, lane_prefix=PG, pool_size=5, pool_data=2100.000G, prioritize_scattered_mix=False[0m
+[32m2026-05-20 14:56:29[0m | [1mINFO    [0m | [1m补Lane尝试: variant=manual_or_risk:（极速周期）清华项目1000个自建库测序+2000个RNA文库测序技术服务（委托）合同|S|客户-真核普通转录组文库|NA|MANUAL_RISK, lane_prefix=RM, pool_size=29, pool_data=2145.495G, prioritize_scattered_mix=True[0m
+[32m2026-05-20 14:56:29[0m | [1mINFO    [0m | [1m补Lane尝试: variant=manual_or_risk:YC2025年武汉序拓生物自建库PE150测序技术服务（委托）合同|S|客户-ATAC-SEQ文库|NA|SCATTERED+MANUAL_RISK+IMBALANCE, lane_prefix=RM, pool_size=5, pool_data=2100.000G, prioritize_scattered_mix=True[0m
+[32m2026-05-20 14:56:29[0m | [1mINFO    [0m | [1m补Lane尝试: variant=full_priority, lane_prefix=RM, pool_size=398, pool_data=15683.753G, prioritize_scattered_mix=True[0m
+[32m2026-05-20 14:56:29[0m | [1mINFO    [0m | [1m全局优先级硬约束生效: stage=RM_build, 当前允许P0/P1(临检/SJ+YC)参与，暂缓较低优先级文库171个[0m
+[32m2026-05-20 14:56:29[0m | [1mINFO    [0m | [1m补Lane尝试: variant=non_clinical_priority, lane_prefix=RM, pool_size=315, pool_data=15148.853G, prioritize_scattered_mix=True[0m
+[32m2026-05-20 14:56:29[0m | [1mINFO    [0m | [1m全局优先级硬约束生效: stage=RM_build, 当前允许P0/P1(临检/SJ+YC)参与，暂缓较低优先级文库171个[0m
+[32m2026-05-20 14:56:29[0m | [1mINFO    [0m | [1m补Lane尝试: variant=non_clinical_relaxed, lane_prefix=RM, pool_size=315, pool_data=15148.853G, prioritize_scattered_mix=False[0m
+[32m2026-05-20 14:56:29[0m | [1mINFO    [0m | [1m全局优先级硬约束生效: stage=RM_build, 当前允许P0/P1(临检/SJ+YC)参与，暂缓较低优先级文库171个[0m
+[32m2026-05-20 14:56:34[0m | [1mINFO    [0m | [1m补Lane尝试: variant=other_only_relaxed, lane_prefix=RM, pool_size=171, pool_data=10771.992G, prioritize_scattered_mix=False[0m
+[32m2026-05-20 14:56:35[0m | [1mINFO    [0m | [1m补Lane尝试: variant=manual_or_risk:（极速周期）清华项目1000个自建库测序+2000个RNA文库测序技术服务（委托）合同|S|客户-真核普通转录组文库|NA|MANUAL_RISK, lane_prefix=GL, pool_size=29, pool_data=2145.495G, prioritize_scattered_mix=True[0m
+[32m2026-05-20 14:56:35[0m | [1mINFO    [0m | [1m补Lane尝试: variant=manual_or_risk:YC2025年武汉序拓生物自建库PE150测序技术服务（委托）合同|S|客户-ATAC-SEQ文库|NA|SCATTERED+MANUAL_RISK+IMBALANCE, lane_prefix=GL, pool_size=5, pool_data=2100.000G, prioritize_scattered_mix=True[0m
+[32m2026-05-20 14:56:35[0m | [1mINFO    [0m | [1m补Lane尝试: variant=full_priority, lane_prefix=GL, pool_size=177, pool_data=12993.992G, prioritize_scattered_mix=True[0m
+[32m2026-05-20 14:56:35[0m | [1mINFO    [0m | [1m全局优先级硬约束生效: stage=GL_build, 当前允许P0/P1(临检/SJ+YC)参与，暂缓较低优先级文库171个[0m
+[32m2026-05-20 14:56:35[0m | [1mINFO    [0m | [1m补Lane尝试: variant=non_clinical_priority, lane_prefix=GL, pool_size=176, pool_data=12871.992G, prioritize_scattered_mix=True[0m
+[32m2026-05-20 14:56:35[0m | [1mINFO    [0m | [1m全局优先级硬约束生效: stage=GL_build, 当前允许P0/P1(临检/SJ+YC)参与，暂缓较低优先级文库171个[0m
+[32m2026-05-20 14:56:35[0m | [1mINFO    [0m | [1m补Lane尝试: variant=non_clinical_relaxed, lane_prefix=GL, pool_size=176, pool_data=12871.992G, prioritize_scattered_mix=False[0m
+[32m2026-05-20 14:56:35[0m | [1mINFO    [0m | [1m全局优先级硬约束生效: stage=GL_build, 当前允许P0/P1(临检/SJ+YC)参与，暂缓较低优先级文库171个[0m
+[32m2026-05-20 14:56:35[0m | [1mINFO    [0m | [1m补Lane尝试: variant=other_only_relaxed, lane_prefix=GL, pool_size=171, pool_data=10771.992G, prioritize_scattered_mix=False[0m
+[32m2026-05-20 14:56:35[0m | [1mINFO    [0m | [1m终态普通尾货全局1.1 regroup成功: lane=GL_Nova X-25B_001, 机型=Nova X-25B, 文库数=35, 数据量=2216.0G[0m
+[32m2026-05-20 14:56:35[0m | [1mINFO    [0m | [1m补Lane尝试: variant=manual_or_risk:（极速周期）清华项目1000个自建库测序+2000个RNA文库测序技术服务（委托）合同|S|客户-真核普通转录组文库|NA|MANUAL_RISK, lane_prefix=GL, pool_size=25, pool_data=2117.495G, prioritize_scattered_mix=True[0m
+[32m2026-05-20 14:56:35[0m | [1mINFO    [0m | [1m补Lane尝试: variant=full_priority, lane_prefix=GL, pool_size=142, pool_data=10777.992G, prioritize_scattered_mix=True[0m
+[32m2026-05-20 14:56:35[0m | [1mINFO    [0m | [1m全局优先级硬约束生效: stage=GL_build, 当前允许P0/P1(临检/SJ+YC)参与，暂缓较低优先级文库136个[0m
+[32m2026-05-20 14:56:35[0m | [1mINFO    [0m | [1m补Lane尝试: variant=non_clinical_priority, lane_prefix=GL, pool_size=141, pool_data=10655.992G, prioritize_scattered_mix=True[0m
+[32m2026-05-20 14:56:35[0m | [1mINFO    [0m | [1m全局优先级硬约束生效: stage=GL_build, 当前允许P0/P1(临检/SJ+YC)参与，暂缓较低优先级文库136个[0m
+[32m2026-05-20 14:56:35[0m | [1mINFO    [0m | [1m补Lane尝试: variant=non_clinical_relaxed, lane_prefix=GL, pool_size=141, pool_data=10655.992G, prioritize_scattered_mix=False[0m
+[32m2026-05-20 14:56:35[0m | [1mINFO    [0m | [1m全局优先级硬约束生效: stage=GL_build, 当前允许P0/P1(临检/SJ+YC)参与，暂缓较低优先级文库136个[0m
+[32m2026-05-20 14:56:35[0m | [1mINFO    [0m | [1m补Lane尝试: variant=other_only_relaxed, lane_prefix=GL, pool_size=136, pool_data=8555.992G, prioritize_scattered_mix=False[0m
+[32m2026-05-20 14:56:35[0m | [1mINFO    [0m | [1m终态普通尾货全局1.1 regroup成功: lane=GL_Nova X-25B_002, 机型=Nova X-25B, 文库数=47, 数据量=2246.8G[0m
+[32m2026-05-20 14:56:35[0m | [1mINFO    [0m | [1m补Lane尝试: variant=manual_or_risk:（极速周期）清华项目1000个自建库测序+2000个RNA文库测序技术服务（委托）合同|S|客户-真核普通转录组文库|NA|MANUAL_RISK, lane_prefix=GL, pool_size=23, pool_data=2099.495G, prioritize_scattered_mix=True[0m
+[32m2026-05-20 14:56:35[0m | [1mINFO    [0m | [1m补Lane尝试: variant=full_priority, lane_prefix=GL, pool_size=95, pool_data=8531.192G, prioritize_scattered_mix=True[0m
+[32m2026-05-20 14:56:35[0m | [1mINFO    [0m | [1m全局优先级硬约束生效: stage=GL_build, 当前允许P0/P1(临检/SJ+YC)参与，暂缓较低优先级文库89个[0m
+[32m2026-05-20 14:56:35[0m | [1mINFO    [0m | [1m补Lane尝试: variant=non_clinical_priority, lane_prefix=GL, pool_size=94, pool_data=8409.192G, prioritize_scattered_mix=True[0m
+[32m2026-05-20 14:56:35[0m | [1mINFO    [0m | [1m全局优先级硬约束生效: stage=GL_build, 当前允许P0/P1(临检/SJ+YC)参与，暂缓较低优先级文库89个[0m
+[32m2026-05-20 14:56:35[0m | [1mINFO    [0m | [1m补Lane尝试: variant=non_clinical_relaxed, lane_prefix=GL, pool_size=94, pool_data=8409.192G, prioritize_scattered_mix=False[0m
+[32m2026-05-20 14:56:35[0m | [1mINFO    [0m | [1m全局优先级硬约束生效: stage=GL_build, 当前允许P0/P1(临检/SJ+YC)参与，暂缓较低优先级文库89个[0m
+[32m2026-05-20 14:56:35[0m | [1mINFO    [0m | [1m补Lane尝试: variant=other_only_relaxed, lane_prefix=GL, pool_size=89, pool_data=6309.192G, prioritize_scattered_mix=False[0m
+[32m2026-05-20 14:56:35[0m | [1mINFO    [0m | [1m终态普通尾货全局1.1 regroup成功: lane=GL_Nova X-25B_003, 机型=Nova X-25B, 文库数=36, 数据量=2130.1G[0m
+[32m2026-05-20 14:56:35[0m | [1mINFO    [0m | [1m补Lane尝试: variant=full_priority, lane_prefix=GL, pool_size=59, pool_data=6401.062G, prioritize_scattered_mix=True[0m
+[32m2026-05-20 14:56:35[0m | [1mINFO    [0m | [1m全局优先级硬约束生效: stage=GL_build, 当前允许P0/P1(临检/SJ+YC)参与，暂缓较低优先级文库53个[0m
+[32m2026-05-20 14:56:35[0m | [1mINFO    [0m | [1m补Lane尝试: variant=non_clinical_priority, lane_prefix=GL, pool_size=58, pool_data=6279.062G, prioritize_scattered_mix=True[0m
+[32m2026-05-20 14:56:35[0m | [1mINFO    [0m | [1m全局优先级硬约束生效: stage=GL_build, 当前允许P0/P1(临检/SJ+YC)参与，暂缓较低优先级文库53个[0m
+[32m2026-05-20 14:56:35[0m | [1mINFO    [0m | [1m补Lane尝试: variant=non_clinical_relaxed, lane_prefix=GL, pool_size=58, pool_data=6279.062G, prioritize_scattered_mix=False[0m
+[32m2026-05-20 14:56:35[0m | [1mINFO    [0m | [1m全局优先级硬约束生效: stage=GL_build, 当前允许P0/P1(临检/SJ+YC)参与，暂缓较低优先级文库53个[0m
+[32m2026-05-20 14:56:35[0m | [1mINFO    [0m | [1m补Lane尝试: variant=other_only_relaxed, lane_prefix=GL, pool_size=53, pool_data=4179.062G, prioritize_scattered_mix=False[0m
+[32m2026-05-20 14:56:36[0m | [1mINFO    [0m | [1m补Lane跳过汇总: lane_prefix=GL, machine=Nova X-25B, reason_top=[总量100.0G低于最小门槛1995.0Gx8, 总量6.0G低于最小门槛2095.0Gx2, 总量2036.5G低于最小门槛2095.0Gx1, 总量400.0G低于最小门槛2095.0Gx1][0m
+[32m2026-05-20 14:56:38[0m | [1mINFO    [0m | [1m补Lane尝试: variant=cluster_fast_path, lane_prefix=OG, pool_size=17, pool_data=2436.500G, prioritize_scattered_mix=False[0m
+[32m2026-05-20 14:56:38[0m | [1mINFO    [0m | [1m剩余库分层重组搜索完成: 新增Lane=3 (大簇专项=0, 高约束专项=0, 专lane=0, 混排lane=0, 普通lane=3), 跳过拆分文库=0, 剩余未分配=280[0m
+[32m2026-05-20 14:56:38[0m | [33m[1mWARNING [0m | [33m[1m检测到重复Lane ID，已自动重命名: GL_NovaSeq X Plus_001 -> GL_NovaSeq X Plus_007[0m
+[32m2026-05-20 14:56:38[0m | [33m[1mWARNING [0m | [33m[1m检测到重复Lane ID，已自动重命名: GL_Nova X-25B_001 -> GL_Nova X-25B_002[0m
+[32m2026-05-20 14:56:38[0m | [33m[1mWARNING [0m | [33m[1m检测到重复Lane ID，已自动重命名: GL_Nova X-25B_002 -> GL_Nova X-25B_003[0m
+[32m2026-05-20 14:56:38[0m | [33m[1mWARNING [0m | [33m[1m检测到重复Lane ID，已自动重命名: GL_Nova X-25B_003 -> GL_Nova X-25B_004[0m
+[32m2026-05-20 14:56:38[0m | [33m[1mWARNING [0m | [33m[1m最终收口发现重复Lane ID并已重命名: 4条[0m
+[32m2026-05-20 14:56:38[0m | [1mINFO    [0m | [1m脚本内置 Pooling 预测已停用，后续统一调用 prediction_delivery[0m
+[32m2026-05-20 14:56:38[0m | [33m[1mWARNING [0m | [33m[1mLane GL_Nova X-25B_002 利用率异常: 227.28% (数据量=2216.00GB, 容量=975.00GB)[0m
+[32m2026-05-20 14:56:38[0m | [33m[1mWARNING [0m | [33m[1mLane GL_Nova X-25B_003 利用率异常: 230.44% (数据量=2246.80GB, 容量=975.00GB)[0m
+[32m2026-05-20 14:56:38[0m | [33m[1mWARNING [0m | [33m[1mLane GL_Nova X-25B_004 利用率异常: 218.47% (数据量=2130.13GB, 容量=975.00GB)[0m
+[32m2026-05-20 14:56:38[0m | [1mINFO    [0m | [1mIndex校验器初始化完成（真实数据验证版本）[0m
+[32m2026-05-20 14:56:38[0m | [1mINFO    [0m | [1m成Lane校验程序初始化完成 (严格模式: True, 碱基不均衡上限: 35%, 特殊文库关键词: 9个)[0m
+[32m2026-05-20 14:56:39[0m | [33m[1mWARNING [0m | [33m[1mLane内发现 1 个Index冲突[0m
+[32m2026-05-20 14:56:39[0m | [33m[1mWARNING [0m | [33m[1mLane内发现 1 个Index冲突[0m
+[32m2026-05-20 14:56:42[0m | [1mINFO    [0m | [1m1.1首轮高优回填成功: lane=GL_Nova X-25B_004, 文库=12531869, 数据量42.8G, lane内高优累计141.0G[0m
+[32m2026-05-20 14:56:42[0m | [1mINFO    [0m | [1m1.1首轮高优回填成功: lane=GL_Nova X-25B_002, 文库=12531740, 数据量30.0G, lane内高优累计78.0G[0m
+[32m2026-05-20 14:56:49[0m | [1mINFO    [0m | [1m1.1首轮高优回填成功: lane=GL_Nova X-25B_002, 文库=12531903, 数据量9.0G, lane内高优累计87.0G[0m
+[32m2026-05-20 14:56:49[0m | [1mINFO    [0m | [1m1.1首轮高优回填成功: lane=GL_Nova X-25B_004, 文库=12531794, 数据量9.0G, lane内高优累计150.0G[0m
+[32m2026-05-20 14:56:53[0m | [33m[1mWARNING [0m | [33m[1mLane内发现 1 个Index冲突[0m
+[32m2026-05-20 14:56:54[0m | [33m[1mWARNING [0m | [33m[1mLane内发现 1 个Index冲突[0m
+[32m2026-05-20 14:57:02[0m | [33m[1mWARNING [0m | [33m[1mLane内发现 1 个Index冲突[0m
+[32m2026-05-20 14:57:02[0m | [33m[1mWARNING [0m | [33m[1mLane内发现 1 个Index冲突[0m
+[32m2026-05-20 14:57:07[0m | [33m[1mWARNING [0m | [33m[1mLane内发现 2 个Index冲突[0m
+[32m2026-05-20 14:57:07[0m | [33m[1mWARNING [0m | [33m[1mLane内发现 1 个Index冲突[0m
+[32m2026-05-20 14:57:07[0m | [33m[1mWARNING [0m | [33m[1mLane内发现 1 个Index冲突[0m
+[32m2026-05-20 14:57:08[0m | [33m[1mWARNING [0m | [33m[1mLane内发现 2 个Index冲突[0m
+[32m2026-05-20 14:57:08[0m | [33m[1mWARNING [0m | [33m[1mLane内发现 4 个Index冲突[0m
+[32m2026-05-20 14:57:08[0m | [33m[1mWARNING [0m | [33m[1mLane内发现 1 个Index冲突[0m
+[32m2026-05-20 14:57:08[0m | [33m[1mWARNING [0m | [33m[1mLane内发现 2 个Index冲突[0m
+[32m2026-05-20 14:57:08[0m | [33m[1mWARNING [0m | [33m[1mLane内发现 1 个Index冲突[0m
+[32m2026-05-20 14:57:08[0m | [33m[1mWARNING [0m | [33m[1mLane内发现 2 个Index冲突[0m
+[32m2026-05-20 14:57:08[0m | [33m[1mWARNING [0m | [33m[1mLane内发现 2 个Index冲突[0m
+[32m2026-05-20 14:57:09[0m | [33m[1mWARNING [0m | [33m[1mLane内发现 1 个Index冲突[0m
+[32m2026-05-20 14:57:09[0m | [33m[1mWARNING [0m | [33m[1mLane内发现 1 个Index冲突[0m
+[32m2026-05-20 14:57:09[0m | [33m[1mWARNING [0m | [33m[1mLane内发现 1 个Index冲突[0m
+[32m2026-05-20 14:57:09[0m | [33m[1mWARNING [0m | [33m[1mLane内发现 1 个Index冲突[0m
+[32m2026-05-20 14:57:11[0m | [33m[1mWARNING [0m | [33m[1mLane内发现 1 个Index冲突[0m
+[32m2026-05-20 14:57:11[0m | [33m[1mWARNING [0m | [33m[1mLane内发现 1 个Index冲突[0m
+[32m2026-05-20 14:57:12[0m | [33m[1mWARNING [0m | [33m[1mLane内发现 1 个Index冲突[0m
+[32m2026-05-20 14:57:13[0m | [33m[1mWARNING [0m | [33m[1mLane内发现 1 个Index冲突[0m
+[32m2026-05-20 14:57:13[0m | [33m[1mWARNING [0m | [33m[1mLane内发现 1 个Index冲突[0m
+[32m2026-05-20 14:57:23[0m | [1mINFO    [0m | [1m1.1首轮高优回填完成: 消耗高优文库=4个/90.8G, 变更Lane=2, 剩余高优未分配=246[0m
+[32m2026-05-20 14:57:23[0m | [1mINFO    [0m | [1mIndex校验器初始化完成（真实数据验证版本）[0m
+[32m2026-05-20 14:57:23[0m | [1mINFO    [0m | [1m成Lane校验程序初始化完成 (严格模式: True, 碱基不均衡上限: 35%, 特殊文库关键词: 9个)[0m
+[32m2026-05-20 14:57:23[0m | [1mINFO    [0m | [1m1.1首轮二次补排启动: 首轮剩余文库=276个[0m
+[32m2026-05-20 14:57:23[0m | [1mINFO    [0m | [1m1.1首轮二次补排策略: expensive_rescue=True, peak_window_mixed=True, post_fill_optimization=True, rule_bucket_prescheduling=True[0m
+[32m2026-05-20 14:57:23[0m | [1mINFO    [0m | [1m
+================================================================================[0m
+[32m2026-05-20 14:57:23[0m | [1mINFO    [0m | [1m排机流程：纯规则排机[0m
+[32m2026-05-20 14:57:23[0m | [1mINFO    [0m | [1m================================================================================[0m
+[32m2026-05-20 14:57:23[0m | [1mINFO    [0m | [1mIndex校验器初始化完成（真实数据验证版本）[0m
+[32m2026-05-20 14:57:23[0m | [1mINFO    [0m | [1mIndex校验器初始化完成（真实数据验证版本）[0m
+[32m2026-05-20 14:57:23[0m | [1mINFO    [0m | [1m成Lane校验程序初始化完成 (严格模式: True, 碱基不均衡上限: 35%, 特殊文库关键词: 9个)[0m
+[32m2026-05-20 14:57:23[0m | [33m[1mWARNING [0m | [33m[1mPooling配置表不存在: /data/work/yuyongpeng/liblane_v2_deepseek/data/wktype_pooling_config.xlsx，将使用默认策略[0m
+[32m2026-05-20 14:57:23[0m | [1mINFO    [0m | [1m产出效率修正表不存在: /data/work/yuyongpeng/liblane_v2_deepseek/data/production_efficiency_correction.csv，跳过后校准[0m
+[32m2026-05-20 14:57:23[0m | [33m[1mWARNING [0m | [33m[1m模型文件不存在: models/loutput_pre_lane_v5/lightgbm_model.pkl[0m
+[32m2026-05-20 14:57:23[0m | [33m[1mWARNING [0m | [33m[1mloutput预测器不可用，将使用规则降级策略[0m
+[32m2026-05-20 14:57:23[0m | [1mINFO    [0m | [1m逐Lane贪心排机器初始化完成 - 基础容量: 985.0GB, 利用率区间: [100%, 100%], 配置模式: 按机型自动[0m
+[32m2026-05-20 14:57:23[0m | [1mINFO    [0m | [1m启用检查: Index=True, 碱基不均衡=True, 规则检查器=False[0m
+[32m2026-05-20 14:57:23[0m | [1mINFO    [0m | [1m排机阶段：Pooling优化器已禁用（V6流程不需要）[0m
+[32m2026-05-20 14:57:23[0m | [1mINFO    [0m | [1mIndex校验器初始化完成（真实数据验证版本）[0m
+[32m2026-05-20 14:57:23[0m | [1mINFO    [0m | [1m成Lane校验程序初始化完成 (严格模式: True, 碱基不均衡上限: 35%, 特殊文库关键词: 9个)[0m
+[32m2026-05-20 14:57:23[0m | [1mINFO    [0m | [1m严格校验容量区间改为按统一配置表动态解析[0m
+[32m2026-05-20 14:57:23[0m | [1mINFO    [0m | [1m主流程前置拆分完成: 无需拆分[0m
+[32m2026-05-20 14:57:23[0m | [1mINFO    [0m | [1m全局优先级硬约束生效: stage=mixed_peak_window, 当前允许P0/P1(临检/SJ+YC)参与，暂缓较低优先级文库52个[0m
+[32m2026-05-20 14:57:23[0m | [1mINFO    [0m | [1m混排Peak窗口: 261-409bp, 134个文库/4005G, 理论最多1条Lane[0m
+[32m2026-05-20 14:57:23[0m | [1mINFO    [0m | [1m混排Lane预抽取完成: 新增Lane=0，使用文库=0个/0.0G，剩余待排=276个/9000.0G[0m
+[32m2026-05-20 14:57:23[0m | [1mINFO    [0m | [1m主流程规则分桶预调度: bucket=manual_or_risk:YC2025年武汉序拓生物自建库PE150测序技术服务（委托）合同|S|客户-ATAC-SEQ文库|NA|SCATTERED+MANUAL_RISK+IMBALANCE, count=5, data=2100.0G[0m
+[32m2026-05-20 14:57:23[0m | [1mINFO    [0m | [1m主流程规则分桶跳过: bucket=manual_or_risk:（极速周期）清华项目1000个自建库测序+2000个RNA文库测序技术服务（委托）合同|S|客户-真核普通转录组文库|NA|MANUAL_RISK, count=15, reason=总量2036.5G低于最小门槛2095.0G[0m
+[32m2026-05-20 14:57:23[0m | [1mINFO    [0m | [1m主流程规则分桶跳过: bucket=manual_or_risk:YC-（极速周期）2025年上海近岸生物年度框架协议分析技术服务（委托）合同|S|客户-METHYLATION文库|NA|SCATTERED+MANUAL_RISK+IMBALANCE, count=5, reason=总量500.0G低于最小门槛2074.1G[0m
+[32m2026-05-20 14:57:23[0m | [1mINFO    [0m | [1m主流程规则分桶跳过: bucket=manual_or_risk:（极速周期）北大SH自建库散样XP建库测序技术服务（委托）合同|S|客户-真核普通转录组文库|NA|SCATTERED+MANUAL_RISK, count=2, reason=总量400.0G低于最小门槛2095.0G[0m
+[32m2026-05-20 14:57:23[0m | [1mINFO    [0m | [1m主流程规则分桶跳过: bucket=manual_or_risk:医学委托科服混样子项目|S|全基因组文库|NA|SCATTERED+MANUAL_RISK, count=73, reason=总量392.5G低于最小门槛2095.0G[0m
+[32m2026-05-20 14:57:23[0m | [1mINFO    [0m | [1m主流程规则分桶跳过: bucket=manual_or_risk:YC宏微特斯测序技术服务（委托）合同2025|S|客户-META文库|NA|SCATTERED+MANUAL_RISK, count=14, reason=总量381.0G低于最小门槛2095.0G[0m
+[32m2026-05-20 14:57:23[0m | [1mINFO    [0m | [1m主流程规则分桶跳过: bucket=manual_or_risk:YC-中国科学院北京基因组研究所20000G自建库文库测序技术服务（委托）合同|S|客户-METHYLATION文库|NA|SCATTERED+MANUAL_RISK+IMBALANCE, count=3, reason=总量300.0G低于最小门槛2074.1G[0m
+[32m2026-05-20 14:57:23[0m | [1mINFO    [0m | [1m主流程规则分桶跳过: bucket=manual_or_risk:四川农业大学100个样本单细胞建库测序技术服务（委托）合同|S|墨卓转录组-3端文库|NA|MANUAL_RISK+IMBALANCE, count=3, reason=总量300.0G低于最小门槛1995.0G[0m
+[32m2026-05-20 14:57:23[0m | [1mINFO    [0m | [1m主流程规则分桶跳过: bucket=manual_or_risk:YC大连晶泰测序技术服务（委托）合同2025|S|客户-METHYLATION文库|NA|SCATTERED+MANUAL_RISK+IMBALANCE, count=2, reason=总量200.0G低于最小门槛2074.1G[0m
+[32m2026-05-20 14:57:23[0m | [1mINFO    [0m | [1m主流程规则分桶跳过: bucket=manual_or_risk:YC项目1000个自建库测序数据质控技术服务（委托）合同|S|客户-其他碱基均衡文库|NA|SCATTERED+MANUAL_RISK, count=13, reason=总量195.8G低于最小门槛2095.0G[0m
+[32m2026-05-20 14:57:23[0m | [1mINFO    [0m | [1m主流程规则分桶跳过: bucket=manual_or_risk:国科大自建库测序NOVA X PLUS技术服务（委托）合同-2|S|客户-HI-C文库|NA|MANUAL_RISK, count=2, reason=总量126.3G低于最小门槛2095.0G[0m
+[32m2026-05-20 14:57:23[0m | [1mINFO    [0m | [1m主流程规则分桶跳过: bucket=manual_or_risk:医学委托科服混样子项目|S|IDT全外文库|NA|SCATTERED+MANUAL_RISK, count=1, reason=总量121.5G低于最小门槛2095.0G[0m
+[32m2026-05-20 14:57:23[0m | [1mINFO    [0m | [1m主流程规则分桶跳过: bucket=manual_or_risk:广妇儿15例墨卓单细胞带矩阵分析技术服务（委托）合同|S|墨卓转录组-3端文库|NA|MANUAL_RISK+IMBALANCE, count=1, reason=总量100.0G低于最小门槛1995.0G[0m
+[32m2026-05-20 14:57:23[0m | [1mINFO    [0m | [1m主流程规则分桶跳过: bucket=manual_or_risk:西北农林科技大学4例样本单细胞转录组（墨卓平台）建库测序技术服务（委托）合同|S|墨卓转录组-3端文库|NA|MANUAL_RISK+IMBALANCE, count=1, reason=总量100.0G低于最小门槛1995.0G[0m
+[32m2026-05-20 14:57:23[0m | [1mINFO    [0m | [1m主流程规则分桶跳过: bucket=manual_or_risk:YC大连基恩测序技术服务（委托）合同2025|S|客户-人重测序文库|NA|SCATTERED+MANUAL_RISK, count=6, reason=总量87.6G低于最小门槛2095.0G[0m
+[32m2026-05-20 14:57:23[0m | [1mINFO    [0m | [1m主流程规则分桶跳过: bucket=manual_or_risk:YC郑州大学2025年自建库测序技术服务（委托）合同|S|客户-扩增子文库|NA|SCATTERED+MANUAL_RISK+IMBALANCE, count=4, reason=总量72.0G低于最小门槛1466.5G[0m
+[32m2026-05-20 14:57:23[0m | [1mINFO    [0m | [1m主流程规则分桶跳过: bucket=manual_or_risk:YC（极速周期）2025年泛因生物自建库合同分析技术服务（委托）合同|S|客户-PCR产物|NA|SCATTERED+MANUAL_RISK+IMBALANCE, count=2, reason=总量50.0G低于最小门槛1257.0G[0m
+[32m2026-05-20 14:57:23[0m | [1mINFO    [0m | [1m主流程规则分桶跳过: bucket=manual_or_risk:YC-中国科学院北京基因组研究所（专用）25000G自建库文库测序技术服务（委托）合同-YYG|S|客户-真核普通转录组文库|NA|SCATTERED+MANUAL_RISK, count=6, reason=总量43.0G低于最小门槛2095.0G[0m
+[32m2026-05-20 14:57:23[0m | [1mINFO    [0m | [1m主流程规则分桶跳过: bucket=manual_or_risk:YC因诺惟康纯测序技术服务（委托）合同2025|S|客户-DNA PCR FREE（人）|NA|SCATTERED+MANUAL_RISK, count=4, reason=总量40.0G低于最小门槛2095.0G[0m
+[32m2026-05-20 14:57:23[0m | [1mINFO    [0m | [1m主流程规则分桶跳过: bucket=manual_or_risk:YC宏微特斯测序技术服务（委托）合同2025|S|客户-扩增子文库|NA|SCATTERED+MANUAL_RISK+IMBALANCE, count=13, reason=总量39.0G低于最小门槛1466.5G[0m
+[32m2026-05-20 14:57:23[0m | [1mINFO    [0m | [1m主流程规则分桶跳过: bucket=manual_or_risk:YC2025年武汉序拓生物自建库PE150测序技术服务（委托）合同|S|客户-SMALL RNA文库|NA|SCATTERED+MANUAL_RISK, count=9, reason=总量36.0G低于最小门槛2095.0G[0m
+[32m2026-05-20 14:57:23[0m | [1mINFO    [0m | [1m主流程规则分桶跳过: bucket=manual_or_risk:中南大学湘雅二医院18个ATAC自建库测序分析技术服务（委托）合同|S|客户-ATAC-SEQ文库|NA|MANUAL_RISK+IMBALANCE, count=3, reason=总量36.0G低于最小门槛1676.0G[0m
+[32m2026-05-20 14:57:23[0m | [1mINFO    [0m | [1m主流程规则分桶跳过: bucket=manual_or_risk:YC-25-上海桐树医学检验实验室散文库纯测序技术服务（委托）补充合同|S|客户-METHYLATION文库|NA|SCATTERED+MANUAL_RISK+IMBALANCE, count=2, reason=总量32.0G低于最小门槛2074.1G[0m
+[32m2026-05-20 14:57:23[0m | [1mINFO    [0m | [1m主流程规则分桶跳过: bucket=manual_or_risk:红杨树X PLUS自建库测序技术服务（委托）合同|S|客户-ATAC-SEQ文库|NA|MANUAL_RISK+IMBALANCE, count=3, reason=总量30.0G低于最小门槛1676.0G[0m
+[32m2026-05-20 14:57:23[0m | [1mINFO    [0m | [1m主流程规则分桶跳过: bucket=manual_or_risk:YC项目1000个自建库测序数据质控技术服务（委托）合同|S|客户-CHIP-SEQ文库|NA|SCATTERED+MANUAL_RISK, count=7, reason=总量23.2G低于最小门槛2095.0G[0m
+[32m2026-05-20 14:57:23[0m | [1mINFO    [0m | [1m主流程规则分桶跳过: bucket=manual_or_risk:医学委托科服混样子项目|S|客户DNA文库|NA|SCATTERED+MANUAL_RISK, count=9, reason=总量20.9G低于最小门槛2095.0G[0m
+[32m2026-05-20 14:57:23[0m | [1mINFO    [0m | [1m主流程规则分桶跳过: bucket=manual_or_risk:YC厦门大学2025年-自建库测序项目-补充协议|S|客户-人重测序文库|NA|SCATTERED+MANUAL_RISK, count=4, reason=总量20.0G低于最小门槛2095.0G[0m
+[32m2026-05-20 14:57:23[0m | [1mINFO    [0m | [1m主流程规则分桶跳过: bucket=manual_or_risk:YC派真生物-2025自建库测序技术服务（委托）合同分析技术服务（委托）合同|S|客户-PCR产物|NA|SCATTERED+MANUAL_RISK+IMBALANCE, count=2, reason=总量20.0G低于最小门槛1257.0G[0m
+[32m2026-05-20 14:57:23[0m | [1mINFO    [0m | [1m主流程规则分桶跳过: bucket=manual_or_risk:YC银丰基因自建库测序技术服务（委托）合同2025|S|客户-人外显子文库|NA|SCATTERED+MANUAL_RISK, count=2, reason=总量20.0G低于最小门槛2095.0G[0m
+[32m2026-05-20 14:57:23[0m | [1mINFO    [0m | [1m主流程规则分桶跳过: bucket=manual_or_risk:YC（极速周期）2025年深圳易基因自建库测序分析技术服务（委托）合同|S|客户-METHYLATION文库|NA|SCATTERED+MANUAL_RISK+IMBALANCE, count=1, reason=总量20.0G低于最小门槛2074.1G[0m
+[32m2026-05-20 14:57:23[0m | [1mINFO    [0m | [1m主流程规则分桶跳过: bucket=manual_or_risk:YC项目1000个自建库测序数据质控技术服务（委托）合同|S|客户-动植物全基因组重测序文库|NA|SCATTERED+MANUAL_RISK, count=2, reason=总量18.2G低于最小门槛2095.0G[0m
+[32m2026-05-20 14:57:23[0m | [1mINFO    [0m | [1m主流程规则分桶跳过: bucket=manual_or_risk:YC宏微特斯测序技术服务（委托）合同2025|S|客户-人外显子文库|NA|SCATTERED+MANUAL_RISK, count=2, reason=总量17.7G低于最小门槛2095.0G[0m
+[32m2026-05-20 14:57:23[0m | [1mINFO    [0m | [1m主流程规则分桶跳过: bucket=manual_or_risk:YC-中国科学院北京基因组研究所20000G自建库文库测序技术服务（委托）合同|S|客户-真核普通转录组文库|NA|SCATTERED+MANUAL_RISK, count=2, reason=总量10.0G低于最小门槛2095.0G[0m
+[32m2026-05-20 14:57:23[0m | [1mINFO    [0m | [1m主流程规则分桶跳过: bucket=manual_or_risk:YC项目1000个自建库测序数据质控技术服务（委托）合同|S|客户-其他碱基不均衡文库|NA|SCATTERED+MANUAL_RISK+IMBALANCE, count=4, reason=总量9.3G低于最小门槛1676.0G[0m
+[32m2026-05-20 14:57:23[0m | [1mINFO    [0m | [1m主流程规则分桶跳过: bucket=manual_or_risk:YC郑州大学2025年自建库测序技术服务（委托）合同|S|客户-人外显子文库|NA|SCATTERED+MANUAL_RISK, count=2, reason=总量9.0G低于最小门槛2095.0G[0m
+[32m2026-05-20 14:57:23[0m | [1mINFO    [0m | [1m主流程规则分桶跳过: bucket=manual_or_risk:YC2025年凯德维斯医学XPLUS自建库测序技术服务（委托）合同|S|客户-人重测序文库|NA|SCATTERED+MANUAL_RISK, count=1, reason=总量8.4G低于最小门槛2095.0G[0m
+[32m2026-05-20 14:57:23[0m | [1mINFO    [0m | [1m主流程规则分桶跳过: bucket=manual_or_risk:YC-25-上海桐树医学检验实验室散文库纯测序技术服务（委托）补充合同|S|客户-人目标区域文库|NA|SCATTERED+MANUAL_RISK, count=2, reason=总量6.1G低于最小门槛2095.0G[0m
+[32m2026-05-20 14:57:23[0m | [1mINFO    [0m | [1m主流程规则分桶跳过: bucket=manual_or_risk:24.12.27华中农业大学X-PLUS平台自建库测序技术服务（委托）合同|S|客户-动植物全基因组重测序文库|NA|MANUAL_RISK, count=1, reason=总量6.0G低于最小门槛2095.0G[0m
+[32m2026-05-20 14:57:23[0m | [1mINFO    [0m | [1m主流程规则分桶跳过: bucket=manual_or_risk:YC项目1000个自建库测序数据质控技术服务（委托）合同|S|客户-真核普通转录组文库|NA|SCATTERED+MANUAL_RISK, count=1, reason=总量6.0G低于最小门槛2095.0G[0m
+[32m2026-05-20 14:57:23[0m | [1mINFO    [0m | [1m主流程规则分桶跳过: bucket=manual_or_risk:自建库测序散样分析技术服务（委托）合同|S|客户-动植物全基因组重测序文库|NA|SCATTERED+MANUAL_RISK, count=1, reason=总量6.0G低于最小门槛2095.0G[0m
+[32m2026-05-20 14:57:23[0m | [1mINFO    [0m | [1m主流程规则分桶跳过: bucket=manual_or_risk:（极速周期）北生所300例文库测序技术服务（委托）合同|S|客户-CUT-TAG文库|NA|MANUAL_RISK+IMBALANCE, count=1, reason=总量6.0G低于最小门槛1676.0G[0m
+[32m2026-05-20 14:57:23[0m | [1mINFO    [0m | [1m主流程规则分桶跳过: bucket=manual_or_risk:YC（极速周期）2025年深圳易基因自建库测序分析技术服务（委托）合同|S|客户-CHIP-SEQ文库|NA|SCATTERED+MANUAL_RISK, count=4, reason=总量5.6G低于最小门槛2095.0G[0m
+[32m2026-05-20 14:57:23[0m | [1mINFO    [0m | [1m主流程规则分桶跳过: bucket=manual_or_risk:YC-中国科学院北京基因组研究所20000G自建库文库测序技术服务（委托）合同|S|客户-人重测序文库|NA|SCATTERED+MANUAL_RISK, count=2, reason=总量4.0G低于最小门槛2095.0G[0m
+[32m2026-05-20 14:57:23[0m | [1mINFO    [0m | [1m主流程规则分桶跳过: bucket=manual_or_risk:YC宏微特斯测序技术服务（委托）合同2025|S|客户-其他碱基不均衡文库|NA|SCATTERED+MANUAL_RISK+IMBALANCE, count=3, reason=总量3.0G低于最小门槛1676.0G[0m
+[32m2026-05-20 14:57:23[0m | [1mINFO    [0m | [1m主流程规则分桶跳过: bucket=manual_or_risk:YC-第三医学中心麦老师自建库测序技术服务（委托）合同|S|客户-真核普通转录组文库|NA|SCATTERED+MANUAL_RISK, count=1, reason=总量2.7G低于最小门槛2095.0G[0m
+[32m2026-05-20 14:57:23[0m | [1mINFO    [0m | [1m主流程规则分桶跳过: bucket=manual_or_risk:YC高博博仁医院测序技术服务（委托）合同2025|S|客户-动植物全基因组重测序文库|NA|SCATTERED+MANUAL_RISK, count=1, reason=总量2.5G低于最小门槛2095.0G[0m
+[32m2026-05-20 14:57:23[0m | [1mINFO    [0m | [1m主流程规则分桶跳过: bucket=manual_or_risk:H101SC241104YC（极速周期）自建库测序技术服务（委托）合同-2|S|客户-PCR产物|NA|SCATTERED+MANUAL_RISK+IMBALANCE, count=1, reason=总量2.2G低于最小门槛1257.0G[0m
+[32m2026-05-20 14:57:23[0m | [1mINFO    [0m | [1m主流程规则分桶跳过: bucket=manual_or_risk:YC（极速周期）动物所自建库 XPLUS 测序技术服务（委托）合同-LL|S|客户-真核普通转录组文库|NA|SCATTERED+MANUAL_RISK, count=2, reason=总量2.1G低于最小门槛2095.0G[0m
+[32m2026-05-20 14:57:23[0m | [1mINFO    [0m | [1m主流程规则分桶跳过: bucket=manual_or_risk:YC北京优吉测序技术服务（委托）合同2025|S|客户-PCR产物|NA|SCATTERED+MANUAL_RISK+IMBALANCE, count=1, reason=总量1.0G低于最小门槛1257.0G[0m
+[32m2026-05-20 14:57:23[0m | [1mINFO    [0m | [1m主流程规则分桶跳过: bucket=manual_or_risk:YC北京爱普益纯测序技术服务（委托）合同2025|S|客户-其他碱基均衡文库|NA|SCATTERED+MANUAL_RISK, count=1, reason=总量0.8G低于最小门槛2095.0G[0m
+[32m2026-05-20 14:57:23[0m | [1mINFO    [0m | [1m主流程规则分桶跳过: bucket=manual_or_risk:YC（极速周期）2025年深圳易基因自建库测序分析技术服务（委托）合同|S|客户-真核普通转录组文库|NA|SCATTERED+MANUAL_RISK, count=1, reason=总量0.8G低于最小门槛2095.0G[0m
+[32m2026-05-20 14:57:23[0m | [1mINFO    [0m | [1m主流程规则分桶跳过: bucket=ten_x:3个单细胞分析技术服务（委托）合同|S|10X转录组-3'文库|NA|TENX+MANUAL_RISK+IMBALANCE, count=1, reason=总量100.0G低于最小门槛1995.0G[0m
+[32m2026-05-20 14:57:23[0m | [1mINFO    [0m | [1m主流程规则分桶跳过: bucket=ten_x:LXL-单细胞转录组测序分析技术服务（委托）合同|S|10X转录组-3'文库|NA|TENX+MANUAL_RISK+IMBALANCE, count=1, reason=总量100.0G低于最小门槛1995.0G[0m
+[32m2026-05-20 14:57:23[0m | [1mINFO    [0m | [1m主流程规则分桶跳过: bucket=ten_x:南科大6个单细胞转录组分析技术服务（委托）合同|S|10X转录组-3'文库|NA|TENX+MANUAL_RISK+IMBALANCE, count=1, reason=总量100.0G低于最小门槛1995.0G[0m
+[32m2026-05-20 14:57:23[0m | [1mINFO    [0m | [1m主流程规则分桶跳过: bucket=ten_x:厦门大学100个单细胞转录组+50个单细胞ATAC测序技术服务（委托）合同|S|10X转录组-3'文库|NA|TENX+MANUAL_RISK+IMBALANCE, count=1, reason=总量100.0G低于最小门槛1995.0G[0m
+[32m2026-05-20 14:57:23[0m | [1mINFO    [0m | [1m主流程规则分桶跳过: bucket=ten_x:四川大学华西医院6例软骨10X3端单细胞转录组分析技术服务（委托）合同|S|10X转录组-3'文库|NA|TENX+MANUAL_RISK+IMBALANCE, count=1, reason=总量100.0G低于最小门槛1995.0G[0m
+[32m2026-05-20 14:57:23[0m | [1mINFO    [0m | [1m主流程规则分桶跳过: bucket=ten_x:山东大学16个单细胞测序分析技术服务（委托）合同-张晓鲁|S|10X转录组-3'文库|NA|TENX+MANUAL_RISK+IMBALANCE, count=1, reason=总量100.0G低于最小门槛1995.0G[0m
+[32m2026-05-20 14:57:23[0m | [1mINFO    [0m | [1m主流程规则分桶跳过: bucket=ten_x:南方科技大学20例单细胞测序分析技术服务（委托）合同|S|10X转录组-3'文库|NA|TENX+MANUAL_RISK+IMBALANCE, count=1, reason=总量68.0G低于最小门槛1995.0G[0m
+[32m2026-05-20 14:57:23[0m | [1mINFO    [0m | [1m主流程规则分桶跳过: bucket=ten_x:YC苏州德运康瑞-2025年度自建库项目技术服务（委托）合同|S|客户-单细胞文库|NA|TENX+SCATTERED+MANUAL_RISK+IMBALANCE, count=4, reason=总量40.0G低于最小门槛1843.6G[0m
+[32m2026-05-20 14:57:23[0m | [1mINFO    [0m | [1m主流程规则分桶跳过: bucket=ten_x:JQ_华西医院10X单细胞建库测序分析技术服务（委托）合同|S|10X转录组-3'文库|NA|TENX+MANUAL_RISK+IMBALANCE, count=2, reason=总量7.9G低于最小门槛1995.0G[0m
+[32m2026-05-20 14:57:23[0m | [1mINFO    [0m | [1m主流程规则分桶跳过: bucket=ten_x:浙江大学国际健康医学研究院肿瘤完整基因组图谱计划一期（第一批）分析技术服务（委托）合同|S|10X转录组-3'文库|NA|TENX+MANUAL_RISK+IMBALANCE, count=2, reason=总量5.3G低于最小门槛1995.0G[0m
+[32m2026-05-20 14:57:23[0m | [1mINFO    [0m | [1m主流程规则分桶跳过: bucket=ten_x:四川大学华西医院5例肺癌组织单细胞建库测序分析技术服务（委托）合同|S|10X转录组-3'文库|NA|TENX+MANUAL_RISK+IMBALANCE, count=1, reason=总量3.1G低于最小门槛1995.0G[0m
+[32m2026-05-20 14:57:23[0m | [1mINFO    [0m | [1m主流程规则分桶跳过: bucket=ten_x:中山大学5个10X GENOMICS 3'单细胞转录组分析技术服务（委托）合同|S|10X转录组-3'文库|NA|TENX+MANUAL_RISK+IMBALANCE, count=1, reason=总量2.6G低于最小门槛1995.0G[0m
+[32m2026-05-20 14:57:23[0m | [1mINFO    [0m | [1m主流程规则分桶跳过: bucket=ten_x:中山眼科35例单细胞转录组分析技术服务（委托）合同|S|10X转录组-3'文库|NA|TENX+MANUAL_RISK+IMBALANCE, count=1, reason=总量2.5G低于最小门槛1995.0G[0m
+[32m2026-05-20 14:57:23[0m | [1mINFO    [0m | [1m主流程规则分桶跳过: bucket=general:林大300个样本的DNA小片段建库测序分析技术服务（委托）合同|Z|微生物常规小片段文库|NA|NORMAL, count=1, reason=总量200.0G低于最小门槛2095.0G[0m
+[32m2026-05-20 14:57:23[0m | [1mINFO    [0m | [1m主流程规则分桶跳过: bucket=general:河南大学三亚研究院戚赛鸽398个花生重测序育种分析技术服务（委托）合同|Z|DNA小片段文库|NA|NORMAL, count=4, reason=总量100.0G低于最小门槛2095.0G[0m
+[32m2026-05-20 14:57:23[0m | [1mINFO    [0m | [1m主流程规则分桶预调度完成: 分桶=66，桶后尾货=276个/9000.0G[0m
+[32m2026-05-20 14:57:23[0m | [1mINFO    [0m | [1m主流程尾货统一补排启动: count=276, data=9000.0G[0m
+[32m2026-05-20 14:57:23[0m | [1mINFO    [0m | [1m开始逐Lane贪心排机 - 文库数: 276[0m
+[32m2026-05-20 14:57:23[0m | [1mINFO    [0m | [1m预拆分完成: 使用外层已拆分文库[0m
+[32m2026-05-20 14:57:23[0m | [1mINFO    [0m | [1m===== 批次全局分析报告 =====[0m
+[32m2026-05-20 14:57:23[0m | [1mINFO    [0m | [1m机器类型: Nova X-25B[0m
+[32m2026-05-20 14:57:23[0m | [1mINFO    [0m | [1m文库总数: 276[0m
+[32m2026-05-20 14:57:23[0m | [1mINFO    [0m | [1m总数据量: 9000.0 GB[0m
+[32m2026-05-20 14:57:23[0m | [1mINFO    [0m | [1m预估Lane数: 4~5[0m
+[32m2026-05-20 14:57:23[0m | [1mINFO    [0m | [1m--- 特征标记 ---[0m
+[32m2026-05-20 14:57:23[0m | [1mINFO    [0m | [1m  包Lane文库: 无[0m
+[32m2026-05-20 14:57:23[0m | [1mINFO    [0m | [1m  碱基不均衡: 有[0m
+[32m2026-05-20 14:57:23[0m | [1mINFO    [0m | [1m  客户文库:   无[0m
+[32m2026-05-20 14:57:23[0m | [1mINFO    [0m | [1m  10bp文库:   有[0m
+[32m2026-05-20 14:57:23[0m | [1mINFO    [0m | [1m  非10bp文库: 有[0m
+[32m2026-05-20 14:57:23[0m | [1mINFO    [0m | [1m  特殊组合:   有[0m
+[32m2026-05-20 14:57:23[0m | [1mINFO    [0m | [1m--- 分组画像 ---[0m
+[32m2026-05-20 14:57:23[0m | [1mINFO    [0m | [1m  [imbalance] 碱基不均衡文库: 78个文库, 4649.8GB, 预估3~3条Lane[0m
+[32m2026-05-20 14:57:23[0m | [1mINFO    [0m | [1m  [non_10bp] 非10碱基文库: 159个文库, 5130.1GB, 预估3~3条Lane[0m
+[32m2026-05-20 14:57:23[0m | [1mINFO    [0m | [1m  [all] 全部文库: 276个文库, 9000.0GB, 预估4~5条Lane[0m
+[32m2026-05-20 14:57:23[0m | [1mINFO    [0m | [1m  [10bp] 10碱基文库: 117个文库, 3869.9GB, 预估2~2条Lane[0m
+[32m2026-05-20 14:57:23[0m | [1mINFO    [0m | [1m  [special_combo_b] 10X 3端/Visium组合: 19个文库, 1189.4GB, 预估1~1条Lane[0m
+[32m2026-05-20 14:57:23[0m | [1mINFO    [0m | [1m--- 专用Lane推荐 ---[0m
+[32m2026-05-20 14:57:23[0m | [1mINFO    [0m | [1m  [imbalance] 碱基不均衡文库数据量充足，可包专用Lane避免混排占比限制 - 约2条Lane, 4649.8GB, 置信度: high[0m
+[32m2026-05-20 14:57:23[0m | [1mINFO    [0m | [1m  [non_10bp] 非10bp文库集中排入专用Lane，避免触发10bp>=40%混排规则 - 约2条Lane, 5130.1GB, 置信度: high[0m
+[32m2026-05-20 14:57:23[0m | [1mINFO    [0m | [1m--- 混排约束 ---[0m
+[32m2026-05-20 14:57:23[0m | [1mINFO    [0m | [1m  [imbalance_max_30pct] imbalance vs all: 碱基不均衡文库全局占比51.7%，超过30%上限，必须拆分为专用Lane[0m
+[32m2026-05-20 14:57:23[0m | [1mINFO    [0m | [1m--- 尾部风险 ---[0m
+[32m2026-05-20 14:57:23[0m | [1mINFO    [0m | [1m  [imbalance] 碱基不均衡文库排完整Lane后剩余459.8GB，不足半Lane(1048GB)，需要大文库骨架携带或混入散样Lane - 459.8GB, 78个, 严重程度: medium[0m
+[32m2026-05-20 14:57:23[0m | [1mINFO    [0m | [1m  [non_10bp] 非10碱基文库排完整Lane后剩余940.1GB，不足半Lane(1048GB)，需要大文库骨架携带或混入散样Lane - 940.1GB, 159个, 严重程度: medium[0m
+[32m2026-05-20 14:57:23[0m | [1mINFO    [0m | [1m--- 策略建议 ---[0m
+[32m2026-05-20 14:57:23[0m | [1mINFO    [0m | [1m  - 碱基不均衡文库数据量充足，优先形成专用Lane[0m
+[32m2026-05-20 14:57:23[0m | [1mINFO    [0m | [1m  - 非10bp文库建议走专用Lane，避免10bp>=40%混排红线[0m
+[32m2026-05-20 14:57:23[0m | [1mINFO    [0m | [1m===== 报告结束 =====[0m
+[32m2026-05-20 14:57:23[0m | [1mINFO    [0m | [1m保留外部传入的策略执行计划，仅使用批次分析报告[0m
+[32m2026-05-20 14:57:23[0m | [1mINFO    [0m | [1m处理机器类型 NovaSeq X Plus - 文库数: 26 - Lane容量: 1100GB, 利用率区间: [100%, 100%], 特殊文库上限: 350GB[0m
+[32m2026-05-20 14:57:23[0m | [1mINFO    [0m | [1m碱基不均衡专用Lane策略: 19个碱基不均衡文库[0m
+[32m2026-05-20 14:57:23[0m | [1mINFO    [0m | [1m专用Lane分组G34剩余合同量500.0G无法满足1.1或3.6T-NEW有效容量下限[0m
+[32m2026-05-20 14:57:23[0m | [1mINFO    [0m | [1m专用Lane分组G4剩余合同量689.4G无法满足1.1或3.6T-NEW有效容量下限[0m
+[32m2026-05-20 14:57:23[0m | [1mINFO    [0m | [1m形成0条专用Lane，剩余19个碱基不均衡文库[0m
+[32m2026-05-20 14:57:23[0m | [1mINFO    [0m | [1m剩余池总量1495.9GB不足最小成Lane门槛2095.0GB，跳过后续随机重试[0m
+[32m2026-05-20 14:57:23[0m | [1mINFO    [0m | [1m专用Lane分组G34剩余合同量500.0G无法满足1.1或3.6T-NEW有效容量下限[0m
+[32m2026-05-20 14:57:23[0m | [1mINFO    [0m | [1m专用Lane分组G4剩余合同量689.4G无法满足1.1或3.6T-NEW有效容量下限[0m
+[32m2026-05-20 14:57:23[0m | [1mINFO    [0m | [1m专用Lane创建完成: 0条Lane, 19个碱基不均衡文库待分配, 7个中性文库待分配[0m
+[32m2026-05-20 14:57:23[0m | [1mINFO    [0m | [1m处理机器类型 Nova X-25B - 文库数: 250 - Lane容量: 1050.0GB, 利用率区间: [100%, 100%], 特殊文库上限: 350GB[0m
+[32m2026-05-20 14:57:23[0m | [1mINFO    [0m | [1m碱基不均衡专用Lane策略: 7个碱基不均衡文库[0m
+[32m2026-05-20 14:57:23[0m | [1mINFO    [0m | [1m专用Lane分组G25剩余合同量66.0G无法满足1.1或3.6T-NEW有效容量下限[0m
+[32m2026-05-20 14:57:23[0m | [1mINFO    [0m | [1m专用Lane分组G26剩余合同量6.0G无法满足1.1或3.6T-NEW有效容量下限[0m
+[32m2026-05-20 14:57:23[0m | [1mINFO    [0m | [1m形成0条专用Lane，剩余7个碱基不均衡文库[0m
+[32m2026-05-20 14:57:23[0m | [1mINFO    [0m | [1m第二轮排机: 235 个未分配文库（随机顺序）[0m
+[32m2026-05-20 14:57:23[0m | [1mINFO    [0m | [1m第三轮排机: 235 个未分配文库（小文库优先）[0m
+[32m2026-05-20 14:57:24[0m | [1mINFO    [0m | [1m连续5轮无新Lane且未分配池不变，提前结束无效重试[0m
+[32m2026-05-20 14:57:24[0m | [1mINFO    [0m | [1m专用Lane分组G25剩余合同量66.0G无法满足1.1或3.6T-NEW有效容量下限[0m
+[32m2026-05-20 14:57:24[0m | [1mINFO    [0m | [1m专用Lane分组G26剩余合同量6.0G无法满足1.1或3.6T-NEW有效容量下限[0m
+[32m2026-05-20 14:57:24[0m | [1mINFO    [0m | [1m专用Lane创建完成: 0条Lane, 7个碱基不均衡文库待分配, 228个中性文库待分配[0m
+[32m2026-05-20 14:57:24[0m | [1mINFO    [0m | [1m最后填充策略: 尝试将261个未分配文库塞入已有Lane[0m
+[32m2026-05-20 14:57:24[0m | [1mINFO    [0m | [1m最后填充策略: 成功塞入2个文库，踢出0个违反规则的文库，剩余259个无法分配[0m
+[32m2026-05-20 14:57:24[0m | [1mINFO    [0m | [1m挪移优化: 未分配数据量6745GB已足够，尝试精选组建新Lane[0m
+[32m2026-05-20 14:57:24[0m | [1mINFO    [0m | [1m残余精选: 内部98个, 客户161个[0m
+[32m2026-05-20 14:57:24[0m | [1mINFO    [0m | [1mIndex校验器初始化完成（真实数据验证版本）[0m
+[32m2026-05-20 14:57:24[0m | [1mINFO    [0m | [1m成Lane校验程序初始化完成 (严格模式: True, 碱基不均衡上限: 35%, 特殊文库关键词: 9个)[0m
+[32m2026-05-20 14:57:24[0m | [1mINFO    [0m | [1m残余精选: 验证失败 - ValidationError(rule_type=<ValidationRuleType.BASE_IMBALANCE_RATIO: 'base_imbalance_ratio'>, severity=<ValidationSeverity.ERROR: 'error'>, message='碱基不均衡占比52.8%超过35%限制', current_value=0.5281596452328159, threshold_value=0.35, affected_libraries=[12531754, 12531757, 12531753, 12531751, 12531758, 12531737, 12531747, 12531749, 12531736, 12531738, 12531718, 12531713, 12531733, 12531721, 12531739, 12531734, 12531741, 12531875, 12531719, 12531775]), ValidationError(rule_type=<ValidationRuleType.SPECIAL_LIBRARY_LIMIT: 'special_library_limit'>, severity=<ValidationSeverity.ERROR: 'error'>, message='特殊文库总量1191.0G超过350.0G限制', current_value=1190.9999999999998, threshold_value=350.0, affected_libraries=[12531754, 12531757, 12531753, 12531751, 12531758, 12531737, 12531747, 12531749, 12531736, 12531738, 12531718, 12531713, 12531733, 12531721, 12531739, 12531734, 12531741, 12531875, 12531719, 12531775])[0m
+[32m2026-05-20 14:57:24[0m | [1mINFO    [0m | [1m挪移优化: 精选组建失败，继续尝试挪移策略[0m
+[32m2026-05-20 14:57:24[0m | [1mINFO    [0m | [1m挪移优化: 未分配259个文库(6745GB)，需要从现有Lane挪出-4650GB[0m
+[32m2026-05-20 14:57:24[0m | [33m[1mWARNING [0m | [33m[1m挪移优化: 新Lane 10bp占比27.1%不足40%，尝试补充10bp文库[0m
+[32m2026-05-20 14:57:24[0m | [33m[1mWARNING [0m | [33m[1m挪移优化: 无法补充足够10bp文库，放弃创建新Lane[0m
+[32m2026-05-20 14:57:24[0m | [1mINFO    [0m | [1m逐Lane贪心排机完成 - Lane数: 1, 已分配: 17/276, 未分配: 259, 平均利用率: 103.7%, 耗时: 1.08秒[0m
+[32m2026-05-20 14:57:24[0m | [1mINFO    [0m | [1mIndex校验器初始化完成（真实数据验证版本）[0m
+[32m2026-05-20 14:57:24[0m | [1mINFO    [0m | [1m成Lane校验程序初始化完成 (严格模式: False, 碱基不均衡上限: 35%, 特殊文库关键词: 9个)[0m
+[32m2026-05-20 14:57:24[0m | [1mINFO    [0m | [1m最终验证结果: 1条Lane通过，259个文库未分配[0m
+[32m2026-05-20 14:57:24[0m | [1mINFO    [0m | [1mwkspecialsplits边排边检查完成: 无需调整[0m
+[32m2026-05-20 14:57:24[0m | [33m[1mWARNING [0m | [33m[1mLane GL_Nova X-25B_001 验证失败 - 错误: ['capacity'], 警告: [][0m
+[32m2026-05-20 14:57:24[0m | [1mINFO    [0m | [1m验证完成：0条Lane通过验证[0m
+[32m2026-05-20 14:57:24[0m | [1mINFO    [0m | [1m57规则二次改排救援已关闭，失败Lane文库回收到未分配池[0m
+[32m2026-05-20 14:57:24[0m | [1mINFO    [0m | [1m高成本救援(EX/RB)跳过: 当前0条Lane通过验证，未分配池=276个/9000.0G，继续做高成本救援收益过低[0m
+[32m2026-05-20 14:57:24[0m | [1mINFO    [0m | [1m分层重组救援跳过: 当前0条Lane通过验证，未分配池=276个/9000.0G，跳过[0m
+[32m2026-05-20 14:57:24[0m | [1mINFO    [0m | [1m剩余库分层重组搜索未新增Lane: 跳过拆分文库=0, 剩余未分配=276[0m
+[32m2026-05-20 14:57:24[0m | [1mINFO    [0m | [1m脚本内置 Pooling 预测已停用，后续统一调用 prediction_delivery[0m
+[32m2026-05-20 14:57:24[0m | [1mINFO    [0m | [1mIndex校验器初始化完成（真实数据验证版本）[0m
+[32m2026-05-20 14:57:24[0m | [1mINFO    [0m | [1m成Lane校验程序初始化完成 (严格模式: True, 碱基不均衡上限: 35%, 特殊文库关键词: 9个)[0m
+[32m2026-05-20 14:57:24[0m | [1mINFO    [0m | [1m1.1首轮二次补排完成: 新增Lane=0, 剩余文库=276[0m
+[32m2026-05-20 14:57:24[0m | [1mINFO    [0m | [1m步骤1.5-3候选池接收1.1剩余文库276个，继续进入3.6T-NEW[0m
+[32m2026-05-20 14:57:24[0m | [1mINFO    [0m | [1m1.1首轮排机完成: 生成13条Lane[0m
+[32m2026-05-20 14:57:24[0m | [1mINFO    [0m | [1m三阶段未成Lane池顺序消耗完成: 3.6T-NEW最终候选池=307个文库, 1.1 Lane=13条[0m
+[32m2026-05-20 14:57:24[0m | [1mINFO    [0m | [1mIndex校验器初始化完成（真实数据验证版本）[0m
+[32m2026-05-20 14:57:24[0m | [1mINFO    [0m | [1m成Lane校验程序初始化完成 (严格模式: True, 碱基不均衡上限: 35%, 特殊文库关键词: 9个)[0m
+[32m2026-05-20 14:57:24[0m | [1mINFO    [0m | [1m补Lane尝试: variant=full_priority, lane_prefix=GL, pool_size=20, pool_data=4942.000G, prioritize_scattered_mix=True[0m
+[32m2026-05-20 14:57:24[0m | [1mINFO    [0m | [1m全局优先级硬约束生效: stage=GL_build, 当前允许P0/P1(临检/SJ+YC)参与，暂缓较低优先级文库14个[0m
+[32m2026-05-20 14:57:24[0m | [1mINFO    [0m | [1m补Lane尝试: variant=non_clinical_priority, lane_prefix=GL, pool_size=19, pool_data=4820.000G, prioritize_scattered_mix=True[0m
+[32m2026-05-20 14:57:24[0m | [1mINFO    [0m | [1m全局优先级硬约束生效: stage=GL_build, 当前允许P0/P1(临检/SJ+YC)参与，暂缓较低优先级文库14个[0m
+[32m2026-05-20 14:57:24[0m | [1mINFO    [0m | [1m补Lane尝试: variant=non_clinical_relaxed, lane_prefix=GL, pool_size=19, pool_data=4820.000G, prioritize_scattered_mix=False[0m
+[32m2026-05-20 14:57:24[0m | [1mINFO    [0m | [1m全局优先级硬约束生效: stage=GL_build, 当前允许P0/P1(临检/SJ+YC)参与，暂缓较低优先级文库14个[0m
+[32m2026-05-20 14:57:24[0m | [1mINFO    [0m | [1m补Lane尝试: variant=other_only_relaxed, lane_prefix=GL, pool_size=14, pool_data=2720.000G, prioritize_scattered_mix=False[0m
+[32m2026-05-20 14:57:24[0m | [1mINFO    [0m | [1m补Lane跳过汇总: lane_prefix=GL, machine=Nova X-25B, reason_top=[总量2000.0G低于最小门槛2095.0Gx1, 总量400.0G低于最小门槛2095.0Gx1, 总量122.0G低于最小门槛2095.0Gx1, 总量120.0G低于最小门槛2095.0Gx1][0m
+[32m2026-05-20 14:57:24[0m | [1mINFO    [0m | [1m
+================================================================================[0m
+[32m2026-05-20 14:57:24[0m | [1mINFO    [0m | [1m步骤1.6: 尾货碱基不均衡专Lane二次抽取[0m
+[32m2026-05-20 14:57:24[0m | [1mINFO    [0m | [1m================================================================================[0m
+[32m2026-05-20 14:57:24[0m | [1mINFO    [0m | [1mIndex校验器初始化完成（真实数据验证版本）[0m
+[32m2026-05-20 14:57:24[0m | [1mINFO    [0m | [1mIndex校验器初始化完成（真实数据验证版本）[0m
+[32m2026-05-20 14:57:24[0m | [1mINFO    [0m | [1m成Lane校验程序初始化完成 (严格模式: True, 碱基不均衡上限: 35%, 特殊文库关键词: 9个)[0m
+[32m2026-05-20 14:57:24[0m | [33m[1mWARNING [0m | [33m[1mPooling配置表不存在: /data/work/yuyongpeng/liblane_v2_deepseek/data/wktype_pooling_config.xlsx，将使用默认策略[0m
+[32m2026-05-20 14:57:24[0m | [1mINFO    [0m | [1m产出效率修正表不存在: /data/work/yuyongpeng/liblane_v2_deepseek/data/production_efficiency_correction.csv，跳过后校准[0m
+[32m2026-05-20 14:57:24[0m | [33m[1mWARNING [0m | [33m[1m模型文件不存在: models/loutput_pre_lane_v5/lightgbm_model.pkl[0m
+[32m2026-05-20 14:57:24[0m | [33m[1mWARNING [0m | [33m[1mloutput预测器不可用，将使用规则降级策略[0m
+[32m2026-05-20 14:57:24[0m | [1mINFO    [0m | [1m逐Lane贪心排机器初始化完成 - 基础容量: 985.0GB, 利用率区间: [100%, 100%], 配置模式: 按机型自动[0m
+[32m2026-05-20 14:57:24[0m | [1mINFO    [0m | [1m启用检查: Index=True, 碱基不均衡=True, 规则检查器=False[0m
+[32m2026-05-20 14:57:24[0m | [1mINFO    [0m | [1m专用Lane分组G25剩余合同量66.0G无法满足1.1或3.6T-NEW有效容量下限[0m
+[32m2026-05-20 14:57:24[0m | [1mINFO    [0m | [1m专用Lane分组G34剩余合同量500.0G无法满足1.1或3.6T-NEW有效容量下限[0m
+[32m2026-05-20 14:57:24[0m | [1mINFO    [0m | [1m专用Lane分组G4剩余合同量689.4G无法满足1.1或3.6T-NEW有效容量下限[0m
+[32m2026-05-20 14:57:24[0m | [1mINFO    [0m | [1m尾货碱基不均衡专Lane二次抽取未形成新Lane[0m
+[32m2026-05-20 14:57:24[0m | [1mINFO    [0m | [1m
+================================================================================[0m
+[32m2026-05-20 14:57:24[0m | [1mINFO    [0m | [1m步骤2: 处理普通文库（使用GreedyLaneScheduler）[0m
+[32m2026-05-20 14:57:24[0m | [1mINFO    [0m | [1m================================================================================[0m
+[32m2026-05-20 14:57:24[0m | [1mINFO    [0m | [1mIndex校验器初始化完成（真实数据验证版本）[0m
+[32m2026-05-20 14:57:24[0m | [1mINFO    [0m | [1m成Lane校验程序初始化完成 (严格模式: True, 碱基不均衡上限: 35%, 特殊文库关键词: 9个)[0m
+[32m2026-05-20 14:57:24[0m | [1mINFO    [0m | [1m步骤2前置拆分家族构建未构建出完整拆分Lane[0m
+[32m2026-05-20 14:57:24[0m | [1mINFO    [0m | [1m排机超时保护已启动，最大允许时间: 10 分钟[0m
+[32m2026-05-20 14:57:25[0m | [1mINFO    [0m | [1m
+================================================================================[0m
+[32m2026-05-20 14:57:25[0m | [1mINFO    [0m | [1m排机流程：纯规则排机[0m
+[32m2026-05-20 14:57:25[0m | [1mINFO    [0m | [1m================================================================================[0m
+[32m2026-05-20 14:57:25[0m | [1mINFO    [0m | [1mIndex校验器初始化完成（真实数据验证版本）[0m
+[32m2026-05-20 14:57:25[0m | [1mINFO    [0m | [1mIndex校验器初始化完成（真实数据验证版本）[0m
+[32m2026-05-20 14:57:25[0m | [1mINFO    [0m | [1m成Lane校验程序初始化完成 (严格模式: True, 碱基不均衡上限: 35%, 特殊文库关键词: 9个)[0m
+[32m2026-05-20 14:57:25[0m | [33m[1mWARNING [0m | [33m[1mPooling配置表不存在: /data/work/yuyongpeng/liblane_v2_deepseek/data/wktype_pooling_config.xlsx，将使用默认策略[0m
+[32m2026-05-20 14:57:25[0m | [1mINFO    [0m | [1m产出效率修正表不存在: /data/work/yuyongpeng/liblane_v2_deepseek/data/production_efficiency_correction.csv，跳过后校准[0m
+[32m2026-05-20 14:57:25[0m | [33m[1mWARNING [0m | [33m[1m模型文件不存在: models/loutput_pre_lane_v5/lightgbm_model.pkl[0m
+[32m2026-05-20 14:57:25[0m | [33m[1mWARNING [0m | [33m[1mloutput预测器不可用，将使用规则降级策略[0m
+[32m2026-05-20 14:57:25[0m | [1mINFO    [0m | [1m逐Lane贪心排机器初始化完成 - 基础容量: 985.0GB, 利用率区间: [100%, 100%], 配置模式: 按机型自动[0m
+[32m2026-05-20 14:57:25[0m | [1mINFO    [0m | [1m启用检查: Index=True, 碱基不均衡=True, 规则检查器=False[0m
+[32m2026-05-20 14:57:25[0m | [1mINFO    [0m | [1m排机阶段：Pooling优化器已禁用（V6流程不需要）[0m
+[32m2026-05-20 14:57:25[0m | [1mINFO    [0m | [1mIndex校验器初始化完成（真实数据验证版本）[0m
+[32m2026-05-20 14:57:25[0m | [1mINFO    [0m | [1m成Lane校验程序初始化完成 (严格模式: True, 碱基不均衡上限: 35%, 特殊文库关键词: 9个)[0m
+[32m2026-05-20 14:57:25[0m | [1mINFO    [0m | [1m严格校验容量区间改为按统一配置表动态解析[0m
+[32m2026-05-20 14:57:25[0m | [1mINFO    [0m | [1m============================================================[0m
+[32m2026-05-20 14:57:25[0m | [1mINFO    [0m | [1m[拆分] 开始文库拆分预处理[0m
+[32m2026-05-20 14:57:25[0m | [1mINFO    [0m | [1m  拆分规则: 1.1模式文库（兼容旧名1.0）不拆分；3.6T-NEW模式按 单index >100.0G、多index >300.0G[0m
+[32m2026-05-20 14:57:25[0m | [1mINFO    [0m | [1m  最小保留数据量: >2.0G[0m
+[32m2026-05-20 14:57:25[0m | [1mINFO    [0m | [1m------------------------------------------------------------[0m
+[32m2026-05-20 14:57:25[0m | [1mINFO    [0m | [1m 拆分完成[0m
+[32m2026-05-20 14:57:25[0m | [1mINFO    [0m | [1m  原始文库数: 9[0m
+[32m2026-05-20 14:57:25[0m | [1mINFO    [0m | [1m  拆分文库数: 9[0m
+[32m2026-05-20 14:57:25[0m | [1mINFO    [0m | [1m  最终文库数: 63[0m
+[32m2026-05-20 14:57:25[0m | [1mINFO    [0m | [1m============================================================[0m
+[32m2026-05-20 14:57:25[0m | [1mINFO    [0m | [1m主流程前置拆分完成: 原始文库307个，触发拆分9个，拆分后文库361个[0m
+[32m2026-05-20 14:57:25[0m | [1mINFO    [0m | [1m全局优先级硬约束生效: stage=mixed_peak_window, 当前允许P0/P1(临检/SJ+YC)参与，暂缓较低优先级文库134个[0m
+[32m2026-05-20 14:57:25[0m | [1mINFO    [0m | [1m混排Peak窗口: 261-409bp, 137个文库/4102G, 理论最多4条Lane[0m
+[32m2026-05-20 14:57:25[0m | [1mINFO    [0m | [1m混排Lane预抽取完成: 新增Lane=0，使用文库=0个/0.0G，剩余待排=361个/15570.4G[0m
+[32m2026-05-20 14:57:25[0m | [1mINFO    [0m | [1m主流程规则分桶预调度: bucket=manual_or_risk:YC2025年武汉序拓生物自建库PE150测序技术服务（委托）合同|S|客户-ATAC-SEQ文库|NA|SCATTERED+MANUAL_RISK+IMBALANCE, count=5, data=2100.0G[0m
+[32m2026-05-20 14:57:25[0m | [1mINFO    [0m | [1m主流程规则分桶跳过: bucket=manual_or_risk:（极速周期）清华项目1000个自建库测序+2000个RNA文库测序技术服务（委托）合同|S|客户-真核普通转录组文库|NA|MANUAL_RISK, count=15, reason=总量2036.5G低于最小门槛2095.0G[0m
+[32m2026-05-20 14:57:25[0m | [1mINFO    [0m | [1m主流程规则分桶跳过: bucket=manual_or_risk:YC-（极速周期）2025年上海近岸生物年度框架协议分析技术服务（委托）合同|S|客户-METHYLATION文库|NA|SCATTERED+MANUAL_RISK+IMBALANCE, count=5, reason=总量500.0G低于最小门槛2074.1G[0m
+[32m2026-05-20 14:57:25[0m | [1mINFO    [0m | [1m主流程规则分桶跳过: bucket=manual_or_risk:（极速周期）北大SH自建库散样XP建库测序技术服务（委托）合同|S|客户-真核普通转录组文库|NA|SCATTERED+MANUAL_RISK, count=2, reason=总量400.0G低于最小门槛2095.0G[0m
+[32m2026-05-20 14:57:25[0m | [1mINFO    [0m | [1m主流程规则分桶跳过: bucket=manual_or_risk:医学委托科服混样子项目|S|全基因组文库|NA|SCATTERED+MANUAL_RISK, count=73, reason=总量392.5G低于最小门槛2095.0G[0m
+[32m2026-05-20 14:57:25[0m | [1mINFO    [0m | [1m主流程规则分桶跳过: bucket=manual_or_risk:YC宏微特斯测序技术服务（委托）合同2025|S|客户-META文库|NA|SCATTERED+MANUAL_RISK, count=14, reason=总量381.0G低于最小门槛2095.0G[0m
+[32m2026-05-20 14:57:25[0m | [1mINFO    [0m | [1m主流程规则分桶跳过: bucket=manual_or_risk:YC-中国科学院北京基因组研究所20000G自建库文库测序技术服务（委托）合同|S|客户-METHYLATION文库|NA|SCATTERED+MANUAL_RISK+IMBALANCE, count=3, reason=总量300.0G低于最小门槛2074.1G[0m
+[32m2026-05-20 14:57:25[0m | [1mINFO    [0m | [1m主流程规则分桶跳过: bucket=manual_or_risk:四川农业大学100个样本单细胞建库测序技术服务（委托）合同|S|墨卓转录组-3端文库|NA|MANUAL_RISK+IMBALANCE, count=3, reason=总量300.0G低于最小门槛1995.0G[0m
+[32m2026-05-20 14:57:25[0m | [1mINFO    [0m | [1m主流程规则分桶跳过: bucket=manual_or_risk:上海吉凯25年人WES年度协议测序分析技术服务（委托）合同Q1|S|外显子文库|NA|MANUAL_RISK, count=6, reason=总量240.0G低于最小门槛995.0G[0m
+[32m2026-05-20 14:57:25[0m | [1mINFO    [0m | [1m主流程规则分桶跳过: bucket=manual_or_risk:YC大连晶泰测序技术服务（委托）合同2025|S|客户-METHYLATION文库|NA|SCATTERED+MANUAL_RISK+IMBALANCE, count=2, reason=总量200.0G低于最小门槛2074.1G[0m
+[32m2026-05-20 14:57:25[0m | [1mINFO    [0m | [1m主流程规则分桶跳过: bucket=manual_or_risk:YC项目1000个自建库测序数据质控技术服务（委托）合同|S|客户-其他碱基均衡文库|NA|SCATTERED+MANUAL_RISK, count=13, reason=总量195.8G低于最小门槛2095.0G[0m
+[32m2026-05-20 14:57:25[0m | [1mINFO    [0m | [1m主流程规则分桶跳过: bucket=manual_or_risk:同济大学200例WES测序分析技术服务（委托）合同|S|外显子文库|NA|MANUAL_RISK, count=4, reason=总量160.0G低于最小门槛995.0G[0m
+[32m2026-05-20 14:57:25[0m | [1mINFO    [0m | [1m主流程规则分桶跳过: bucket=manual_or_risk:国科大自建库测序NOVA X PLUS技术服务（委托）合同-2|S|客户-HI-C文库|NA|MANUAL_RISK, count=2, reason=总量126.3G低于最小门槛2095.0G[0m
+[32m2026-05-20 14:57:25[0m | [1mINFO    [0m | [1m主流程规则分桶跳过: bucket=manual_or_risk:医学委托科服混样子项目|S|IDT全外文库|NA|SCATTERED+MANUAL_RISK, count=1, reason=总量121.5G低于最小门槛2095.0G[0m
+[32m2026-05-20 14:57:25[0m | [1mINFO    [0m | [1m主流程规则分桶跳过: bucket=manual_or_risk:YC（极速周期）2025年深圳易基因自建库测序分析技术服务（委托）合同|S|客户-METHYLATION文库|NA|SCATTERED+MANUAL_RISK+IMBALANCE, count=4, reason=总量117.7G低于最小门槛985.0G[0m
+[32m2026-05-20 14:57:25[0m | [1mINFO    [0m | [1m主流程规则分桶跳过: bucket=manual_or_risk:广妇儿15例墨卓单细胞带矩阵分析技术服务（委托）合同|S|墨卓转录组-3端文库|NA|MANUAL_RISK+IMBALANCE, count=1, reason=总量100.0G低于最小门槛1995.0G[0m
+[32m2026-05-20 14:57:25[0m | [1mINFO    [0m | [1m主流程规则分桶跳过: bucket=manual_or_risk:西北农林科技大学4例样本单细胞转录组（墨卓平台）建库测序技术服务（委托）合同|S|墨卓转录组-3端文库|NA|MANUAL_RISK+IMBALANCE, count=1, reason=总量100.0G低于最小门槛1995.0G[0m
+[32m2026-05-20 14:57:25[0m | [1mINFO    [0m | [1m主流程规则分桶跳过: bucket=manual_or_risk:YC大连基恩测序技术服务（委托）合同2025|S|客户-人重测序文库|NA|SCATTERED+MANUAL_RISK, count=6, reason=总量87.6G低于最小门槛2095.0G[0m
+[32m2026-05-20 14:57:25[0m | [1mINFO    [0m | [1m主流程规则分桶跳过: bucket=manual_or_risk:1500个FFPE样本外显子建库测序技术服务（委托）合同|S|外显子文库|NA|MANUAL_RISK, count=1, reason=总量80.0G低于最小门槛995.0G[0m
+[32m2026-05-20 14:57:25[0m | [1mINFO    [0m | [1m主流程规则分桶跳过: bucket=manual_or_risk:YC郑州大学2025年自建库测序技术服务（委托）合同|S|客户-扩增子文库|NA|SCATTERED+MANUAL_RISK+IMBALANCE, count=4, reason=总量72.0G低于最小门槛1466.5G[0m
+[32m2026-05-20 14:57:25[0m | [1mINFO    [0m | [1m主流程规则分桶跳过: bucket=manual_or_risk:YC（极速周期）2025年泛因生物自建库合同分析技术服务（委托）合同|S|客户-PCR产物|NA|SCATTERED+MANUAL_RISK+IMBALANCE, count=2, reason=总量50.0G低于最小门槛1257.0G[0m
+[32m2026-05-20 14:57:25[0m | [1mINFO    [0m | [1m主流程规则分桶跳过: bucket=manual_or_risk:北大医院50例外显子建库测序MAPPING技术服务（委托）合同|S|外显子文库|NA|MANUAL_RISK, count=2, reason=总量50.0G低于最小门槛995.0G[0m
+[32m2026-05-20 14:57:25[0m | [1mINFO    [0m | [1m主流程规则分桶跳过: bucket=manual_or_risk:YC-中国科学院北京基因组研究所（专用）25000G自建库文库测序技术服务（委托）合同-YYG|S|客户-真核普通转录组文库|NA|SCATTERED+MANUAL_RISK, count=6, reason=总量43.0G低于最小门槛2095.0G[0m
+[32m2026-05-20 14:57:25[0m | [1mINFO    [0m | [1m主流程规则分桶跳过: bucket=manual_or_risk:YC因诺惟康纯测序技术服务（委托）合同2025|S|客户-DNA PCR FREE（人）|NA|SCATTERED+MANUAL_RISK, count=4, reason=总量40.0G低于最小门槛2095.0G[0m
+[32m2026-05-20 14:57:25[0m | [1mINFO    [0m | [1m主流程规则分桶跳过: bucket=manual_or_risk:2025年基石WES年框架分析技术服务（委托）合同|S|外显子文库|NA|MANUAL_RISK, count=1, reason=总量40.0G低于最小门槛995.0G[0m
+[32m2026-05-20 14:57:25[0m | [1mINFO    [0m | [1m主流程规则分桶跳过: bucket=manual_or_risk:YC宏微特斯测序技术服务（委托）合同2025|S|客户-扩增子文库|NA|SCATTERED+MANUAL_RISK+IMBALANCE, count=13, reason=总量39.0G低于最小门槛1466.5G[0m
+[32m2026-05-20 14:57:25[0m | [1mINFO    [0m | [1m主流程规则分桶跳过: bucket=manual_or_risk:YC2025年武汉序拓生物自建库PE150测序技术服务（委托）合同|S|客户-SMALL RNA文库|NA|SCATTERED+MANUAL_RISK, count=9, reason=总量36.0G低于最小门槛2095.0G[0m
+[32m2026-05-20 14:57:25[0m | [1mINFO    [0m | [1m主流程规则分桶跳过: bucket=manual_or_risk:中南大学湘雅二医院18个ATAC自建库测序分析技术服务（委托）合同|S|客户-ATAC-SEQ文库|NA|MANUAL_RISK+IMBALANCE, count=3, reason=总量36.0G低于最小门槛1676.0G[0m
+[32m2026-05-20 14:57:25[0m | [1mINFO    [0m | [1m主流程规则分桶跳过: bucket=manual_or_risk:YC-25-上海桐树医学检验实验室散文库纯测序技术服务（委托）补充合同|S|客户-METHYLATION文库|NA|SCATTERED+MANUAL_RISK+IMBALANCE, count=2, reason=总量32.0G低于最小门槛2074.1G[0m
+[32m2026-05-20 14:57:25[0m | [1mINFO    [0m | [1m主流程规则分桶跳过: bucket=manual_or_risk:红杨树X PLUS自建库测序技术服务（委托）合同|S|客户-ATAC-SEQ文库|NA|MANUAL_RISK+IMBALANCE, count=3, reason=总量30.0G低于最小门槛1676.0G[0m
+[32m2026-05-20 14:57:25[0m | [1mINFO    [0m | [1m主流程规则分桶跳过: bucket=manual_or_risk:YC项目1000个自建库测序数据质控技术服务（委托）合同|S|客户-CHIP-SEQ文库|NA|SCATTERED+MANUAL_RISK, count=7, reason=总量23.2G低于最小门槛2095.0G[0m
+[32m2026-05-20 14:57:25[0m | [1mINFO    [0m | [1m主流程规则分桶跳过: bucket=manual_or_risk:医学委托科服混样子项目|S|客户DNA文库|NA|SCATTERED+MANUAL_RISK, count=9, reason=总量20.9G低于最小门槛2095.0G[0m
+[32m2026-05-20 14:57:25[0m | [1mINFO    [0m | [1m主流程规则分桶跳过: bucket=manual_or_risk:YC厦门大学2025年-自建库测序项目-补充协议|S|客户-人重测序文库|NA|SCATTERED+MANUAL_RISK, count=4, reason=总量20.0G低于最小门槛2095.0G[0m
+[32m2026-05-20 14:57:25[0m | [1mINFO    [0m | [1m主流程规则分桶跳过: bucket=manual_or_risk:YC派真生物-2025自建库测序技术服务（委托）合同分析技术服务（委托）合同|S|客户-PCR产物|NA|SCATTERED+MANUAL_RISK+IMBALANCE, count=2, reason=总量20.0G低于最小门槛1257.0G[0m
+[32m2026-05-20 14:57:25[0m | [1mINFO    [0m | [1m主流程规则分桶跳过: bucket=manual_or_risk:YC银丰基因自建库测序技术服务（委托）合同2025|S|客户-人外显子文库|NA|SCATTERED+MANUAL_RISK, count=2, reason=总量20.0G低于最小门槛2095.0G[0m
+[32m2026-05-20 14:57:25[0m | [1mINFO    [0m | [1m主流程规则分桶跳过: bucket=manual_or_risk:2025年安琪尔WES建库测序分析技术服务（委托）合同|S|外显子文库|NA|MANUAL_RISK, count=1, reason=总量20.0G低于最小门槛995.0G[0m
+[32m2026-05-20 14:57:25[0m | [1mINFO    [0m | [1m主流程规则分桶跳过: bucket=manual_or_risk:YC项目1000个自建库测序数据质控技术服务（委托）合同|S|客户-动植物全基因组重测序文库|NA|SCATTERED+MANUAL_RISK, count=2, reason=总量18.2G低于最小门槛2095.0G[0m
+[32m2026-05-20 14:57:25[0m | [1mINFO    [0m | [1m主流程规则分桶跳过: bucket=manual_or_risk:YC宏微特斯测序技术服务（委托）合同2025|S|客户-人外显子文库|NA|SCATTERED+MANUAL_RISK, count=2, reason=总量17.7G低于最小门槛2095.0G[0m
+[32m2026-05-20 14:57:25[0m | [1mINFO    [0m | [1m主流程规则分桶跳过: bucket=manual_or_risk:神外所50例150XWES建库测序+50例500XWES建库测序分析技术服务（委托）合同|S|外显子文库|NA|MANUAL_RISK, count=1, reason=总量12.0G低于最小门槛995.0G[0m
+[32m2026-05-20 14:57:25[0m | [1mINFO    [0m | [1m主流程规则分桶跳过: bucket=manual_or_risk:YC-中国科学院北京基因组研究所20000G自建库文库测序技术服务（委托）合同|S|客户-真核普通转录组文库|NA|SCATTERED+MANUAL_RISK, count=2, reason=总量10.0G低于最小门槛2095.0G[0m
+[32m2026-05-20 14:57:25[0m | [1mINFO    [0m | [1m主流程规则分桶跳过: bucket=manual_or_risk:50个外显子测序分析技术服务（委托）合同-W|S|外显子文库|NA|MANUAL_RISK, count=1, reason=总量10.0G低于最小门槛995.0G[0m
+[32m2026-05-20 14:57:25[0m | [1mINFO    [0m | [1m主流程规则分桶跳过: bucket=manual_or_risk:浙江大学700例外显子测序XPLUS技术服务（委托）合同|S|外显子文库|NA|MANUAL_RISK, count=1, reason=总量10.0G低于最小门槛995.0G[0m
+[32m2026-05-20 14:57:25[0m | [1mINFO    [0m | [1m主流程规则分桶跳过: bucket=manual_or_risk:YC项目1000个自建库测序数据质控技术服务（委托）合同|S|客户-其他碱基不均衡文库|NA|SCATTERED+MANUAL_RISK+IMBALANCE, count=4, reason=总量9.3G低于最小门槛1676.0G[0m
+[32m2026-05-20 14:57:25[0m | [1mINFO    [0m | [1m主流程规则分桶跳过: bucket=manual_or_risk:YC郑州大学2025年自建库测序技术服务（委托）合同|S|客户-人外显子文库|NA|SCATTERED+MANUAL_RISK, count=2, reason=总量9.0G低于最小门槛2095.0G[0m
+[32m2026-05-20 14:57:25[0m | [1mINFO    [0m | [1m主流程规则分桶跳过: bucket=manual_or_risk:YC2025年凯德维斯医学XPLUS自建库测序技术服务（委托）合同|S|客户-人重测序文库|NA|SCATTERED+MANUAL_RISK, count=1, reason=总量8.4G低于最小门槛2095.0G[0m
+[32m2026-05-20 14:57:25[0m | [1mINFO    [0m | [1m主流程规则分桶跳过: bucket=manual_or_risk:YC-25-上海桐树医学检验实验室散文库纯测序技术服务（委托）补充合同|S|客户-人目标区域文库|NA|SCATTERED+MANUAL_RISK, count=2, reason=总量6.1G低于最小门槛2095.0G[0m
+[32m2026-05-20 14:57:25[0m | [1mINFO    [0m | [1m主流程规则分桶跳过: bucket=manual_or_risk:24.12.27华中农业大学X-PLUS平台自建库测序技术服务（委托）合同|S|客户-动植物全基因组重测序文库|NA|MANUAL_RISK, count=1, reason=总量6.0G低于最小门槛2095.0G[0m
+[32m2026-05-20 14:57:25[0m | [1mINFO    [0m | [1m主流程规则分桶跳过: bucket=manual_or_risk:YC项目1000个自建库测序数据质控技术服务（委托）合同|S|客户-真核普通转录组文库|NA|SCATTERED+MANUAL_RISK, count=1, reason=总量6.0G低于最小门槛2095.0G[0m
+[32m2026-05-20 14:57:25[0m | [1mINFO    [0m | [1m主流程规则分桶跳过: bucket=manual_or_risk:自建库测序散样分析技术服务（委托）合同|S|客户-动植物全基因组重测序文库|NA|SCATTERED+MANUAL_RISK, count=1, reason=总量6.0G低于最小门槛2095.0G[0m
+[32m2026-05-20 14:57:25[0m | [1mINFO    [0m | [1m主流程规则分桶跳过: bucket=manual_or_risk:（极速周期）北生所300例文库测序技术服务（委托）合同|S|客户-CUT-TAG文库|NA|MANUAL_RISK+IMBALANCE, count=1, reason=总量6.0G低于最小门槛1676.0G[0m
+[32m2026-05-20 14:57:25[0m | [1mINFO    [0m | [1m主流程规则分桶跳过: bucket=manual_or_risk:YC（极速周期）2025年深圳易基因自建库测序分析技术服务（委托）合同|S|客户-CHIP-SEQ文库|NA|SCATTERED+MANUAL_RISK, count=4, reason=总量5.6G低于最小门槛2095.0G[0m
+[32m2026-05-20 14:57:25[0m | [1mINFO    [0m | [1m主流程规则分桶跳过: bucket=manual_or_risk:YC-中国科学院北京基因组研究所20000G自建库文库测序技术服务（委托）合同|S|客户-人重测序文库|NA|SCATTERED+MANUAL_RISK, count=2, reason=总量4.0G低于最小门槛2095.0G[0m
+[32m2026-05-20 14:57:25[0m | [1mINFO    [0m | [1m主流程规则分桶跳过: bucket=manual_or_risk:YC宏微特斯测序技术服务（委托）合同2025|S|客户-其他碱基不均衡文库|NA|SCATTERED+MANUAL_RISK+IMBALANCE, count=3, reason=总量3.0G低于最小门槛1676.0G[0m
+[32m2026-05-20 14:57:25[0m | [1mINFO    [0m | [1m主流程规则分桶跳过: bucket=manual_or_risk:YC-第三医学中心麦老师自建库测序技术服务（委托）合同|S|客户-真核普通转录组文库|NA|SCATTERED+MANUAL_RISK, count=1, reason=总量2.7G低于最小门槛2095.0G[0m
+[32m2026-05-20 14:57:25[0m | [1mINFO    [0m | [1m主流程规则分桶跳过: bucket=manual_or_risk:YC高博博仁医院测序技术服务（委托）合同2025|S|客户-动植物全基因组重测序文库|NA|SCATTERED+MANUAL_RISK, count=1, reason=总量2.5G低于最小门槛2095.0G[0m
+[32m2026-05-20 14:57:25[0m | [1mINFO    [0m | [1m主流程规则分桶跳过: bucket=manual_or_risk:H101SC241104YC（极速周期）自建库测序技术服务（委托）合同-2|S|客户-PCR产物|NA|SCATTERED+MANUAL_RISK+IMBALANCE, count=1, reason=总量2.2G低于最小门槛1257.0G[0m
+[32m2026-05-20 14:57:25[0m | [1mINFO    [0m | [1m主流程规则分桶跳过: bucket=manual_or_risk:YC（极速周期）动物所自建库 XPLUS 测序技术服务（委托）合同-LL|S|客户-真核普通转录组文库|NA|SCATTERED+MANUAL_RISK, count=2, reason=总量2.1G低于最小门槛2095.0G[0m
+[32m2026-05-20 14:57:25[0m | [1mINFO    [0m | [1m主流程规则分桶跳过: bucket=manual_or_risk:YC北京优吉测序技术服务（委托）合同2025|S|客户-PCR产物|NA|SCATTERED+MANUAL_RISK+IMBALANCE, count=1, reason=总量1.0G低于最小门槛1257.0G[0m
+[32m2026-05-20 14:57:25[0m | [1mINFO    [0m | [1m主流程规则分桶跳过: bucket=manual_or_risk:YC北京爱普益纯测序技术服务（委托）合同2025|S|客户-其他碱基均衡文库|NA|SCATTERED+MANUAL_RISK, count=1, reason=总量0.8G低于最小门槛2095.0G[0m
+[32m2026-05-20 14:57:25[0m | [1mINFO    [0m | [1m主流程规则分桶跳过: bucket=manual_or_risk:YC（极速周期）2025年深圳易基因自建库测序分析技术服务（委托）合同|S|客户-真核普通转录组文库|NA|SCATTERED+MANUAL_RISK, count=1, reason=总量0.8G低于最小门槛2095.0G[0m
+[32m2026-05-20 14:57:25[0m | [1mINFO    [0m | [1m主流程规则分桶跳过: bucket=ten_x:3个单细胞分析技术服务（委托）合同|S|10X转录组-3'文库|NA|TENX+MANUAL_RISK+IMBALANCE, count=1, reason=总量100.0G低于最小门槛1995.0G[0m
+[32m2026-05-20 14:57:25[0m | [1mINFO    [0m | [1m主流程规则分桶跳过: bucket=ten_x:LXL-单细胞转录组测序分析技术服务（委托）合同|S|10X转录组-3'文库|NA|TENX+MANUAL_RISK+IMBALANCE, count=1, reason=总量100.0G低于最小门槛1995.0G[0m
+[32m2026-05-20 14:57:25[0m | [1mINFO    [0m | [1m主流程规则分桶跳过: bucket=ten_x:南科大6个单细胞转录组分析技术服务（委托）合同|S|10X转录组-3'文库|NA|TENX+MANUAL_RISK+IMBALANCE, count=1, reason=总量100.0G低于最小门槛1995.0G[0m
+[32m2026-05-20 14:57:25[0m | [1mINFO    [0m | [1m主流程规则分桶跳过: bucket=ten_x:厦门大学100个单细胞转录组+50个单细胞ATAC测序技术服务（委托）合同|S|10X转录组-3'文库|NA|TENX+MANUAL_RISK+IMBALANCE, count=1, reason=总量100.0G低于最小门槛1995.0G[0m
+[32m2026-05-20 14:57:25[0m | [1mINFO    [0m | [1m主流程规则分桶跳过: bucket=ten_x:四川大学华西医院6例软骨10X3端单细胞转录组分析技术服务（委托）合同|S|10X转录组-3'文库|NA|TENX+MANUAL_RISK+IMBALANCE, count=1, reason=总量100.0G低于最小门槛1995.0G[0m
+[32m2026-05-20 14:57:25[0m | [1mINFO    [0m | [1m主流程规则分桶跳过: bucket=ten_x:山东大学16个单细胞测序分析技术服务（委托）合同-张晓鲁|S|10X转录组-3'文库|NA|TENX+MANUAL_RISK+IMBALANCE, count=1, reason=总量100.0G低于最小门槛1995.0G[0m
+[32m2026-05-20 14:57:25[0m | [1mINFO    [0m | [1m主流程规则分桶跳过: bucket=ten_x:南方科技大学20例单细胞测序分析技术服务（委托）合同|S|10X转录组-3'文库|NA|TENX+MANUAL_RISK+IMBALANCE, count=1, reason=总量68.0G低于最小门槛1995.0G[0m
+[32m2026-05-20 14:57:25[0m | [1mINFO    [0m | [1m主流程规则分桶跳过: bucket=ten_x:YC苏州德运康瑞-2025年度自建库项目技术服务（委托）合同|S|客户-单细胞文库|NA|TENX+SCATTERED+MANUAL_RISK+IMBALANCE, count=4, reason=总量40.0G低于最小门槛1843.6G[0m
+[32m2026-05-20 14:57:25[0m | [1mINFO    [0m | [1m主流程规则分桶跳过: bucket=ten_x:JQ_华西医院10X单细胞建库测序分析技术服务（委托）合同|S|10X转录组-3'文库|NA|TENX+MANUAL_RISK+IMBALANCE, count=2, reason=总量7.9G低于最小门槛1995.0G[0m
+[32m2026-05-20 14:57:25[0m | [1mINFO    [0m | [1m主流程规则分桶跳过: bucket=ten_x:浙江大学国际健康医学研究院肿瘤完整基因组图谱计划一期（第一批）分析技术服务（委托）合同|S|10X转录组-3'文库|NA|TENX+MANUAL_RISK+IMBALANCE, count=2, reason=总量5.3G低于最小门槛1995.0G[0m
+[32m2026-05-20 14:57:25[0m | [1mINFO    [0m | [1m主流程规则分桶跳过: bucket=ten_x:四川大学华西医院5例肺癌组织单细胞建库测序分析技术服务（委托）合同|S|10X转录组-3'文库|NA|TENX+MANUAL_RISK+IMBALANCE, count=1, reason=总量3.1G低于最小门槛1995.0G[0m
+[32m2026-05-20 14:57:25[0m | [1mINFO    [0m | [1m主流程规则分桶跳过: bucket=ten_x:中山大学5个10X GENOMICS 3'单细胞转录组分析技术服务（委托）合同|S|10X转录组-3'文库|NA|TENX+MANUAL_RISK+IMBALANCE, count=1, reason=总量2.6G低于最小门槛1995.0G[0m
+[32m2026-05-20 14:57:25[0m | [1mINFO    [0m | [1m主流程规则分桶跳过: bucket=ten_x:中山眼科35例单细胞转录组分析技术服务（委托）合同|S|10X转录组-3'文库|NA|TENX+MANUAL_RISK+IMBALANCE, count=1, reason=总量2.5G低于最小门槛1995.0G[0m
+[32m2026-05-20 14:57:25[0m | [1mINFO    [0m | [1m主流程规则分桶预调度: bucket=general:铂安诺微生物建库测序技术服务（委托）合同|Z|DNA小片段文库|NA|NORMAL, count=28, data=2600.0G[0m
+[32m2026-05-20 14:57:25[0m | [1mINFO    [0m | [1m开始逐Lane贪心排机 - 文库数: 28[0m
+[32m2026-05-20 14:57:25[0m | [1mINFO    [0m | [1m预拆分完成: 使用外层已拆分文库[0m
+[32m2026-05-20 14:57:25[0m | [1mINFO    [0m | [1m===== 批次全局分析报告 =====[0m
+[32m2026-05-20 14:57:25[0m | [1mINFO    [0m | [1m机器类型: NovaSeq X Plus[0m
+[32m2026-05-20 14:57:25[0m | [1mINFO    [0m | [1m文库总数: 28[0m
+[32m2026-05-20 14:57:25[0m | [1mINFO    [0m | [1m总数据量: 2600.0 GB[0m
+[32m2026-05-20 14:57:25[0m | [1mINFO    [0m | [1m预估Lane数: 3~3[0m
+[32m2026-05-20 14:57:25[0m | [1mINFO    [0m | [1m--- 特征标记 ---[0m
+[32m2026-05-20 14:57:25[0m | [1mINFO    [0m | [1m  包Lane文库: 无[0m
+[32m2026-05-20 14:57:25[0m | [1mINFO    [0m | [1m  碱基不均衡: 无[0m
+[32m2026-05-20 14:57:25[0m | [1mINFO    [0m | [1m  客户文库:   无[0m
+[32m2026-05-20 14:57:25[0m | [1mINFO    [0m | [1m  10bp文库:   有[0m
+[32m2026-05-20 14:57:25[0m | [1mINFO    [0m | [1m  非10bp文库: 无[0m
+[32m2026-05-20 14:57:25[0m | [1mINFO    [0m | [1m  特殊组合:   无[0m
+[32m2026-05-20 14:57:25[0m | [1mINFO    [0m | [1m--- 分组画像 ---[0m
+[32m2026-05-20 14:57:25[0m | [1mINFO    [0m | [1m  [10bp] 10碱基文库: 28个文库, 2600.0GB, 预估3~3条Lane[0m
+[32m2026-05-20 14:57:25[0m | [1mINFO    [0m | [1m  [all] 全部文库: 28个文库, 2600.0GB, 预估3~3条Lane[0m
+[32m2026-05-20 14:57:25[0m | [1mINFO    [0m | [1m--- 策略建议 ---[0m
+[32m2026-05-20 14:57:25[0m | [1mINFO    [0m | [1m  - 数据分布较均匀，可按常规贪心排机流程处理[0m
+[32m2026-05-20 14:57:25[0m | [1mINFO    [0m | [1m===== 报告结束 =====[0m
+[32m2026-05-20 14:57:25[0m | [1mINFO    [0m | [1m保留外部传入的策略执行计划，仅使用批次分析报告[0m
+[32m2026-05-20 14:57:25[0m | [1mINFO    [0m | [1m处理机器类型 NovaSeq X Plus - 文库数: 28 - Lane容量: 1100GB, 利用率区间: [100%, 100%], 特殊文库上限: 350GB[0m
+[32m2026-05-20 14:57:25[0m | [1mINFO    [0m | [1m第二轮排机: 28 个未分配文库（随机顺序）[0m
+[32m2026-05-20 14:57:25[0m | [1mINFO    [0m | [1m第三轮排机: 28 个未分配文库（小文库优先）[0m
+[32m2026-05-20 14:57:25[0m | [1mINFO    [0m | [1m连续5轮无新Lane且未分配池不变，提前结束无效重试[0m
+[32m2026-05-20 14:57:25[0m | [1mINFO    [0m | [1m逐Lane贪心排机完成 - Lane数: 0, 已分配: 0/28, 未分配: 28, 平均利用率: 0.0%, 耗时: 0.01秒[0m
+[32m2026-05-20 14:57:25[0m | [1mINFO    [0m | [1mIndex校验器初始化完成（真实数据验证版本）[0m
+[32m2026-05-20 14:57:25[0m | [1mINFO    [0m | [1m成Lane校验程序初始化完成 (严格模式: False, 碱基不均衡上限: 35%, 特殊文库关键词: 9个)[0m
+[32m2026-05-20 14:57:25[0m | [1mINFO    [0m | [1m最终验证结果: 0条Lane通过，28个文库未分配[0m
+[32m2026-05-20 14:57:25[0m | [1mINFO    [0m | [1m主流程规则分桶预调度: bucket=general:浙江大学医学院附属第一医院28个原核转录组分析技术服务（委托）合同|Z|原核链特异性转录组文库|NA|NORMAL, count=21, data=1950.0G[0m
+[32m2026-05-20 14:57:25[0m | [1mINFO    [0m | [1m开始逐Lane贪心排机 - 文库数: 21[0m
+[32m2026-05-20 14:57:25[0m | [1mINFO    [0m | [1m预拆分完成: 使用外层已拆分文库[0m
+[32m2026-05-20 14:57:25[0m | [1mINFO    [0m | [1m使用外部传入的全局分析报告（全量文库），跳过内部分析[0m
+[32m2026-05-20 14:57:25[0m | [1mINFO    [0m | [1m处理机器类型 NovaSeq X Plus - 文库数: 21 - Lane容量: 1100GB, 利用率区间: [100%, 100%], 特殊文库上限: 350GB[0m
+[32m2026-05-20 14:57:25[0m | [1mINFO    [0m | [1m第二轮排机: 21 个未分配文库（随机顺序）[0m
+[32m2026-05-20 14:57:25[0m | [1mINFO    [0m | [1m第三轮排机: 21 个未分配文库（小文库优先）[0m
+[32m2026-05-20 14:57:25[0m | [1mINFO    [0m | [1m连续5轮无新Lane且未分配池不变，提前结束无效重试[0m
+[32m2026-05-20 14:57:25[0m | [1mINFO    [0m | [1m逐Lane贪心排机完成 - Lane数: 0, 已分配: 0/21, 未分配: 21, 平均利用率: 0.0%, 耗时: 0.01秒[0m
+[32m2026-05-20 14:57:25[0m | [1mINFO    [0m | [1mIndex校验器初始化完成（真实数据验证版本）[0m
+[32m2026-05-20 14:57:25[0m | [1mINFO    [0m | [1m成Lane校验程序初始化完成 (严格模式: False, 碱基不均衡上限: 35%, 特殊文库关键词: 9个)[0m
+[32m2026-05-20 14:57:25[0m | [1mINFO    [0m | [1m最终验证结果: 0条Lane通过，21个文库未分配[0m
+[32m2026-05-20 14:57:25[0m | [1mINFO    [0m | [1m主流程规则分桶跳过: bucket=general:交医68个PCR-小片段建库测序XPLUS技术服务（委托）合同|Z|动植物全基因组重测序文库|NA|NORMAL, count=7, reason=总量650.0G低于最小门槛995.0G[0m
+[32m2026-05-20 14:57:25[0m | [1mINFO    [0m | [1m主流程规则分桶跳过: bucket=general:浙江大学100例链特+普转建库测序技术服务（委托）合同|Z|真核链特异性转录组文库|NA|NORMAL, count=7, reason=总量650.0G低于最小门槛995.0G[0m
+[32m2026-05-20 14:57:25[0m | [1mINFO    [0m | [1m主流程规则分桶跳过: bucket=general:林大300个样本的DNA小片段建库测序分析技术服务（委托）合同|Z|微生物常规小片段文库|NA|NORMAL, count=1, reason=总量200.0G低于最小门槛2095.0G[0m
+[32m2026-05-20 14:57:25[0m | [1mINFO    [0m | [1m主流程规则分桶跳过: bucket=general:河南大学三亚研究院戚赛鸽398个花生重测序育种分析技术服务（委托）合同|Z|DNA小片段文库|NA|NORMAL, count=5, reason=总量100.8G低于最小门槛995.0G[0m
+[32m2026-05-20 14:57:25[0m | [1mINFO    [0m | [1m主流程规则分桶预调度完成: 分桶=79，桶后尾货=361个/15570.4G[0m
+[32m2026-05-20 14:57:25[0m | [1mINFO    [0m | [1m主流程尾货统一补排启动: count=361, data=15570.4G[0m
+[32m2026-05-20 14:57:25[0m | [1mINFO    [0m | [1m开始逐Lane贪心排机 - 文库数: 361[0m
+[32m2026-05-20 14:57:25[0m | [1mINFO    [0m | [1m预拆分完成: 使用外层已拆分文库[0m
+[32m2026-05-20 14:57:25[0m | [1mINFO    [0m | [1m使用外部传入的全局分析报告（全量文库），跳过内部分析[0m
+[32m2026-05-20 14:57:25[0m | [1mINFO    [0m | [1m处理机器类型 Nova X-25B - 文库数: 270 - Lane容量: 1050.0GB, 利用率区间: [100%, 100%], 特殊文库上限: 350GB[0m
+[32m2026-05-20 14:57:25[0m | [1mINFO    [0m | [1m碱基不均衡专用Lane策略: 7个碱基不均衡文库[0m
+[32m2026-05-20 14:57:25[0m | [1mINFO    [0m | [1m专用Lane分组G25剩余合同量66.0G无法满足1.1或3.6T-NEW有效容量下限[0m
+[32m2026-05-20 14:57:25[0m | [1mINFO    [0m | [1m专用Lane分组G26剩余合同量6.0G无法满足1.1或3.6T-NEW有效容量下限[0m
+[32m2026-05-20 14:57:25[0m | [1mINFO    [0m | [1m形成0条专用Lane，剩余7个碱基不均衡文库[0m
+[32m2026-05-20 14:57:25[0m | [33m[1mWARNING [0m | [33m[1m剩余 107 个文库无法分配（全部有约束冲突）[0m
+[32m2026-05-20 14:57:25[0m | [1mINFO    [0m | [1m第二轮排机: 276 个未分配文库（随机顺序）[0m
+[32m2026-05-20 14:57:26[0m | [33m[1mWARNING [0m | [33m[1m剩余 118 个文库无法分配（全部有约束冲突）[0m
+[32m2026-05-20 14:57:26[0m | [1mINFO    [0m | [1m第三轮排机: 287 个未分配文库（小文库优先）[0m
+[32m2026-05-20 14:57:27[0m | [33m[1mWARNING [0m | [33m[1m剩余 122 个文库无法分配（全部有约束冲突）[0m
+[32m2026-05-20 14:57:28[0m | [33m[1mWARNING [0m | [33m[1m剩余 106 个文库无法分配（全部有约束冲突）[0m
+[32m2026-05-20 14:57:28[0m | [33m[1mWARNING [0m | [33m[1m剩余 111 个文库无法分配（全部有约束冲突）[0m
+[32m2026-05-20 14:57:28[0m | [33m[1mWARNING [0m | [33m[1m剩余 110 个文库无法分配（全部有约束冲突）[0m
+[32m2026-05-20 14:57:28[0m | [33m[1mWARNING [0m | [33m[1m剩余 118 个文库无法分配（全部有约束冲突）[0m
+[32m2026-05-20 14:57:29[0m | [33m[1mWARNING [0m | [33m[1m剩余 121 个文库无法分配（全部有约束冲突）[0m
+[32m2026-05-20 14:57:29[0m | [33m[1mWARNING [0m | [33m[1m剩余 125 个文库无法分配（全部有约束冲突）[0m
+[32m2026-05-20 14:57:29[0m | [33m[1mWARNING [0m | [33m[1m剩余 132 个文库无法分配（全部有约束冲突）[0m
+[32m2026-05-20 14:57:30[0m | [33m[1mWARNING [0m | [33m[1m剩余 134 个文库无法分配（全部有约束冲突）[0m
+[32m2026-05-20 14:57:30[0m | [33m[1mWARNING [0m | [33m[1m剩余 135 个文库无法分配（全部有约束冲突）[0m
+[32m2026-05-20 14:57:30[0m | [1mINFO    [0m | [1m连续8轮无新Lane，停止尝试[0m
+[32m2026-05-20 14:57:30[0m | [1mINFO    [0m | [1m专用Lane分组G25剩余合同量66.0G无法满足1.1或3.6T-NEW有效容量下限[0m
+[32m2026-05-20 14:57:30[0m | [1mINFO    [0m | [1m专用Lane分组G26剩余合同量6.0G无法满足1.1或3.6T-NEW有效容量下限[0m
+[32m2026-05-20 14:57:30[0m | [1mINFO    [0m | [1m专用Lane创建完成: 0条Lane, 7个碱基不均衡文库待分配, 206个中性文库待分配[0m
+[32m2026-05-20 14:57:30[0m | [1mINFO    [0m | [1m处理机器类型 NovaSeq X Plus - 文库数: 91 - Lane容量: 1100GB, 利用率区间: [100%, 100%], 特殊文库上限: 350GB[0m
+[32m2026-05-20 14:57:30[0m | [1mINFO    [0m | [1m碱基不均衡专用Lane策略: 19个碱基不均衡文库[0m
+[32m2026-05-20 14:57:30[0m | [1mINFO    [0m | [1m专用Lane分组G34剩余合同量500.0G无法满足1.1或3.6T-NEW有效容量下限[0m
+[32m2026-05-20 14:57:30[0m | [1mINFO    [0m | [1m专用Lane分组G4剩余合同量689.4G无法满足1.1或3.6T-NEW有效容量下限[0m
+[32m2026-05-20 14:57:30[0m | [1mINFO    [0m | [1m形成0条专用Lane，剩余19个碱基不均衡文库[0m
+[32m2026-05-20 14:57:30[0m | [1mINFO    [0m | [1m第二轮排机: 81 个未分配文库（随机顺序）[0m
+[32m2026-05-20 14:57:30[0m | [1mINFO    [0m | [1m第三轮排机: 81 个未分配文库（小文库优先）[0m
+[32m2026-05-20 14:57:30[0m | [1mINFO    [0m | [1m连续5轮无新Lane且未分配池不变，提前结束无效重试[0m
+[32m2026-05-20 14:57:30[0m | [1mINFO    [0m | [1m专用Lane分组G34剩余合同量500.0G无法满足1.1或3.6T-NEW有效容量下限[0m
+[32m2026-05-20 14:57:30[0m | [1mINFO    [0m | [1m专用Lane分组G4剩余合同量689.4G无法满足1.1或3.6T-NEW有效容量下限[0m
+[32m2026-05-20 14:57:30[0m | [1mINFO    [0m | [1m专用Lane创建完成: 0条Lane, 19个碱基不均衡文库待分配, 62个中性文库待分配[0m
+[32m2026-05-20 14:57:30[0m | [1mINFO    [0m | [1m最后填充策略: 尝试将294个未分配文库塞入已有Lane[0m
+[32m2026-05-20 14:57:31[0m | [1mINFO    [0m | [1m最后填充策略: 成功塞入47个文库，踢出0个违反规则的文库，剩余246个无法分配[0m
+[32m2026-05-20 14:57:31[0m | [33m[1mWARNING [0m | [33m[1m最后填充策略未分配池重建修正: 旧算法=246个，新算法=181个[0m
+[32m2026-05-20 14:57:31[0m | [1mINFO    [0m | [1m挪移优化: 未分配数据量10879GB已足够，尝试精选组建新Lane[0m
+[32m2026-05-20 14:57:31[0m | [1mINFO    [0m | [1m残余精选: 内部89个, 客户92个[0m
+[32m2026-05-20 14:57:31[0m | [1mINFO    [0m | [1mIndex校验器初始化完成（真实数据验证版本）[0m
+[32m2026-05-20 14:57:31[0m | [1mINFO    [0m | [1m成Lane校验程序初始化完成 (严格模式: True, 碱基不均衡上限: 35%, 特殊文库关键词: 9个)[0m
+[32m2026-05-20 14:57:31[0m | [1mINFO    [0m | [1m残余精选: 成功创建DL_NovaSeq X Plus_001，12个文库，1105GB，客户占比0.0%[0m
+[32m2026-05-20 14:57:31[0m | [1mINFO    [0m | [1m残余精选: 剩余169个文库无法分配[0m
+[32m2026-05-20 14:57:31[0m | [1mINFO    [0m | [1m逐Lane贪心排机完成 - Lane数: 5, 已分配: 185/361, 未分配: 169, 平均利用率: 105.3%, 耗时: 6.80秒[0m
+[32m2026-05-20 14:57:31[0m | [1mINFO    [0m | [1mIndex校验器初始化完成（真实数据验证版本）[0m
+[32m2026-05-20 14:57:31[0m | [1mINFO    [0m | [1m成Lane校验程序初始化完成 (严格模式: False, 碱基不均衡上限: 35%, 特殊文库关键词: 9个)[0m
+[32m2026-05-20 14:57:31[0m | [33m[1mWARNING [0m | [33m[1mLane GL_NovaSeq X Plus_001 验证失败: ['Lane有效数据量1161.2G(原始1161.2G+平衡0.0G)超过上限1105G，规则=tj_1595_standard_pe150_25b，需剔除约56.2G的文库'][0m
+[32m2026-05-20 14:57:31[0m | [1mINFO    [0m | [1m有1条Lane验证失败，尝试挪移优化...[0m
+[32m2026-05-20 14:57:31[0m | [1mINFO    [0m | [1mkeep_failed_lanes=True，保留1条验证失败的Lane供外层矫正（未分配池不变）[0m
+[32m2026-05-20 14:57:31[0m | [1mINFO    [0m | [1m最终验证结果（含待矫正Lane）: 5条Lane，169个文库未分配[0m
+[32m2026-05-20 14:57:31[0m | [1mINFO    [0m | [1mwkspecialsplits边排边检查完成: 无需调整[0m
+[32m2026-05-20 14:57:32[0m | [33m[1mWARNING [0m | [33m[1mLane GL_NovaSeq X Plus_001 验证失败 - 错误: ['capacity_exceeded'], 警告: [][0m
+[32m2026-05-20 14:57:32[0m | [1mINFO    [0m | [1m验证完成：4条Lane通过验证[0m
+[32m2026-05-20 14:57:32[0m | [1mINFO    [0m | [1m57规则二次改排救援已关闭，失败Lane文库回收到未分配池[0m
+[32m2026-05-20 14:57:32[0m | [1mINFO    [0m | [1m补Lane尝试: variant=manual_or_risk:YC2025年武汉序拓生物自建库PE150测序技术服务（委托）合同|S|客户-ATAC-SEQ文库|NA|SCATTERED+MANUAL_RISK+IMBALANCE, lane_prefix=EX, pool_size=5, pool_data=2100.000G, prioritize_scattered_mix=True[0m
+[32m2026-05-20 14:57:32[0m | [1mINFO    [0m | [1m补Lane尝试: variant=general:铂安诺微生物建库测序技术服务（委托）合同|Z|DNA小片段文库|NA|NORMAL, lane_prefix=EX, pool_size=28, pool_data=2600.000G, prioritize_scattered_mix=True[0m
+[32m2026-05-20 14:57:32[0m | [1mINFO    [0m | [1m补Lane尝试: variant=general:浙江大学医学院附属第一医院28个原核转录组分析技术服务（委托）合同|Z|原核链特异性转录组文库|NA|NORMAL, lane_prefix=EX, pool_size=21, pool_data=1950.000G, prioritize_scattered_mix=True[0m
+[32m2026-05-20 14:57:32[0m | [1mINFO    [0m | [1m补Lane尝试: variant=full_priority, lane_prefix=EX, pool_size=181, pool_data=10935.664G, prioritize_scattered_mix=True[0m
+[32m2026-05-20 14:57:32[0m | [1mINFO    [0m | [1m全局优先级硬约束生效: stage=EX_build, 当前允许P0/P1(临检/SJ+YC)参与，暂缓较低优先级文库93个[0m
+[32m2026-05-20 14:57:32[0m | [1mINFO    [0m | [1m补Lane尝试: variant=non_clinical_priority, lane_prefix=EX, pool_size=168, pool_data=10769.764G, prioritize_scattered_mix=True[0m
+[32m2026-05-20 14:57:32[0m | [1mINFO    [0m | [1m全局优先级硬约束生效: stage=EX_build, 当前允许P0/P1(临检/SJ+YC)参与，暂缓较低优先级文库93个[0m
+[32m2026-05-20 14:57:32[0m | [1mINFO    [0m | [1m补Lane尝试: variant=non_clinical_relaxed, lane_prefix=EX, pool_size=168, pool_data=10769.764G, prioritize_scattered_mix=False[0m
+[32m2026-05-20 14:57:32[0m | [1mINFO    [0m | [1m全局优先级硬约束生效: stage=EX_build, 当前允许P0/P1(临检/SJ+YC)参与，暂缓较低优先级文库93个[0m
+[32m2026-05-20 14:57:32[0m | [1mINFO    [0m | [1m补Lane尝试: variant=other_only_relaxed, lane_prefix=EX, pool_size=93, pool_data=7210.025G, prioritize_scattered_mix=False[0m
+[32m2026-05-20 14:57:32[0m | [1mINFO    [0m | [1m补Lane尝试: variant=general:铂安诺微生物建库测序技术服务（委托）合同|Z|DNA小片段文库|NA|NORMAL, lane_prefix=EX, pool_size=25, pool_data=2321.429G, prioritize_scattered_mix=True[0m
+[32m2026-05-20 14:57:32[0m | [1mINFO    [0m | [1m补Lane尝试: variant=general:浙江大学医学院附属第一医院28个原核转录组分析技术服务（委托）合同|Z|原核链特异性转录组文库|NA|NORMAL, lane_prefix=EX, pool_size=18, pool_data=1671.429G, prioritize_scattered_mix=True[0m
+[32m2026-05-20 14:57:32[0m | [1mINFO    [0m | [1m补Lane尝试: variant=full_priority, lane_prefix=EX, pool_size=164, pool_data=9845.507G, prioritize_scattered_mix=True[0m
+[32m2026-05-20 14:57:32[0m | [1mINFO    [0m | [1m全局优先级硬约束生效: stage=EX_build, 当前允许P0/P1(临检/SJ+YC)参与，暂缓较低优先级文库76个[0m
+[32m2026-05-20 14:57:32[0m | [1mINFO    [0m | [1m补Lane尝试: variant=non_clinical_priority, lane_prefix=EX, pool_size=151, pool_data=9679.607G, prioritize_scattered_mix=True[0m
+[32m2026-05-20 14:57:32[0m | [1mINFO    [0m | [1m全局优先级硬约束生效: stage=EX_build, 当前允许P0/P1(临检/SJ+YC)参与，暂缓较低优先级文库76个[0m
+[32m2026-05-20 14:57:32[0m | [1mINFO    [0m | [1m补Lane尝试: variant=non_clinical_relaxed, lane_prefix=EX, pool_size=151, pool_data=9679.607G, prioritize_scattered_mix=False[0m
+[32m2026-05-20 14:57:32[0m | [1mINFO    [0m | [1m全局优先级硬约束生效: stage=EX_build, 当前允许P0/P1(临检/SJ+YC)参与，暂缓较低优先级文库76个[0m
+[32m2026-05-20 14:57:32[0m | [1mINFO    [0m | [1m补Lane尝试: variant=other_only_relaxed, lane_prefix=EX, pool_size=76, pool_data=6119.868G, prioritize_scattered_mix=False[0m
+[32m2026-05-20 14:57:33[0m | [1mINFO    [0m | [1mLane数量提升新增Lane数: 2[0m
+[32m2026-05-20 14:57:33[0m | [1mINFO    [0m | [1m补Lane尝试: variant=manual_or_risk:YC2025年武汉序拓生物自建库PE150测序技术服务（委托）合同|S|客户-ATAC-SEQ文库|NA|SCATTERED+MANUAL_RISK+IMBALANCE, lane_prefix=RB, pool_size=5, pool_data=2100.000G, prioritize_scattered_mix=True[0m
+[32m2026-05-20 14:57:33[0m | [1mINFO    [0m | [1m补Lane尝试: variant=general:铂安诺微生物建库测序技术服务（委托）合同|Z|DNA小片段文库|NA|NORMAL, lane_prefix=RB, pool_size=21, pool_data=1950.000G, prioritize_scattered_mix=True[0m
+[32m2026-05-20 14:57:33[0m | [1mINFO    [0m | [1m补Lane尝试: variant=general:浙江大学医学院附属第一医院28个原核转录组分析技术服务（委托）合同|Z|原核链特异性转录组文库|NA|NORMAL, lane_prefix=RB, pool_size=15, pool_data=1392.857G, prioritize_scattered_mix=True[0m
+[32m2026-05-20 14:57:33[0m | [1mINFO    [0m | [1m补Lane尝试: variant=full_priority, lane_prefix=RB, pool_size=154, pool_data=8809.793G, prioritize_scattered_mix=True[0m
+[32m2026-05-20 14:57:33[0m | [1mINFO    [0m | [1m全局优先级硬约束生效: stage=RB_build, 当前允许P0/P1(临检/SJ+YC)参与，暂缓较低优先级文库66个[0m
+[32m2026-05-20 14:57:33[0m | [1mINFO    [0m | [1m补Lane尝试: variant=non_clinical_priority, lane_prefix=RB, pool_size=141, pool_data=8643.893G, prioritize_scattered_mix=True[0m
+[32m2026-05-20 14:57:33[0m | [1mINFO    [0m | [1m全局优先级硬约束生效: stage=RB_build, 当前允许P0/P1(临检/SJ+YC)参与，暂缓较低优先级文库66个[0m
+[32m2026-05-20 14:57:33[0m | [1mINFO    [0m | [1m补Lane尝试: variant=non_clinical_relaxed, lane_prefix=RB, pool_size=141, pool_data=8643.893G, prioritize_scattered_mix=False[0m
+[32m2026-05-20 14:57:33[0m | [1mINFO    [0m | [1m全局优先级硬约束生效: stage=RB_build, 当前允许P0/P1(临检/SJ+YC)参与，暂缓较低优先级文库66个[0m
+[32m2026-05-20 14:57:33[0m | [1mINFO    [0m | [1m补Lane尝试: variant=other_only_relaxed, lane_prefix=RB, pool_size=66, pool_data=5084.154G, prioritize_scattered_mix=False[0m
+[32m2026-05-20 14:57:33[0m | [1mINFO    [0m | [1m跨Lane多文库交换完成：新增1条，剩余未分配143个[0m
+[32m2026-05-20 14:57:33[0m | [1mINFO    [0m | [1mIndex校验器初始化完成（真实数据验证版本）[0m
+[32m2026-05-20 14:57:33[0m | [1mINFO    [0m | [1m成Lane校验程序初始化完成 (严格模式: True, 碱基不均衡上限: 35%, 特殊文库关键词: 9个)[0m
+[32m2026-05-20 14:57:33[0m | [1mINFO    [0m | [1mLane PKG_LANE_0002 尝试补平衡文库模板: sample_id=phix, test_no=Novaseq X Plus-PE150, index_seq=GGGGGGGGGG;ACCGAGATCT[0m
+[32m2026-05-20 14:57:33[0m | [1mINFO    [0m | [1mLane PKG_LANE_0002 平衡文库补充成功: sample_id=phix, 数据量=100.000G[0m
+[32m2026-05-20 14:57:33[0m | [1mINFO    [0m | [1mLane PKG_LANE_0003 尝试补平衡文库模板: sample_id=phix, test_no=Novaseq X Plus-PE150, index_seq=GGGGGGGGGG;ACCGAGATCT[0m
+[32m2026-05-20 14:57:33[0m | [1mINFO    [0m | [1mLane PKG_LANE_0003 平衡文库补充成功: sample_id=phix, 数据量=100.000G[0m
+[32m2026-05-20 14:57:33[0m | [1mINFO    [0m | [1mLane PKG_LANE_0004 尝试补平衡文库模板: sample_id=phix, test_no=Novaseq X Plus-PE150, index_seq=GGGGGGGGGG;ACCGAGATCT[0m
+[32m2026-05-20 14:57:33[0m | [1mINFO    [0m | [1mLane PKG_LANE_0004 平衡文库补充成功: sample_id=phix, 数据量=100.000G[0m
+[32m2026-05-20 14:57:33[0m | [1mINFO    [0m | [1mLane PKG_LANE_0005 尝试补平衡文库模板: sample_id=phix, test_no=Novaseq X Plus-PE150, index_seq=GGGGGGGGGG;ACCGAGATCT[0m
+[32m2026-05-20 14:57:33[0m | [1mINFO    [0m | [1mLane PKG_LANE_0005 平衡文库补充成功: sample_id=phix, 数据量=100.000G[0m
+[32m2026-05-20 14:57:33[0m | [1mINFO    [0m | [1mLane PKG_LANE_0006 尝试补平衡文库模板: sample_id=phix, test_no=Novaseq X Plus-PE150, index_seq=GGGGGGGGGG;ACCGAGATCT[0m
+[32m2026-05-20 14:57:33[0m | [1mINFO    [0m | [1mLane PKG_LANE_0006 平衡文库补充成功: sample_id=phix, 数据量=100.000G[0m
+[32m2026-05-20 14:57:33[0m | [1mINFO    [0m | [1mLane PKG_LANE_0007 尝试补平衡文库模板: sample_id=phix, test_no=Novaseq X Plus-PE150, index_seq=GGGGGGGGGG;ACCGAGATCT[0m
+[32m2026-05-20 14:57:33[0m | [1mINFO    [0m | [1mLane PKG_LANE_0007 平衡文库补充成功: sample_id=phix, 数据量=100.000G[0m
+[32m2026-05-20 14:57:33[0m | [1mINFO    [0m | [1mLane PKG_LANE_0008 尝试补平衡文库模板: sample_id=phix, test_no=Novaseq X Plus-PE150, index_seq=GGGGGGGGGG;ACCGAGATCT[0m
+[32m2026-05-20 14:57:33[0m | [1mINFO    [0m | [1mLane PKG_LANE_0008 平衡文库补充成功: sample_id=phix, 数据量=100.000G[0m
+[32m2026-05-20 14:57:33[0m | [1mINFO    [0m | [1mLane PKG_LANE_0009 尝试补平衡文库模板: sample_id=phix, test_no=Novaseq X Plus-PE150, index_seq=GGGGGGGGGG;ACCGAGATCT[0m
+[32m2026-05-20 14:57:33[0m | [1mINFO    [0m | [1mLane PKG_LANE_0009 平衡文库补充成功: sample_id=phix, 数据量=100.000G[0m
+[32m2026-05-20 14:57:33[0m | [1mINFO    [0m | [1mLane PKG_LANE_0001 尝试补平衡文库模板: sample_id=phix, test_no=Novaseq X Plus-PE150, index_seq=GGGGGGGGGG;ACCGAGATCT[0m
+[32m2026-05-20 14:57:33[0m | [1mINFO    [0m | [1mLane PKG_LANE_0001 平衡文库补充成功: sample_id=phix, 数据量=100.000G[0m
+[32m2026-05-20 14:57:33[0m | [1mINFO    [0m | [1mLane LS_NovaX-25B_001 尝试补平衡文库模板: sample_id=phix, test_no=Novaseq X Plus-PE150, index_seq=GGGGGGGGGG;ACCGAGATCT[0m
+[32m2026-05-20 14:57:33[0m | [1mINFO    [0m | [1mLane LS_NovaX-25B_001 平衡文库补充成功: sample_id=phix, 数据量=50.000G[0m
+[32m2026-05-20 14:57:33[0m | [1mINFO    [0m | [1mLane LS_NovaX-25B_002 尝试补平衡文库模板: sample_id=phix, test_no=Novaseq X Plus-PE150, index_seq=GGGGGGGGGG;ACCGAGATCT[0m
+[32m2026-05-20 14:57:33[0m | [1mINFO    [0m | [1mLane LS_NovaX-25B_002 平衡文库补充成功: sample_id=phix, 数据量=49.974G[0m
+[32m2026-05-20 14:57:33[0m | [1mINFO    [0m | [1m预构建Lane平衡文库前置处理完成: 需补平衡文库Lane=11，成功=11，失败移除=0，专Lane保留=0[0m
+[32m2026-05-20 14:57:33[0m | [33m[1mWARNING [0m | [33m[1mLane DL_NovaSeq X Plus_001 终态过滤淘汰: ['Lane有效数据量1037.5G(原始1037.5G+平衡0.0G)低于下限1995G，规则=tj_1595_mode_1_1_special_combo，需添加约957.5G的文库'][0m
+[32m2026-05-20 14:57:33[0m | [33m[1mWARNING [0m | [33m[1mLane DL_NovaSeq X Plus_002 终态过滤淘汰: ['Lane有效数据量1000.0G(原始1000.0G+平衡0.0G)低于下限1995G，规则=tj_1595_mode_1_1_special_combo，需添加约995.0G的文库'][0m
+[32m2026-05-20 14:57:33[0m | [1mINFO    [0m | [1m
+合并25条预构建Lane到最终结果（过滤掉2条未通过严格校验的预构建Lane）[0m
+[32m2026-05-20 14:57:33[0m | [1mINFO    [0m | [1m最终Lane总数: 32 (预构建Lane: 25, 普通Lane: 7)[0m
+[32m2026-05-20 14:57:33[0m | [1mINFO    [0m | [1m全局预拆分回滚完成: 9个原始文库因拆分子文库未全部成Lane而回滚[0m
+[32m2026-05-20 14:57:33[0m | [1mINFO    [0m | [1m检测到3.6T-NEW预消耗Lane与1.1 Lane并存，跳过最终全局优先级硬约束收口，保留已成Lane的1.1结果[0m
+[32m2026-05-20 14:57:33[0m | [1mINFO    [0m | [1m分层重组救援（大池降配）: 未分配=134个/12009.5G，每机台每阶段限 4 条[0m
+[32m2026-05-20 14:57:33[0m | [1mINFO    [0m | [1m补Lane跳过汇总: lane_prefix=MG, machine=Nova X-25B, reason_top=[严格构Lane失败x1, 同池严格失败缓存命中x1][0m
+[32m2026-05-20 14:57:33[0m | [1mINFO    [0m | [1m补Lane跳过汇总: lane_prefix=PG, machine=Nova X-25B, reason_top=[严格构Lane失败x1, 同池严格失败缓存命中x1][0m
+[32m2026-05-20 14:57:33[0m | [1mINFO    [0m | [1m补Lane尝试: variant=full_priority, lane_prefix=PG, pool_size=16, pool_data=1149.658G, prioritize_scattered_mix=True[0m
+[32m2026-05-20 14:57:33[0m | [1mINFO    [0m | [1m补Lane尝试: variant=non_clinical_relaxed, lane_prefix=PG, pool_size=16, pool_data=1149.658G, prioritize_scattered_mix=False[0m
+[32m2026-05-20 14:57:34[0m | [1mINFO    [0m | [1m补Lane跳过汇总: lane_prefix=PG, machine=Nova X-25B, reason_top=[总量500.0G低于最小门槛2074.1Gx1, 总量300.0G低于最小门槛2074.1Gx1, 总量200.0G低于最小门槛2074.1Gx1, 总量117.7G低于最小门槛985.0Gx1][0m
+[32m2026-05-20 14:57:34[0m | [1mINFO    [0m | [1m补Lane尝试: variant=full_priority, lane_prefix=RM, pool_size=125, pool_data=6159.527G, prioritize_scattered_mix=True[0m
+[32m2026-05-20 14:57:34[0m | [1mINFO    [0m | [1m全局优先级硬约束生效: stage=RM_build, 当前允许P0/P1(临检/SJ+YC)参与，暂缓较低优先级文库37个[0m
+[32m2026-05-20 14:57:34[0m | [1mINFO    [0m | [1m补Lane尝试: variant=non_clinical_priority, lane_prefix=RM, pool_size=112, pool_data=5993.627G, prioritize_scattered_mix=True[0m
+[32m2026-05-20 14:57:34[0m | [1mINFO    [0m | [1m全局优先级硬约束生效: stage=RM_build, 当前允许P0/P1(临检/SJ+YC)参与，暂缓较低优先级文库37个[0m
+[32m2026-05-20 14:57:34[0m | [1mINFO    [0m | [1m补Lane尝试: variant=non_clinical_relaxed, lane_prefix=RM, pool_size=112, pool_data=5993.627G, prioritize_scattered_mix=False[0m
+[32m2026-05-20 14:57:34[0m | [1mINFO    [0m | [1m全局优先级硬约束生效: stage=RM_build, 当前允许P0/P1(临检/SJ+YC)参与，暂缓较低优先级文库37个[0m
+[32m2026-05-20 14:57:35[0m | [1mINFO    [0m | [1m补Lane尝试: variant=other_only_relaxed, lane_prefix=RM, pool_size=37, pool_data=2433.888G, prioritize_scattered_mix=False[0m
+[32m2026-05-20 14:57:38[0m | [1mINFO    [0m | [1m补Lane跳过汇总: lane_prefix=RM, machine=Nova X-25B, reason_top=[总量16.0G低于最小门槛995.0Gx2, 总量900.0G低于最小门槛1995.0Gx1, 总量500.0G低于最小门槛2074.1Gx1, 总量300.0G低于最小门槛2074.1Gx1][0m
+[32m2026-05-20 14:57:38[0m | [1mINFO    [0m | [1m补Lane尝试: variant=full_priority, lane_prefix=GL, pool_size=41, pool_data=4493.888G, prioritize_scattered_mix=True[0m
+[32m2026-05-20 14:57:38[0m | [1mINFO    [0m | [1m全局优先级硬约束生效: stage=GL_build, 当前允许P0/P1(临检/SJ+YC)参与，暂缓较低优先级文库36个[0m
+[32m2026-05-20 14:57:38[0m | [1mINFO    [0m | [1m补Lane尝试: variant=non_clinical_relaxed, lane_prefix=GL, pool_size=41, pool_data=4493.888G, prioritize_scattered_mix=False[0m
+[32m2026-05-20 14:57:38[0m | [1mINFO    [0m | [1m全局优先级硬约束生效: stage=GL_build, 当前允许P0/P1(临检/SJ+YC)参与，暂缓较低优先级文库36个[0m
+[32m2026-05-20 14:57:38[0m | [1mINFO    [0m | [1m补Lane尝试: variant=other_only_relaxed, lane_prefix=GL, pool_size=36, pool_data=2393.888G, prioritize_scattered_mix=False[0m
+[32m2026-05-20 14:57:39[0m | [1mINFO    [0m | [1m补Lane跳过汇总: lane_prefix=GL, machine=Nova X-25B, reason_top=[总量900.0G低于最小门槛1995.0Gx1, 总量200.0G低于最小门槛2095.0Gx1, 总量100.0G低于最小门槛1995.0Gx1, 总量36.0G低于最小门槛1676.0Gx1][0m
+[32m2026-05-20 14:57:39[0m | [1mINFO    [0m | [1m终态普通尾货全局1.1 regroup成功: lane=GL_Nova X-25B_001, 机型=Nova X-25B, 文库数=18, 数据量=2015.2G[0m
+[32m2026-05-20 14:57:39[0m | [1mINFO    [0m | [1m补Lane尝试: variant=full_priority, lane_prefix=GL, pool_size=23, pool_data=2478.649G, prioritize_scattered_mix=True[0m
+[32m2026-05-20 14:57:39[0m | [1mINFO    [0m | [1m全局优先级硬约束生效: stage=GL_build, 当前允许P0/P1(临检/SJ+YC)参与，暂缓较低优先级文库18个[0m
+[32m2026-05-20 14:57:39[0m | [1mINFO    [0m | [1m补Lane尝试: variant=non_clinical_relaxed, lane_prefix=GL, pool_size=23, pool_data=2478.649G, prioritize_scattered_mix=False[0m
+[32m2026-05-20 14:57:39[0m | [1mINFO    [0m | [1m全局优先级硬约束生效: stage=GL_build, 当前允许P0/P1(临检/SJ+YC)参与，暂缓较低优先级文库18个[0m
+[32m2026-05-20 14:57:39[0m | [1mINFO    [0m | [1m补Lane跳过汇总: lane_prefix=GL, machine=Nova X-25B, reason_top=[总量10.0G低于最小门槛1995.0Gx2, 总量200.0G低于最小门槛2095.0Gx1, 总量36.0G低于最小门槛1676.0Gx1, 总量30.0G低于最小门槛1676.0Gx1][0m
+[32m2026-05-20 14:57:39[0m | [1mINFO    [0m | [1m剩余库分层重组搜索完成: 新增Lane=1 (大簇专项=0, 高约束专项=0, 专lane=0, 混排lane=0, 普通lane=1), 跳过拆分文库=9, 剩余未分配=116[0m
+[32m2026-05-20 14:57:39[0m | [33m[1mWARNING [0m | [33m[1m检测到重复Lane ID，已自动重命名: GL_Nova X-25B_010 -> GL_Nova X-25B_001[0m
+[32m2026-05-20 14:57:39[0m | [33m[1mWARNING [0m | [33m[1m检测到重复Lane ID，已自动重命名: GL_Nova X-25B_001 -> GL_Nova X-25B_002[0m
+[32m2026-05-20 14:57:39[0m | [33m[1mWARNING [0m | [33m[1m检测到重复Lane ID，已自动重命名: GL_Nova X-25B_002 -> GL_Nova X-25B_003[0m
+[32m2026-05-20 14:57:39[0m | [33m[1mWARNING [0m | [33m[1m检测到重复Lane ID，已自动重命名: GL_Nova X-25B_003 -> GL_Nova X-25B_004[0m
+[32m2026-05-20 14:57:39[0m | [33m[1mWARNING [0m | [33m[1m检测到重复Lane ID，已自动重命名: GL_Nova X-25B_004 -> GL_Nova X-25B_005[0m
+[32m2026-05-20 14:57:39[0m | [33m[1mWARNING [0m | [33m[1m检测到重复Lane ID，已自动重命名: GL_Nova X-25B_005 -> GL_Nova X-25B_006[0m
+[32m2026-05-20 14:57:39[0m | [33m[1mWARNING [0m | [33m[1m检测到重复Lane ID，已自动重命名: GL_Nova X-25B_001 -> GL_Nova X-25B_007[0m
+[32m2026-05-20 14:57:39[0m | [33m[1mWARNING [0m | [33m[1m最终收口发现重复Lane ID并已重命名: 7条[0m
+[32m2026-05-20 14:57:39[0m | [1mINFO    [0m | [1m脚本内置 Pooling 预测已停用，后续统一调用 prediction_delivery[0m
+[32m2026-05-20 14:57:39[0m | [33m[1mWARNING [0m | [33m[1mLane PKG_LANE_0002 利用率异常: 400.00% (数据量=1000.00GB, 容量=250.00GB)[0m
+[32m2026-05-20 14:57:39[0m | [33m[1mWARNING [0m | [33m[1mLane PKG_LANE_0003 利用率异常: 400.00% (数据量=1000.00GB, 容量=250.00GB)[0m
+[32m2026-05-20 14:57:39[0m | [33m[1mWARNING [0m | [33m[1mLane PKG_LANE_0004 利用率异常: 400.00% (数据量=1000.00GB, 容量=250.00GB)[0m
+[32m2026-05-20 14:57:39[0m | [33m[1mWARNING [0m | [33m[1mLane PKG_LANE_0005 利用率异常: 400.00% (数据量=1000.00GB, 容量=250.00GB)[0m
+[32m2026-05-20 14:57:39[0m | [33m[1mWARNING [0m | [33m[1mLane PKG_LANE_0006 利用率异常: 400.00% (数据量=1000.00GB, 容量=250.00GB)[0m
+[32m2026-05-20 14:57:39[0m | [33m[1mWARNING [0m | [33m[1mLane PKG_LANE_0007 利用率异常: 400.00% (数据量=1000.00GB, 容量=250.00GB)[0m
+[32m2026-05-20 14:57:39[0m | [33m[1mWARNING [0m | [33m[1mLane PKG_LANE_0008 利用率异常: 400.00% (数据量=1000.00GB, 容量=250.00GB)[0m
+[32m2026-05-20 14:57:39[0m | [33m[1mWARNING [0m | [33m[1mLane PKG_LANE_0009 利用率异常: 400.00% (数据量=1000.00GB, 容量=250.00GB)[0m
+[32m2026-05-20 14:57:39[0m | [33m[1mWARNING [0m | [33m[1mLane PKG_LANE_0001 利用率异常: 400.00% (数据量=1000.00GB, 容量=250.00GB)[0m
+[32m2026-05-20 14:57:39[0m | [33m[1mWARNING [0m | [33m[1mLane LS_NovaX-25B_001 利用率异常: 400.00% (数据量=1000.00GB, 容量=250.00GB)[0m
+[32m2026-05-20 14:57:39[0m | [33m[1mWARNING [0m | [33m[1mLane LS_NovaX-25B_002 利用率异常: 399.79% (数据量=999.47GB, 容量=250.00GB)[0m
+[32m2026-05-20 14:57:39[0m | [33m[1mWARNING [0m | [33m[1mLane GL_Nova X-25B_003 利用率异常: 231.28% (数据量=2255.00GB, 容量=975.00GB)[0m
+[32m2026-05-20 14:57:39[0m | [33m[1mWARNING [0m | [33m[1mLane GL_Nova X-25B_004 利用率异常: 230.44% (数据量=2246.80GB, 容量=975.00GB)[0m
+[32m2026-05-20 14:57:39[0m | [33m[1mWARNING [0m | [33m[1mLane GL_Nova X-25B_005 利用率异常: 223.79% (数据量=2181.97GB, 容量=975.00GB)[0m
+[32m2026-05-20 14:57:39[0m | [33m[1mWARNING [0m | [33m[1mLane GL_Nova X-25B_007 利用率异常: 206.69% (数据量=2015.24GB, 容量=975.00GB)[0m
+[32m2026-05-20 14:57:39[0m | [1mINFO    [0m | [1mIndex校验器初始化完成（真实数据验证版本）[0m
+[32m2026-05-20 14:57:39[0m | [1mINFO    [0m | [1m成Lane校验程序初始化完成 (严格模式: True, 碱基不均衡上限: 35%, 特殊文库关键词: 9个)[0m
+[32m2026-05-20 14:57:39[0m | [1mINFO    [0m | [1m排后包Lane校验通过[0m
+[32m2026-05-20 14:57:39[0m | [1mINFO    [0m | [1m排后校验通过：包Lane编号文库拆分规则满足约束[0m
+[32m2026-05-20 14:57:39[0m | [1mINFO    [0m | [1mIndex校验器初始化完成（真实数据验证版本）[0m
+[32m2026-05-20 14:57:39[0m | [1mINFO    [0m | [1m成Lane校验程序初始化完成 (严格模式: True, 碱基不均衡上限: 35%, 特殊文库关键词: 9个)[0m
+[32m2026-05-20 14:57:39[0m | [1mINFO    [0m | [1m平衡文库后处理完成: 需补平衡文库Lane=11，成功=11，失败移除=0，专Lane保留=0，回收文库=0[0m
+[32m2026-05-20 14:57:39[0m | [1mINFO    [0m | [1m排后包Lane校验通过[0m
+[32m2026-05-20 14:57:39[0m | [1mINFO    [0m | [1mIndex校验器初始化完成（真实数据验证版本）[0m
+[32m2026-05-20 14:57:39[0m | [1mINFO    [0m | [1m成Lane校验程序初始化完成 (严格模式: True, 碱基不均衡上限: 35%, 特殊文库关键词: 9个)[0m
+[32m2026-05-20 14:57:39[0m | [1mINFO    [0m | [1m排后包Lane校验通过[0m
+[32m2026-05-20 14:57:39[0m | [1mINFO    [0m | [1m排后校验通过：包Lane编号文库拆分规则满足约束[0m
+[32m2026-05-20 14:57:40[0m | [33m[1mWARNING [0m | [33m[1mLane GL_Nova X-25B_006 终态过滤淘汰: 含按规则应拆分文库但不是3.6T-NEW模式，应拆分文库只能排入3.6T-NEW Lane[0m
+[32m2026-05-20 14:57:40[0m | [33m[1mWARNING [0m | [33m[1mLane GL_Nova X-25B_016 终态过滤淘汰: 含按规则应拆分文库但不是3.6T-NEW模式，应拆分文库只能排入3.6T-NEW Lane[0m
+[32m2026-05-20 14:57:40[0m | [33m[1mWARNING [0m | [33m[1mLane GL_Nova X-25B_018 终态过滤淘汰: 含按规则应拆分文库但不是3.6T-NEW模式，应拆分文库只能排入3.6T-NEW Lane[0m
+[32m2026-05-20 14:57:40[0m | [33m[1mWARNING [0m | [33m[1mLane EX_Nova X-25B_007 终态过滤淘汰: ['客户文库占比59.5%不符合规则(应<=50%或=100%)', 'Lane有效数据量347.3G(原始347.3G+平衡0.0G)低于下限995G，规则=tj_1595_standard_pe150_25b，需添加约647.7G的文库'][0m
+[32m2026-05-20 14:57:40[0m | [33m[1mWARNING [0m | [33m[1mLane EX_Nova X-25B_013 终态过滤淘汰: ['AI Lane EX_Nova X-25B_013 Index对数不足: 当前1对, 要求>=5对'][0m
+[32m2026-05-20 14:57:40[0m | [33m[1mWARNING [0m | [33m[1mLane RB_Nova X-25B_007 终态过滤淘汰: ['Lane有效数据量416.3G(原始416.3G+平衡0.0G)低于下限995G，规则=tj_1595_standard_pe150_25b，需添加约578.7G的文库'][0m
+[32m2026-05-20 14:57:40[0m | [1mINFO    [0m | [1m终态淘汰前修复Lane EX_Nova X-25B_013: 补入5个未分配文库，数据量=1068.6G[0m
+[32m2026-05-20 14:57:40[0m | [33m[1mWARNING [0m | [33m[1mLane内发现 1 个Index冲突[0m
+[32m2026-05-20 14:57:40[0m | [1mINFO    [0m | [1m终态淘汰前修复完成: 尝试6条，修复1条，补入5个文库[0m
+[32m2026-05-20 14:57:40[0m | [33m[1mWARNING [0m | [33m[1mLane GL_Nova X-25B_006 终态过滤淘汰: 含按规则应拆分文库但不是3.6T-NEW模式，应拆分文库只能排入3.6T-NEW Lane[0m
+[32m2026-05-20 14:57:40[0m | [33m[1mWARNING [0m | [33m[1mLane GL_Nova X-25B_016 终态过滤淘汰: 含按规则应拆分文库但不是3.6T-NEW模式，应拆分文库只能排入3.6T-NEW Lane[0m
+[32m2026-05-20 14:57:40[0m | [33m[1mWARNING [0m | [33m[1mLane GL_Nova X-25B_018 终态过滤淘汰: 含按规则应拆分文库但不是3.6T-NEW模式，应拆分文库只能排入3.6T-NEW Lane[0m
+[32m2026-05-20 14:57:40[0m | [33m[1mWARNING [0m | [33m[1mLane EX_Nova X-25B_007 终态过滤淘汰: ['客户文库占比59.5%不符合规则(应<=50%或=100%)', 'Lane有效数据量347.3G(原始347.3G+平衡0.0G)低于下限995G，规则=tj_1595_standard_pe150_25b，需添加约647.7G的文库'][0m
+[32m2026-05-20 14:57:40[0m | [33m[1mWARNING [0m | [33m[1mLane RB_Nova X-25B_007 终态过滤淘汰: ['Lane有效数据量416.3G(原始416.3G+平衡0.0G)低于下限995G，规则=tj_1595_standard_pe150_25b，需添加约578.7G的文库'][0m
+[32m2026-05-20 14:57:40[0m | [33m[1mWARNING [0m | [33m[1m终态总复核淘汰Lane GL_Nova X-25B_006: 回收15个原始文库到未分配池[0m
+[32m2026-05-20 14:57:40[0m | [33m[1mWARNING [0m | [33m[1m终态总复核淘汰Lane GL_Nova X-25B_016: 回收29个原始文库到未分配池[0m
+[32m2026-05-20 14:57:40[0m | [33m[1mWARNING [0m | [33m[1m终态总复核淘汰Lane GL_Nova X-25B_018: 回收116个原始文库到未分配池[0m
+[32m2026-05-20 14:57:40[0m | [33m[1mWARNING [0m | [33m[1m终态总复核淘汰Lane EX_Nova X-25B_007: 回收9个原始文库到未分配池[0m
+[32m2026-05-20 14:57:40[0m | [33m[1mWARNING [0m | [33m[1m终态总复核淘汰Lane RB_Nova X-25B_007: 回收4个原始文库到未分配池[0m
+[32m2026-05-20 14:57:40[0m | [1mINFO    [0m | [1m终态总复核完成: 淘汰5条不合规非包Lane，回收173个文库到未分配池，当前有效Lane=28，未分配=284[0m
+[32m2026-05-20 14:57:40[0m | [33m[1mWARNING [0m | [33m[1m终态总复核: 淘汰5条不合规Lane，回收173个文库[0m
+[32m2026-05-20 14:57:40[0m | [1mINFO    [0m | [1m补Lane跳过汇总: lane_prefix=MG, machine=Nova X-25B, reason_top=[严格构Lane失败x1, 同池严格失败缓存命中x1][0m
+[32m2026-05-20 14:57:40[0m | [1mINFO    [0m | [1m补Lane尝试: variant=manual_or_risk:（极速周期）清华项目1000个自建库测序+2000个RNA文库测序技术服务（委托）合同|S|客户-真核普通转录组文库|NA|MANUAL_RISK, lane_prefix=MG, pool_size=13, pool_data=1636.500G, prioritize_scattered_mix=True[0m
+[32m2026-05-20 14:57:40[0m | [1mINFO    [0m | [1m补Lane尝试: variant=non_clinical_relaxed, lane_prefix=MG, pool_size=13, pool_data=1636.500G, prioritize_scattered_mix=False[0m
+[32m2026-05-20 14:57:40[0m | [1mINFO    [0m | [1m补Lane跳过汇总: lane_prefix=PG, machine=Nova X-25B, reason_top=[严格构Lane失败x1, 同池严格失败缓存命中x1][0m
+[32m2026-05-20 14:57:40[0m | [1mINFO    [0m | [1m补Lane跳过汇总: lane_prefix=PG, machine=Nova X-25B, reason_top=[总量500.0G低于最小门槛2074.1Gx1, 总量300.0G低于最小门槛2074.1Gx1, 总量200.0G低于最小门槛2074.1Gx1, 总量117.7G低于最小门槛985.0Gx1][0m
+[32m2026-05-20 14:57:41[0m | [1mINFO    [0m | [1m补Lane尝试: variant=full_priority, lane_prefix=RM, pool_size=266, pool_data=6960.560G, prioritize_scattered_mix=True[0m
+[32m2026-05-20 14:57:41[0m | [1mINFO    [0m | [1m全局优先级硬约束生效: stage=RM_build, 当前允许P0/P1(临检/SJ+YC)参与，暂缓较低优先级文库42个[0m
+[32m2026-05-20 14:57:41[0m | [1mINFO    [0m | [1m补Lane尝试: variant=non_clinical_priority, lane_prefix=RM, pool_size=183, pool_data=6425.660G, prioritize_scattered_mix=True[0m
+[32m2026-05-20 14:57:41[0m | [1mINFO    [0m | [1m全局优先级硬约束生效: stage=RM_build, 当前允许P0/P1(临检/SJ+YC)参与，暂缓较低优先级文库42个[0m
+[32m2026-05-20 14:57:41[0m | [1mINFO    [0m | [1m补Lane尝试: variant=non_clinical_relaxed, lane_prefix=RM, pool_size=183, pool_data=6425.660G, prioritize_scattered_mix=False[0m
+[32m2026-05-20 14:57:41[0m | [1mINFO    [0m | [1m全局优先级硬约束生效: stage=RM_build, 当前允许P0/P1(临检/SJ+YC)参与，暂缓较低优先级文库42个[0m
+[32m2026-05-20 14:57:45[0m | [1mINFO    [0m | [1m补Lane跳过汇总: lane_prefix=RM, machine=Nova X-25B, reason_top=[总量6.0G低于最小门槛2095.0Gx3, 总量80.0G低于最小门槛995.0Gx2, 总量20.0G低于最小门槛2095.0Gx2, 总量0.8G低于最小门槛2095.0Gx2][0m
+[32m2026-05-20 14:57:45[0m | [1mINFO    [0m | [1m补Lane尝试: variant=full_priority, lane_prefix=GL, pool_size=37, pool_data=3838.986G, prioritize_scattered_mix=True[0m
+[32m2026-05-20 14:57:45[0m | [1mINFO    [0m | [1m全局优先级硬约束生效: stage=GL_build, 当前允许P0/P1(临检/SJ+YC)参与，暂缓较低优先级文库31个[0m
+[32m2026-05-20 14:57:45[0m | [1mINFO    [0m | [1m补Lane尝试: variant=non_clinical_priority, lane_prefix=GL, pool_size=36, pool_data=3716.986G, prioritize_scattered_mix=True[0m
+[32m2026-05-20 14:57:45[0m | [1mINFO    [0m | [1m全局优先级硬约束生效: stage=GL_build, 当前允许P0/P1(临检/SJ+YC)参与，暂缓较低优先级文库31个[0m
+[32m2026-05-20 14:57:45[0m | [1mINFO    [0m | [1m补Lane尝试: variant=non_clinical_relaxed, lane_prefix=GL, pool_size=36, pool_data=3716.986G, prioritize_scattered_mix=False[0m
+[32m2026-05-20 14:57:45[0m | [1mINFO    [0m | [1m全局优先级硬约束生效: stage=GL_build, 当前允许P0/P1(临检/SJ+YC)参与，暂缓较低优先级文库31个[0m
+[32m2026-05-20 14:57:45[0m | [1mINFO    [0m | [1m补Lane跳过汇总: lane_prefix=GL, machine=Nova X-25B, reason_top=[总量6.0G低于最小门槛2095.0Gx2, 总量10.0G低于最小门槛1995.0Gx2, 总量600.0G低于最小门槛2095.0Gx1, 总量400.0G低于最小门槛2095.0Gx1][0m
+[32m2026-05-20 14:57:46[0m | [1mINFO    [0m | [1m补Lane尝试: variant=cluster_fast_path, lane_prefix=OG, pool_size=5, pool_data=1000.000G, prioritize_scattered_mix=False[0m
+[32m2026-05-20 14:57:46[0m | [1mINFO    [0m | [1m终态回收池分层重组补Lane完成: 新增Lane=2 (大簇专项=1, 高约束专项=0, 混排lane=0, 普通lane=1), 跳过拆分规则文库=8, 剩余未分配=269[0m
+[32m2026-05-20 14:57:47[0m | [1mINFO    [0m | [1m终态全局3.6跨机型混排补Lane成功: 承载机型=Nova X-25B, 新增Lane=8, 使用原始/补料文库=258，剩余候选=11[0m
+[32m2026-05-20 14:57:47[0m | [1mINFO    [0m | [1m终态全局3.6混排增量完成: 新增Lane=8，使用拆分原始文库=8，使用普通补料文库=250，剩余未分配=11[0m
+[32m2026-05-20 14:57:47[0m | [1mINFO    [0m | [1m终态文库类型碱基不均专Lane未成Lane: 文库类型=客户-ATAC-seq文库, 机型=Nova X-25B, 剩余文库=5, 剩余数据量=2100.0G, reason=no_valid_dedicated_imbalance_subset(best_shortage=0.0G,best_index_pairs=4, validation_top=[]); g53_g54_fill=no_base_selection_for_g53_g54[0m
+[32m2026-05-20 14:57:47[0m | [1mINFO    [0m | [1m终态文库类型专池未成Lane: 文库类型=客户-ATAC-seq文库, 机型=Nova X-25B, 模式=3.6T-NEW, 剩余文库=5, 剩余数据量=2100.0G, reason=no_mode_eligible_libraries[0m
+[32m2026-05-20 14:57:47[0m | [1mINFO    [0m | [1m终态文库类型专池未成Lane: 文库类型=微生物常规小片段文库, 机型=NovaSeq X Plus, 模式=1.1, 剩余文库=1, 剩余数据量=200.0G, reason=hard_skip_total_below_min(total=200.0G,min=2095.0G)[0m
+[32m2026-05-20 14:57:47[0m | [1mINFO    [0m | [1m终态文库类型专池未成Lane: 文库类型=微生物常规小片段文库, 机型=NovaSeq X Plus, 模式=3.6T-NEW, 剩余文库=1, 剩余数据量=200.0G, reason=no_mode_eligible_libraries[0m
+[32m2026-05-20 14:57:47[0m | [1mINFO    [0m | [1m终态文库类型专池未成Lane: 文库类型=全基因组文库, 机型=Nova X-25B, 模式=1.1, 剩余文库=1, 剩余数据量=122.0G, reason=hard_skip_total_below_min(total=122.0G,min=2095.0G)[0m
+[32m2026-05-20 14:57:47[0m | [1mINFO    [0m | [1m终态文库类型专池未成Lane: 文库类型=全基因组文库, 机型=Nova X-25B, 模式=3.6T-NEW, 剩余文库=1, 剩余数据量=122.0G, reason=no_mode_eligible_libraries[0m
+[32m2026-05-20 14:57:47[0m | [1mINFO    [0m | [1m终态文库类型专池未成Lane: 文库类型=客户-Hi-C文库, 机型=Nova X-25B, 模式=1.1, 剩余文库=1, 剩余数据量=120.0G, reason=hard_skip_total_below_min(total=120.0G,min=2095.0G)[0m
+[32m2026-05-20 14:57:47[0m | [1mINFO    [0m | [1m终态文库类型专池未成Lane: 文库类型=客户-Hi-C文库, 机型=Nova X-25B, 模式=3.6T-NEW, 剩余文库=1, 剩余数据量=120.0G, reason=no_mode_eligible_libraries[0m
+[32m2026-05-20 14:57:47[0m | [1mINFO    [0m | [1m终态文库类型碱基不均专Lane未成Lane: 文库类型=10X转录组-3'文库, 机型=NovaSeq X Plus, 剩余文库=3, 剩余数据量=22.3G, reason=hard_skip_total_below_min(total=22.3G,min=1995.0G); g53_g54_fill=no_valid_g53_g54_fill_subset(best_total=0.0G,best_index_pairs=0, validation_top=[])[0m
+[32m2026-05-20 14:57:47[0m | [1mINFO    [0m | [1m终态文库类型专池未成Lane: 文库类型=10X转录组-3'文库, 机型=NovaSeq X Plus, 模式=3.6T-NEW, 剩余文库=3, 剩余数据量=22.3G, reason=hard_skip_total_below_min(total=22.3G,min=970.0G)[0m
+[32m2026-05-20 14:57:47[0m | [1mINFO    [0m | [1m终态文库类型专池增量未新增Lane: 跳过拆分规则文库=0，跳过不支持机型=0，剩余未分配=11[0m
+[32m2026-05-20 14:57:47[0m | [1mINFO    [0m | [1mIndex校验器初始化完成（真实数据验证版本）[0m
+[32m2026-05-20 14:57:47[0m | [1mINFO    [0m | [1m成Lane校验程序初始化完成 (严格模式: True, 碱基不均衡上限: 35%, 特殊文库关键词: 9个)[0m
+[32m2026-05-20 14:57:47[0m | [1mINFO    [0m | [1mIndex校验器初始化完成（真实数据验证版本）[0m
+[32m2026-05-20 14:57:47[0m | [1mINFO    [0m | [1m成Lane校验程序初始化完成 (严格模式: True, 碱基不均衡上限: 35%, 特殊文库关键词: 9个)[0m
+[32m2026-05-20 14:57:47[0m | [1mINFO    [0m | [1m终态增量Lane平衡文库后处理完成: 需补平衡文库Lane=11，成功=11，失败移除=0，专Lane保留=0，回收文库=0[0m
+[32m2026-05-20 14:57:47[0m | [1mINFO    [0m | [1marrange 收集排机结果，用于后续 prediction_delivery 预测[0m
+[32m2026-05-20 14:57:47[0m | [33m[1mWARNING [0m | [33m[1m排机规则映射文件不存在，跳过显式排机规则解析: /data/work/yuyongpeng/liblane_v2_deepseek/paiji_complete2/merge_deal/config[0m
+[32m2026-05-20 14:57:47[0m | [1mINFO    [0m | [1marrange Lane PKG_LANE_0002 排机浓度规则命中: no_loading_concentration_rule_matched, lsjnd=[0m
+[32m2026-05-20 14:57:47[0m | [1mINFO    [0m | [1marrange Lane PKG_LANE_0002 输出规则命中: package_lane_capacity, lsjfs=25B, lcxms=LANE SEQ[0m
+[32m2026-05-20 14:57:47[0m | [1mINFO    [0m | [1marrange Lane PKG_LANE_0002 显式排机规则: P7P5[0m
+[32m2026-05-20 14:57:47[0m | [1mINFO    [0m | [1marrange Lane PKG_LANE_0003 排机浓度规则命中: no_loading_concentration_rule_matched, lsjnd=[0m
+[32m2026-05-20 14:57:47[0m | [1mINFO    [0m | [1marrange Lane PKG_LANE_0003 输出规则命中: package_lane_capacity, lsjfs=25B, lcxms=LANE SEQ[0m
+[32m2026-05-20 14:57:47[0m | [1mINFO    [0m | [1marrange Lane PKG_LANE_0003 显式排机规则: P7P5[0m
+[32m2026-05-20 14:57:47[0m | [1mINFO    [0m | [1marrange Lane PKG_LANE_0004 排机浓度规则命中: no_loading_concentration_rule_matched, lsjnd=[0m
+[32m2026-05-20 14:57:47[0m | [1mINFO    [0m | [1marrange Lane PKG_LANE_0004 输出规则命中: package_lane_capacity, lsjfs=25B, lcxms=LANE SEQ[0m
+[32m2026-05-20 14:57:47[0m | [1mINFO    [0m | [1marrange Lane PKG_LANE_0004 显式排机规则: P7P5[0m
+[32m2026-05-20 14:57:47[0m | [1mINFO    [0m | [1marrange Lane PKG_LANE_0005 排机浓度规则命中: no_loading_concentration_rule_matched, lsjnd=[0m
+[32m2026-05-20 14:57:47[0m | [1mINFO    [0m | [1marrange Lane PKG_LANE_0005 输出规则命中: package_lane_capacity, lsjfs=25B, lcxms=LANE SEQ[0m
+[32m2026-05-20 14:57:47[0m | [1mINFO    [0m | [1marrange Lane PKG_LANE_0005 显式排机规则: P7P5[0m
+[32m2026-05-20 14:57:47[0m | [1mINFO    [0m | [1marrange Lane PKG_LANE_0006 排机浓度规则命中: no_loading_concentration_rule_matched, lsjnd=[0m
+[32m2026-05-20 14:57:47[0m | [1mINFO    [0m | [1marrange Lane PKG_LANE_0006 输出规则命中: package_lane_capacity, lsjfs=25B, lcxms=LANE SEQ[0m
+[32m2026-05-20 14:57:47[0m | [1mINFO    [0m | [1marrange Lane PKG_LANE_0006 显式排机规则: P7P5[0m
+[32m2026-05-20 14:57:47[0m | [1mINFO    [0m | [1marrange Lane PKG_LANE_0007 排机浓度规则命中: no_loading_concentration_rule_matched, lsjnd=[0m
+[32m2026-05-20 14:57:47[0m | [1mINFO    [0m | [1marrange Lane PKG_LANE_0007 输出规则命中: package_lane_capacity, lsjfs=25B, lcxms=LANE SEQ[0m
+[32m2026-05-20 14:57:47[0m | [1mINFO    [0m | [1marrange Lane PKG_LANE_0007 显式排机规则: P7P5[0m
+[32m2026-05-20 14:57:47[0m | [1mINFO    [0m | [1marrange Lane PKG_LANE_0008 排机浓度规则命中: no_loading_concentration_rule_matched, lsjnd=[0m
+[32m2026-05-20 14:57:47[0m | [1mINFO    [0m | [1marrange Lane PKG_LANE_0008 输出规则命中: package_lane_capacity, lsjfs=25B, lcxms=LANE SEQ[0m
+[32m2026-05-20 14:57:47[0m | [1mINFO    [0m | [1marrange Lane PKG_LANE_0008 显式排机规则: P7P5[0m
+[32m2026-05-20 14:57:47[0m | [1mINFO    [0m | [1marrange Lane PKG_LANE_0009 排机浓度规则命中: no_loading_concentration_rule_matched, lsjnd=[0m
+[32m2026-05-20 14:57:47[0m | [1mINFO    [0m | [1marrange Lane PKG_LANE_0009 输出规则命中: package_lane_capacity, lsjfs=25B, lcxms=LANE SEQ[0m
+[32m2026-05-20 14:57:47[0m | [1mINFO    [0m | [1marrange Lane PKG_LANE_0009 显式排机规则: P7P5[0m
+[32m2026-05-20 14:57:47[0m | [1mINFO    [0m | [1marrange Lane PKG_LANE_0001 排机浓度规则命中: 10_plus_24_or_atac_1_9, lsjnd=1.900[0m
+[32m2026-05-20 14:57:47[0m | [1mINFO    [0m | [1marrange Lane PKG_LANE_0001 输出规则命中: fallback_machine_capacity, lsjfs=25B, lcxms=[0m
+[32m2026-05-20 14:57:47[0m | [1mINFO    [0m | [1marrange Lane PKG_LANE_0001 显式排机规则: P7P5[0m
+[32m2026-05-20 14:57:47[0m | [1mINFO    [0m | [1marrange Lane LS_NovaX-25B_001 排机浓度规则命中: 10_plus_24_or_atac_1_9, lsjnd=1.900[0m
+[32m2026-05-20 14:57:47[0m | [1mINFO    [0m | [1marrange Lane LS_NovaX-25B_001 输出规则命中: tj_1595_10_plus_24_lane_seq, lsjfs=25B, lcxms=Lane seq[0m
+[32m2026-05-20 14:57:47[0m | [1mINFO    [0m | [1marrange Lane LS_NovaX-25B_001 显式排机规则: P7P5[0m
+[32m2026-05-20 14:57:47[0m | [1mINFO    [0m | [1marrange Lane LS_NovaX-25B_002 排机浓度规则命中: 10_plus_24_or_atac_1_9, lsjnd=1.900[0m
+[32m2026-05-20 14:57:47[0m | [1mINFO    [0m | [1marrange Lane LS_NovaX-25B_002 输出规则命中: tj_1595_10_plus_24_lane_seq, lsjfs=25B, lcxms=Lane seq[0m
+[32m2026-05-20 14:57:47[0m | [1mINFO    [0m | [1marrange Lane LS_NovaX-25B_002 显式排机规则: P7P5[0m
+[32m2026-05-20 14:57:47[0m | [1mINFO    [0m | [1marrange Lane GL_Nova X-25B_045 排机浓度规则命中: clinical_data_over_100g_2_3, lsjnd=2.300[0m
+[32m2026-05-20 14:57:47[0m | [1mINFO    [0m | [1marrange Lane GL_Nova X-25B_045 输出规则命中: tj_1595_standard_pe150_25b, lsjfs=25B, lcxms=3.6T-NEW[0m
+[32m2026-05-20 14:57:47[0m | [1mINFO    [0m | [1marrange Lane GL_Nova X-25B_045 显式排机规则: P7P5[0m
+[32m2026-05-20 14:57:47[0m | [1mINFO    [0m | [1marrange Lane GL_Nova X-25B_010 排机浓度规则命中: clinical_data_over_100g_2_3, lsjnd=2.300[0m
+[32m2026-05-20 14:57:47[0m | [1mINFO    [0m | [1marrange Lane GL_Nova X-25B_010 输出规则命中: tj_1595_standard_pe150_25b, lsjfs=25B, lcxms=3.6T-NEW[0m
+[32m2026-05-20 14:57:47[0m | [1mINFO    [0m | [1marrange Lane GL_Nova X-25B_010 显式排机规则: P7P5[0m
+[32m2026-05-20 14:57:47[0m | [1mINFO    [0m | [1marrange Lane GL_Nova X-25B_001 排机浓度规则命中: clinical_data_over_100g_2_3, lsjnd=2.300[0m
+[32m2026-05-20 14:57:47[0m | [1mINFO    [0m | [1marrange Lane GL_Nova X-25B_001 输出规则命中: tj_1595_standard_pe150_25b, lsjfs=25B, lcxms=3.6T-NEW[0m
+[32m2026-05-20 14:57:47[0m | [1mINFO    [0m | [1marrange Lane GL_Nova X-25B_001 显式排机规则: P7P5[0m
+[32m2026-05-20 14:57:47[0m | [1mINFO    [0m | [1marrange Lane GL_NovaSeq X Plus_001 排机浓度规则命中: no_loading_concentration_rule_matched, lsjnd=[0m
+[32m2026-05-20 14:57:47[0m | [1mINFO    [0m | [1marrange Lane GL_NovaSeq X Plus_001 输出规则命中: tj_1595_mode_1_1, lsjfs=25B, lcxms=1.1[0m
+[32m2026-05-20 14:57:47[0m | [1mINFO    [0m | [1marrange Lane GL_NovaSeq X Plus_001 显式排机规则: P7P5[0m
+[32m2026-05-20 14:57:47[0m | [1mINFO    [0m | [1marrange Lane GL_NovaSeq X Plus_002 排机浓度规则命中: no_loading_concentration_rule_matched, lsjnd=[0m
+[32m2026-05-20 14:57:47[0m | [1mINFO    [0m | [1marrange Lane GL_NovaSeq X Plus_002 输出规则命中: tj_1595_mode_1_1, lsjfs=25B, lcxms=1.1[0m
+[32m2026-05-20 14:57:47[0m | [1mINFO    [0m | [1marrange Lane GL_NovaSeq X Plus_002 显式排机规则: P7P5[0m
+[32m2026-05-20 14:57:47[0m | [1mINFO    [0m | [1marrange Lane GL_NovaSeq X Plus_003 排机浓度规则命中: no_loading_concentration_rule_matched, lsjnd=[0m
+[32m2026-05-20 14:57:47[0m | [1mINFO    [0m | [1marrange Lane GL_NovaSeq X Plus_003 输出规则命中: tj_1595_mode_1_1, lsjfs=25B, lcxms=1.1[0m
+[32m2026-05-20 14:57:47[0m | [1mINFO    [0m | [1marrange Lane GL_NovaSeq X Plus_003 显式排机规则: P7P5[0m
+[32m2026-05-20 14:57:47[0m | [1mINFO    [0m | [1marrange Lane GL_NovaSeq X Plus_004 排机浓度规则命中: no_loading_concentration_rule_matched, lsjnd=[0m
+[32m2026-05-20 14:57:47[0m | [1mINFO    [0m | [1marrange Lane GL_NovaSeq X Plus_004 输出规则命中: tj_1595_mode_1_1, lsjfs=25B, lcxms=1.1[0m
+[32m2026-05-20 14:57:47[0m | [1mINFO    [0m | [1marrange Lane GL_NovaSeq X Plus_004 显式排机规则: P7P5[0m
+[32m2026-05-20 14:57:47[0m | [1mINFO    [0m | [1marrange Lane GL_NovaSeq X Plus_005 排机浓度规则命中: no_loading_concentration_rule_matched, lsjnd=[0m
+[32m2026-05-20 14:57:47[0m | [1mINFO    [0m | [1marrange Lane GL_NovaSeq X Plus_005 输出规则命中: tj_1595_mode_1_1, lsjfs=25B, lcxms=1.1[0m
+[32m2026-05-20 14:57:47[0m | [1mINFO    [0m | [1marrange Lane GL_NovaSeq X Plus_005 显式排机规则: P7P5[0m
+[32m2026-05-20 14:57:47[0m | [1mINFO    [0m | [1marrange Lane GL_NovaSeq X Plus_006 排机浓度规则命中: no_loading_concentration_rule_matched, lsjnd=[0m
+[32m2026-05-20 14:57:47[0m | [1mINFO    [0m | [1marrange Lane GL_NovaSeq X Plus_006 输出规则命中: tj_1595_mode_1_1, lsjfs=25B, lcxms=1.1[0m
+[32m2026-05-20 14:57:47[0m | [1mINFO    [0m | [1marrange Lane GL_NovaSeq X Plus_006 显式排机规则: P7P5[0m
+[32m2026-05-20 14:57:47[0m | [1mINFO    [0m | [1marrange Lane GL_NovaSeq X Plus_007 排机浓度规则命中: no_loading_concentration_rule_matched, lsjnd=[0m
+[32m2026-05-20 14:57:47[0m | [1mINFO    [0m | [1marrange Lane GL_NovaSeq X Plus_007 输出规则命中: tj_1595_mode_1_1, lsjfs=25B, lcxms=1.1[0m
+[32m2026-05-20 14:57:47[0m | [1mINFO    [0m | [1marrange Lane GL_NovaSeq X Plus_007 显式排机规则: P7P5[0m
+[32m2026-05-20 14:57:47[0m | [1mINFO    [0m | [1marrange Lane GL_Nova X-25B_002 排机浓度规则命中: no_loading_concentration_rule_matched, lsjnd=[0m
+[32m2026-05-20 14:57:47[0m | [1mINFO    [0m | [1marrange Lane GL_Nova X-25B_002 输出规则命中: tj_1595_mode_1_1, lsjfs=25B, lcxms=1.1[0m
+[32m2026-05-20 14:57:47[0m | [1mINFO    [0m | [1marrange Lane GL_Nova X-25B_002 显式排机规则: P7P5[0m
+[32m2026-05-20 14:57:47[0m | [1mINFO    [0m | [1marrange Lane GL_Nova X-25B_003 排机浓度规则命中: no_loading_concentration_rule_matched, lsjnd=[0m
+[32m2026-05-20 14:57:47[0m | [1mINFO    [0m | [1marrange Lane GL_Nova X-25B_003 输出规则命中: tj_1595_mode_1_1, lsjfs=25B, lcxms=1.1[0m
+[32m2026-05-20 14:57:47[0m | [1mINFO    [0m | [1marrange Lane GL_Nova X-25B_003 显式排机规则: P7P5[0m
+[32m2026-05-20 14:57:47[0m | [1mINFO    [0m | [1marrange Lane GL_Nova X-25B_004 排机浓度规则命中: no_loading_concentration_rule_matched, lsjnd=[0m
+[32m2026-05-20 14:57:47[0m | [1mINFO    [0m | [1marrange Lane GL_Nova X-25B_004 输出规则命中: tj_1595_mode_1_1, lsjfs=25B, lcxms=1.1[0m
+[32m2026-05-20 14:57:47[0m | [1mINFO    [0m | [1marrange Lane GL_Nova X-25B_004 显式排机规则: P7P5[0m
+[32m2026-05-20 14:57:47[0m | [1mINFO    [0m | [1marrange Lane GL_Nova X-25B_005 排机浓度规则命中: no_loading_concentration_rule_matched, lsjnd=[0m
+[32m2026-05-20 14:57:47[0m | [1mINFO    [0m | [1marrange Lane GL_Nova X-25B_005 输出规则命中: tj_1595_mode_1_1, lsjfs=25B, lcxms=1.1[0m
+[32m2026-05-20 14:57:47[0m | [1mINFO    [0m | [1marrange Lane GL_Nova X-25B_005 显式排机规则: P7P5[0m
+[32m2026-05-20 14:57:47[0m | [1mINFO    [0m | [1marrange Lane DL_NovaSeq X Plus_001 排机浓度规则命中: special_10x_combo_group_b_non_customer_1_78, lsjnd=1.780[0m
+[32m2026-05-20 14:57:47[0m | [1mINFO    [0m | [1marrange Lane DL_NovaSeq X Plus_001 输出规则命中: tj_1595_special_combo_36t, lsjfs=25B, lcxms=3.6T-NEW[0m
+[32m2026-05-20 14:57:47[0m | [1mINFO    [0m | [1marrange Lane DL_NovaSeq X Plus_001 显式排机规则: P7P5[0m
+[32m2026-05-20 14:57:47[0m | [1mINFO    [0m | [1marrange Lane EX_Nova X-25B_013 排机浓度规则命中: no_loading_concentration_rule_matched, lsjnd=[0m
+[32m2026-05-20 14:57:47[0m | [1mINFO    [0m | [1marrange Lane EX_Nova X-25B_013 输出规则命中: tj_1595_standard_pe150_25b, lsjfs=25B, lcxms=3.6T-NEW[0m
+[32m2026-05-20 14:57:47[0m | [1mINFO    [0m | [1marrange Lane EX_Nova X-25B_013 显式排机规则: P7P5[0m
+[32m2026-05-20 14:57:47[0m | [1mINFO    [0m | [1marrange Lane GL_Nova X-25B_007 排机浓度规则命中: special_10x_combo_group_b_non_customer_1_78, lsjnd=1.780[0m
+[32m2026-05-20 14:57:47[0m | [1mINFO    [0m | [1marrange Lane GL_Nova X-25B_007 输出规则命中: tj_1595_mode_1_1_special_combo, lsjfs=25B, lcxms=1.1[0m
+[32m2026-05-20 14:57:47[0m | [1mINFO    [0m | [1marrange Lane GL_Nova X-25B_007 显式排机规则: P7P5[0m
+[32m2026-05-20 14:57:47[0m | [1mINFO    [0m | [1marrange Lane MG_Nova X-25B_002 排机浓度规则命中: no_loading_concentration_rule_matched, lsjnd=[0m
+[32m2026-05-20 14:57:47[0m | [1mINFO    [0m | [1marrange Lane MG_Nova X-25B_002 输出规则命中: tj_1595_standard_pe150_25b, lsjfs=25B, lcxms=3.6T-NEW[0m
+[32m2026-05-20 14:57:47[0m | [1mINFO    [0m | [1marrange Lane MG_Nova X-25B_002 显式排机规则: P7P5[0m
+[32m2026-05-20 14:57:47[0m | [1mINFO    [0m | [1marrange Lane OG_Nova X-25B_001 排机浓度规则命中: no_loading_concentration_rule_matched, lsjnd=[0m
+[32m2026-05-20 14:57:47[0m | [1mINFO    [0m | [1marrange Lane OG_Nova X-25B_001 输出规则命中: tj_1595_standard_pe150_25b, lsjfs=25B, lcxms=3.6T-NEW[0m
+[32m2026-05-20 14:57:47[0m | [1mINFO    [0m | [1marrange Lane OG_Nova X-25B_001 显式排机规则: P7P5[0m
+[32m2026-05-20 14:57:47[0m | [1mINFO    [0m | [1marrange Lane GM_Nova X-25B_001 排机浓度规则命中: clinical_data_over_100g_2_3, lsjnd=2.300[0m
+[32m2026-05-20 14:57:47[0m | [1mINFO    [0m | [1marrange Lane GM_Nova X-25B_001 输出规则命中: tj_1595_standard_pe150_25b, lsjfs=25B, lcxms=3.6T-NEW[0m
+[32m2026-05-20 14:57:47[0m | [1mINFO    [0m | [1marrange Lane GM_Nova X-25B_001 显式排机规则: P7P5[0m
+[32m2026-05-20 14:57:47[0m | [1mINFO    [0m | [1marrange Lane GM_Nova X-25B_002 排机浓度规则命中: no_loading_concentration_rule_matched, lsjnd=[0m
+[32m2026-05-20 14:57:47[0m | [1mINFO    [0m | [1marrange Lane GM_Nova X-25B_002 输出规则命中: tj_1595_standard_pe150_25b, lsjfs=25B, lcxms=3.6T-NEW[0m
+[32m2026-05-20 14:57:47[0m | [1mINFO    [0m | [1marrange Lane GM_Nova X-25B_002 显式排机规则: P7P5[0m
+[32m2026-05-20 14:57:47[0m | [1mINFO    [0m | [1marrange Lane GM_Nova X-25B_003 排机浓度规则命中: no_loading_concentration_rule_matched, lsjnd=[0m
+[32m2026-05-20 14:57:47[0m | [1mINFO    [0m | [1marrange Lane GM_Nova X-25B_003 输出规则命中: tj_1595_standard_pe150_25b, lsjfs=25B, lcxms=3.6T-NEW[0m
+[32m2026-05-20 14:57:47[0m | [1mINFO    [0m | [1marrange Lane GM_Nova X-25B_003 显式排机规则: P7P5[0m
+[32m2026-05-20 14:57:47[0m | [1mINFO    [0m | [1marrange Lane GM_Nova X-25B_004 排机浓度规则命中: no_loading_concentration_rule_matched, lsjnd=[0m
+[32m2026-05-20 14:57:47[0m | [1mINFO    [0m | [1marrange Lane GM_Nova X-25B_004 输出规则命中: tj_1595_standard_pe150_25b, lsjfs=25B, lcxms=3.6T-NEW[0m
+[32m2026-05-20 14:57:47[0m | [1mINFO    [0m | [1marrange Lane GM_Nova X-25B_004 显式排机规则: P7P5[0m
+[32m2026-05-20 14:57:47[0m | [1mINFO    [0m | [1marrange Lane GM_Nova X-25B_005 排机浓度规则命中: no_loading_concentration_rule_matched, lsjnd=[0m
+[32m2026-05-20 14:57:47[0m | [1mINFO    [0m | [1marrange Lane GM_Nova X-25B_005 输出规则命中: tj_1595_standard_pe150_25b, lsjfs=25B, lcxms=3.6T-NEW[0m
+[32m2026-05-20 14:57:47[0m | [1mINFO    [0m | [1marrange Lane GM_Nova X-25B_005 显式排机规则: P7P5[0m
+[32m2026-05-20 14:57:47[0m | [1mINFO    [0m | [1marrange Lane GM_Nova X-25B_006 排机浓度规则命中: no_loading_concentration_rule_matched, lsjnd=[0m
+[32m2026-05-20 14:57:47[0m | [1mINFO    [0m | [1marrange Lane GM_Nova X-25B_006 输出规则命中: tj_1595_standard_pe150_25b, lsjfs=25B, lcxms=3.6T-NEW[0m
+[32m2026-05-20 14:57:47[0m | [1mINFO    [0m | [1marrange Lane GM_Nova X-25B_006 显式排机规则: P7P5[0m
+[32m2026-05-20 14:57:47[0m | [1mINFO    [0m | [1marrange Lane GM_Nova X-25B_007 排机浓度规则命中: no_loading_concentration_rule_matched, lsjnd=[0m
+[32m2026-05-20 14:57:47[0m | [1mINFO    [0m | [1marrange Lane GM_Nova X-25B_007 输出规则命中: tj_1595_standard_pe150_25b, lsjfs=25B, lcxms=3.6T-NEW[0m
+[32m2026-05-20 14:57:47[0m | [1mINFO    [0m | [1marrange Lane GM_Nova X-25B_007 显式排机规则: P7P5[0m
+[32m2026-05-20 14:57:47[0m | [1mINFO    [0m | [1marrange Lane GM_Nova X-25B_008 排机浓度规则命中: no_loading_concentration_rule_matched, lsjnd=[0m
+[32m2026-05-20 14:57:47[0m | [1mINFO    [0m | [1marrange Lane GM_Nova X-25B_008 输出规则命中: tj_1595_standard_pe150_25b, lsjfs=25B, lcxms=3.6T-NEW[0m
+[32m2026-05-20 14:57:47[0m | [1mINFO    [0m | [1marrange Lane GM_Nova X-25B_008 显式排机规则: P7P5[0m
+/data/work/yuyongpeng/liblane_v2_deepseek/paiji_complete2/paiji_complete/arrange_library/arrange_library_model6.py:15281: FutureWarning: Downcasting object dtype arrays on .fillna, .ffill, .bfill is deprecated and will change in a future version. Call result.infer_objects(copy=False) instead. To opt-in to the future behavior, set `pd.set_option('future.no_silent_downcasting', True)`
+  balance_mask = df[BALANCE_LIBRARY_MARKER_COLUMN].fillna(False).astype(bool)
+[32m2026-05-20 14:57:47[0m | [1mINFO    [0m | [1m明细输出完成: arrange_library/3_sta_arrange_priority150_exempt_fast2.csv[0m
+[32m2026-05-20 14:57:47[0m | [1mINFO    [0m | [1m
+================================================================================[0m
+[32m2026-05-20 14:57:47[0m | [1mINFO    [0m | [1m步骤3: 跳过 prediction_delivery，保留下单量/预测产出空字段[0m
+[32m2026-05-20 14:57:47[0m | [1mINFO    [0m | [1m================================================================================[0m
+[32m2026-05-20 14:57:47[0m | [1mINFO    [0m | [1m已跳过 prediction_delivery 模型预测，输出保留下单量/预测产出字段空值: arrange_library/3_sta_arrange_priority150_exempt_fast2.csv[0m
+[32m2026-05-20 14:57:47[0m | [1mINFO    [0m | [1m输出后处理完成: 记录数=1009, 平均下单量=nanG, 平均产出量=nanG[0m
+[32m2026-05-20 14:57:47[0m | [1mINFO    [0m | [1m
+端到端排机完成！[0m
+[32m2026-05-20 14:57:47[0m | [1mINFO    [0m | [1m最终输出文件: arrange_library/3_sta_arrange_priority150_exempt_fast2.csv[0m
+[32m2026-05-20 14:57:47[0m | [1mINFO    [0m | [1m================================================================================[0m
+real 128.98
+user 141.98
+sys 0.34

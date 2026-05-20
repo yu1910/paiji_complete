@@ -21,6 +21,7 @@ import argparse
 import json
 import math
 import random
+import re
 import signal
 import sys
 from collections import Counter
@@ -8296,6 +8297,153 @@ def _try_build_global_mode_1_1_rescue_lane_from_pool(
             lib.current_seq_mode = "1.1"
             lib.lcxms = "1.1"
     return lane, used
+
+
+def _try_convert_plain_36t_tail_lanes_to_mode_1_1(
+    solution,
+    validator: Any,
+) -> Dict[str, int]:
+    """将纯普通3.6T尾货Lane整体回收，尝试重组成1.1 Lane。
+
+    只做全量成功替换：同一聚类里的候选3.6T Lane如果不能全部被合法1.1
+    Lane消耗，则保持原3.6T结果，避免产生半残Lane。
+    """
+    lane_assignments = list(getattr(solution, "lane_assignments", []) or [])
+    if not lane_assignments:
+        return {"converted_lanes": 0, "new_lanes": 0, "used_libraries": 0}
+
+    def _is_plain_convertible_36t_lane(lane: LaneAssignment) -> bool:
+        lane_id = _safe_str(getattr(lane, "lane_id", ""), default="")
+        if _is_package_lane_assignment(lane):
+            return False
+        if not _is_3_6t_new_lane_context(lane, list(getattr(lane, "libraries", []) or [])):
+            return False
+        if lane_id.startswith(("DL_", "PKG_", "LS_")):
+            return False
+        libraries = _get_non_balance_libraries(list(getattr(lane, "libraries", []) or []))
+        if not libraries:
+            return False
+        if any(_is_priority_library_for_36t_policy(lib) for lib in libraries):
+            return False
+        if any(bool(getattr(lib, "is_base_imbalance", lambda: False)()) for lib in libraries):
+            return False
+        if any(_get_scattered_mix_priority_rank(lib) != 2 for lib in libraries):
+            return False
+        if any(_is_forbidden_in_mode_1_1_by_secondary_36t_policy(lib) for lib in libraries):
+            return False
+        if any(_is_split_library(lib) or _is_split_rule_original_blocked_from_1_1(lib) for lib in libraries):
+            return False
+        return True
+
+    candidate_lanes = [
+        lane for lane in lane_assignments
+        if _is_plain_convertible_36t_lane(lane)
+    ]
+    if len(candidate_lanes) < 2:
+        return {"converted_lanes": 0, "new_lanes": 0, "used_libraries": 0}
+
+    clusters: Dict[Tuple[str, str], List[LaneAssignment]] = {}
+    for lane in candidate_lanes:
+        libraries = _get_non_balance_libraries(list(getattr(lane, "libraries", []) or []))
+        cluster_key = _build_residual_major_cluster_key(libraries[0])
+        if not cluster_key:
+            cluster_key = _get_residual_regroup_cluster_key(libraries[0])
+        if not cluster_key:
+            continue
+        machine_type = getattr(lane, "machine_type", MachineType.NOVA_X_25B)
+        machine_value = getattr(machine_type, "value", str(machine_type))
+        clusters.setdefault((machine_value, cluster_key), []).append(lane)
+
+    if not clusters:
+        return {"converted_lanes": 0, "new_lanes": 0, "used_libraries": 0}
+
+    existing_gl_serials: List[int] = []
+    for lane in lane_assignments:
+        lane_id = _safe_str(getattr(lane, "lane_id", ""), default="")
+        match = re.search(r"GL_[^_]+_(\d+)$", lane_id)
+        if match:
+            try:
+                existing_gl_serials.append(int(match.group(1)))
+            except ValueError:
+                pass
+    next_serial = max(existing_gl_serials or [0]) + 1
+
+    committed_source_lane_ids: Set[int] = set()
+    committed_new_lanes: List[LaneAssignment] = []
+    committed_used_library_ids: Set[int] = set()
+
+    for (_, _), source_lanes in sorted(
+        clusters.items(),
+        key=lambda item: _total_lane_data(
+            [
+                lib
+                for lane in item[1]
+                for lib in _get_non_balance_libraries(list(getattr(lane, "libraries", []) or []))
+            ]
+        ),
+        reverse=True,
+    ):
+        if len(source_lanes) < 2:
+            continue
+        source_libraries = [
+            lib
+            for lane in source_lanes
+            for lib in _get_non_balance_libraries(list(getattr(lane, "libraries", []) or []))
+        ]
+        source_total = _total_lane_data(source_libraries)
+        if source_total <= 0:
+            continue
+
+        machine_type = getattr(source_lanes[0], "machine_type", MachineType.NOVA_X_25B)
+        min_allowed, _ = _resolve_lane_capacity_limits(
+            source_libraries,
+            machine_type,
+            lane_metadata={"selected_seq_mode": "1.1", "lcxms": "1.1"},
+        )
+        if source_total + 1e-6 < min_allowed:
+            continue
+
+        working_pool = list(source_libraries)
+        candidate_new_lanes: List[LaneAssignment] = []
+        candidate_used: List[EnhancedLibraryInfo] = []
+        while working_pool:
+            lane, used = _try_build_global_mode_1_1_rescue_lane_from_pool(
+                pool=working_pool,
+                validator=validator,
+                machine_type=machine_type,
+                lane_serial=next_serial,
+            )
+            if not lane or not used:
+                break
+            next_serial += 1
+            candidate_new_lanes.append(lane)
+            candidate_used.extend(used)
+            used_ids = {id(lib) for lib in used}
+            working_pool = [lib for lib in working_pool if id(lib) not in used_ids]
+
+        if working_pool:
+            continue
+        source_ids = {id(lib) for lib in source_libraries}
+        used_ids = {id(lib) for lib in candidate_used}
+        if source_ids != used_ids:
+            continue
+
+        committed_source_lane_ids.update(id(lane) for lane in source_lanes)
+        committed_new_lanes.extend(candidate_new_lanes)
+        committed_used_library_ids.update(used_ids)
+
+    if not committed_new_lanes:
+        return {"converted_lanes": 0, "new_lanes": 0, "used_libraries": 0}
+
+    solution.lane_assignments = [
+        lane for lane in lane_assignments
+        if id(lane) not in committed_source_lane_ids
+    ] + committed_new_lanes
+    return {
+        "converted_lanes": len(committed_source_lane_ids),
+        "new_lanes": len(committed_new_lanes),
+        "used_libraries": len(committed_used_library_ids),
+    }
 
 
 def _consume_small_split_rule_originals_as_mode_1_1_lanes(
@@ -16829,6 +16977,30 @@ def arrange_library(
                 terminal_global_36t_stats["remaining_unassigned"],
             )
         )
+
+    plain_36t_to_1_1_stats = _try_convert_plain_36t_tail_lanes_to_mode_1_1(
+        solution,
+        final_cleanup_validator,
+    )
+    if plain_36t_to_1_1_stats["converted_lanes"] > 0:
+        logger.info(
+            "终态纯普通3.6T Lane回收合并1.1完成: 回收3.6T Lane={}，新增1.1 Lane={}，使用文库={}".format(
+                plain_36t_to_1_1_stats["converted_lanes"],
+                plain_36t_to_1_1_stats["new_lanes"],
+                plain_36t_to_1_1_stats["used_libraries"],
+            )
+        )
+        plain_36t_cleanup_stats = _final_non_package_validation_cleanup(
+            solution,
+            final_cleanup_validator,
+        )
+        if plain_36t_cleanup_stats["removed_lanes"] > 0:
+            logger.warning(
+                "终态纯普通3.6T回收合并后二次总复核: 淘汰{}条不合规Lane，回收{}个文库".format(
+                    plain_36t_cleanup_stats["removed_lanes"],
+                    plain_36t_cleanup_stats["recovered_libs"],
+                )
+            )
 
     terminal_sample_type_stats = _try_add_terminal_sample_type_dedicated_lanes(
         solution=solution,
