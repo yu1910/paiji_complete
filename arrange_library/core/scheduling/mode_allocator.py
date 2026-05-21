@@ -3,7 +3,7 @@
 创建时间：2026-04-14 13:30:00
 更新时间：2026-05-06 14:20:03
 
-负责将AI可排文库按规则切分为 3.6T-NEW 优先池、1.1 首轮池、1.1禁排回退池。
+负责将AI可排文库按规则切分为 1.1 首轮池、1.1禁排回退池。
 当前版本采用确定性规则，接口设计成将来可挂接AI决策器。
 
 输入：全量AI可排文库 + 1.1配置
@@ -34,7 +34,7 @@ class ModeAllocator:
     """首轮模式分流器
 
     按照1.1模式业务规则，将AI可排文库切分为多个池子：
-    - 3.6T-NEW 优先池（临检/YC/SJ需要优先占用3.6T-NEW lane的文库）
+    - 3.6T-NEW 优先池（历史兼容字段；高优文库逻辑已停用）
     - 1.1 质量正常池（合格+正常建库，优先单独成lane）
     - 1.1 质量风险池（风险/不合格+风险建库，优先单独成lane）
     - 1.1 兜底池（不满足上述两个质量条件的1.1可排文库）
@@ -50,7 +50,7 @@ class ModeAllocator:
     def __init__(self, config: Dict[str, Any]):
         self._config = config
         self._contract_limit = float(config.get("single_library_contract_limit_gb", 500))
-        self._priority_data_types = set(config.get("priority_data_types_for_36t", []))
+        self._priority_data_types = set()
         overflow_cfg = config.get("priority_data_types_to_1_1_overflow", {})
         self._priority_overflow_enabled = bool(overflow_cfg.get("enabled", False))
         self._priority_overflow_trigger_min_pool_gb = float(
@@ -111,16 +111,6 @@ class ModeAllocator:
             if hasattr(lib, "_mode_dispatch_reason"):
                 delattr(lib, "_mode_dispatch_reason")
 
-            # 高优先级文库统一先进入3.6T-NEW预消耗候选池，即使其本身不满足1.1条件。
-            if self._is_priority_for_36t(lib):
-                priority_candidates.append(lib)
-                if reason:
-                    result.dispatch_reasons[origrec] = f"priority_for_36t|{reason}"
-                else:
-                    result.dispatch_reasons[origrec] = "priority_for_36t"
-                lib._mode_dispatch_reason = result.dispatch_reasons[origrec]
-                continue
-
             if reason:
                 result.pool_1_1_forbidden.append(lib)
                 self._clear_mode_1_1_seed_hint(lib)
@@ -156,9 +146,7 @@ class ModeAllocator:
         priority_total_gb = sum(float(lib.contract_data_raw or 0) for lib in priority_candidates)
         max_36t_lanes = self._resolve_priority_36t_lane_count(priority_total_gb)
         logger.info(
-            "模式分流: 临检/YC/SJ数据量={:.1f}G, 建议3.6T-NEW lane上限={}, "
-            "1.1可排文库={}, 1.1禁排回退={}",
-            priority_total_gb, max_36t_lanes,
+            "模式分流: 高优文库逻辑已停用，1.1可排文库={}, 1.1禁排回退={}",
             len(first_round_1_1_candidates), len(result.pool_1_1_forbidden),
         )
 
@@ -212,20 +200,11 @@ class ModeAllocator:
         if baleno or bagfcno:
             return "has_package_lane_or_fc"
 
-        if self._is_36t_only_secondary(lib):
-            return "secondary_priority_for_36t_only"
-
         return ""
 
     def _is_priority_for_36t(self, lib: EnhancedLibraryInfo) -> bool:
-        """判断文库是否满足3.6T-NEW高优条件，数据类型条件优先于次级条件。"""
-        dt = str(getattr(lib, "data_type", "") or "").strip()
-        if dt in self._priority_data_types:
-            return True
-        manual_override = self._resolve_manual_dispatch_override(lib)
-        if manual_override is not None and manual_override[0] == "1.1":
-            return True
-        return self._has_1_1_secondary_eligibility(lib)
+        """历史兼容接口：高优文库逻辑已停用。"""
+        return False
 
     def _resolve_sample_prefix(self, lib: EnhancedLibraryInfo) -> str:
         """统一解析样本前缀，优先读显式字段，缺失时回退到 sample_id 前四位。"""
@@ -258,8 +237,8 @@ class ModeAllocator:
         )
 
     def _is_36t_only_secondary(self, lib: EnhancedLibraryInfo) -> bool:
-        """DHE(第2-4位)/加测/混合文库只能进入3.6T-NEW，不允许进入1.1。"""
-        return self._has_1_1_secondary_eligibility(lib)
+        """历史兼容接口：DHE/加测/混合不再禁止进入1.1。"""
+        return False
 
     def _apply_mode_1_1_quality_seed_hint(self, lib: EnhancedLibraryInfo) -> None:
         """为规则12的优先组合打首轮聚簇提示。"""
@@ -274,19 +253,14 @@ class ModeAllocator:
         self._set_mode_1_1_seed_hint(lib, *self._QUALITY_SEED_HINTS["other"])
 
     def _is_eligible_for_1_1(self, lib: EnhancedLibraryInfo) -> bool:
-        """判断高优先级文库是否满足规则11的小量溢出到1.1条件。
-
-        注意：
-        - 该条件不再作为1.1首轮的总准入条件
-        - 其用途仅限于规则11场景下，识别哪些临检/YC/SJ文库允许少量混入1.1
-        """
+        """历史兼容接口：高优溢出到1.1逻辑已停用。"""
         dt = str(getattr(lib, "data_type", "") or "").strip()
         if dt not in self._eligible_data_types:
             return False
         return not self._is_36t_only_secondary(lib)
 
     def _is_priority_overflow_candidate_for_1_1(self, lib: EnhancedLibraryInfo) -> bool:
-        """优先池中允许少量溢出到1.1的候选。"""
+        """历史兼容接口：高优溢出到1.1逻辑已停用。"""
         if not self._priority_overflow_enabled:
             return False
         if not self._is_priority_for_36t(lib):
@@ -294,19 +268,15 @@ class ModeAllocator:
         return self._is_eligible_for_1_1(lib)
 
     def _should_borrow_1_1_fillers_for_priority_36t_preconsume(self) -> bool:
-        """首轮3.6T高优预消耗是否允许提前借用1.1普通池补料。"""
+        """历史兼容接口：高优预消耗已停用。"""
         return self._priority_36t_preconsume_borrow_fillers_from_1_1
 
     def _get_priority_36t_preconsume_max_filler_gb_per_lane(self) -> float:
-        """首轮3.6T高优预消耗允许借用的1.1普通文库补位上限。"""
+        """历史兼容接口：高优预消耗已停用。"""
         return max(0.0, self._priority_36t_preconsume_max_filler_gb_per_lane)
 
     def _resolve_priority_36t_lane_count(self, total_gb: float) -> int:
-        """根据高优数据量总和，确定3.6T-NEW预消耗lane数上限。
-
-        配置表内的分档保持原样；超过最后一档后不再沿用最后一个
-        max_lanes 硬封顶，而是按最后一档的单lane数据量继续外推。
-        """
+        """历史兼容接口：高优预消耗已停用。"""
         if total_gb <= 0:
             return 0
         max_lanes = 0

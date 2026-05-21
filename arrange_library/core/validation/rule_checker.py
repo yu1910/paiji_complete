@@ -391,30 +391,8 @@ class RuleChecker:
     
     # ========== 规则8：数据类型优先级冲突 ==========
     def check_priority_conflict(self, lib1: Dict, lib2: Dict) -> int:
-        """规则8：不同优先级文库混排受限
-        
-        优先级：临检(医学) > YC > 其他
-        临检与"其他"类型（非YC）混排受限
-        """
-        priority_map = {
-            '临检': 1,
-            '医学': 1,
-            'medical': 1,
-            'clinical': 1,
-            'yc': 2,
-            'yc文库': 2,
-        }
-        
-        type1 = str(lib1.get('数据类型', '')).strip().lower()
-        type2 = str(lib2.get('数据类型', '')).strip().lower()
-        
-        p1 = priority_map.get(type1, 3)
-        p2 = priority_map.get(type2, 3)
-        
-        # 临检(优先级1)和其他类型（优先级3）混排需要特殊处理
-        violation = (p1 == 1 and p2 > 2) or (p2 == 1 and p1 > 2)
-        
-        return int(violation)
+        """规则8历史兼容：高优文库混排限制已停用。"""
+        return 0
     
     # ========== 规则9：产线标识匹配 ==========
     def check_production_line(self, lib1: Dict, lib2: Dict) -> int:
@@ -662,8 +640,21 @@ class RuleChecker:
                 or lib.get('index序列')
                 or ''
             )
-            index_pairs = [seg.strip() for seg in str(index_seq).split(',') if seg.strip()]
+            index_seq_text = str(index_seq).strip()
+            index_pairs = [seg.strip() for seg in index_seq_text.split(',') if seg.strip()]
             index_count = max(len(index_pairs), 1)
+            single_index_data = (
+                lib.get('wk_single_index_data')
+                or lib.get('single_index_data')
+                or lib.get('单端Index数据量')
+                or 0
+            )
+            try:
+                is_single_end_index = float(single_index_data or 0) > 0
+            except (ValueError, TypeError):
+                is_single_end_index = False
+            if index_seq_text and ';' not in index_seq_text:
+                is_single_end_index = True
 
             mode_candidates = [
                 lib.get('lane_sj_mode'),
@@ -692,10 +683,10 @@ class RuleChecker:
             if not is_mode_3_6t_new:
                 return False
 
-            if index_count > 1:
-                threshold = 300.0
-            else:
+            if is_single_end_index:
                 threshold = 100.0
+            else:
+                threshold = 300.0
             return vol > threshold
         except (ValueError, TypeError):
             return False

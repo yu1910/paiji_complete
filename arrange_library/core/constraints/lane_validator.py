@@ -1277,7 +1277,7 @@ class LaneValidator:
             ]
             
             if low_priority_libs:
-                suggestions.append("建议优先剔除优先级较低的文库（非临检/YC/SJ）")
+                suggestions.append("建议优先剔除排机优先级较低的文库")
             
             # 按数据量给出具体建议
             for lib in sorted_libs[:3]:  # 最多列出前3个候选

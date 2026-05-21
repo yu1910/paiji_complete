@@ -18,18 +18,17 @@ from loguru import logger
 from arrange_library.arrange_library_model6 import (
     _build_detail_output,
     _find_best_peak_size_window,
-    _build_priority_36t_preconsume_inputs,
     _build_origrec_key,
     _collect_detail_output_libraries,
     _collect_lanes_with_split,
     _collect_prediction_rows,
+    _enforce_mode_1_1_add_test_cap_per_lane,
     _get_machine_arrangement_exclusion_reason,
     _is_machine_supported_for_arrangement,
     _materialize_balance_libraries_for_solution,
     _read_csv_with_encoding_fallback,
     _resolve_machine_type_enum_simple,
     _run_prediction_delivery,
-    _run_priority_36t_preconsume_stage,
     _safe_str,
     arrange_library,
     load_test_libraries,
@@ -450,7 +449,7 @@ def run_mode_1_1_round1(
     libraries: Optional[Sequence[EnhancedLibraryInfo]] = None,
     config: Optional[Dict[str, Any]] = None,
     existing_lanes: Optional[Sequence[LaneAssignment]] = None,
-    enable_priority_36t_preconsume: bool = True,
+    enable_priority_36t_preconsume: bool = False,
 ) -> Mode11Round1ServiceResult:
     """执行1.1首轮分流与排机，返回可供外部程序消费的结构化结果。"""
     resolved_config = _resolve_mode_1_1_config(config)
@@ -463,105 +462,22 @@ def run_mode_1_1_round1(
     allocator = ModeAllocator(resolved_config)
     dispatch_result = allocator.allocate(round1_input_libraries)
 
-    normal_libraries_for_36t: List[EnhancedLibraryInfo] = []
-    priority_36t_remaining_for_1_1: List[EnhancedLibraryInfo] = []
-    if enable_priority_36t_preconsume:
-        preconsume_inputs = _build_priority_36t_preconsume_inputs(
-            allocator=allocator,
-            dispatch_result=dispatch_result,
-        )
-        preconsume_filler_candidates = list(preconsume_inputs.all_filler_1_1_libraries or [])
-        priority_preconsume_result = _run_priority_36t_preconsume_stage(
-            list(preconsume_inputs.priority_libraries),
-            priority_fallback_to_36t_libraries=list(preconsume_inputs.priority_forbidden_libraries),
-            filler_libraries_for_36t=list(preconsume_inputs.filler_forbidden_libraries),
-            filler_libraries_from_1_1=preconsume_filler_candidates,
-            max_target_lanes=int(getattr(preconsume_inputs, "max_priority_lanes", 0) or 0),
-            max_filler_gb_per_lane=float(getattr(preconsume_inputs, "max_filler_gb_per_lane", 0.0) or 0.0),
-        )
-        if priority_preconsume_result.scheduling_succeeded:
-            priority_36t_remaining_for_1_1 = list(
-                getattr(priority_preconsume_result, "remaining_libraries", []) or []
-            )
-            priority_36t_remaining_for_1_1.extend(
-                list(getattr(preconsume_inputs, "deferred_priority_libraries", []) or [])
-            )
-            normal_libraries_for_36t.extend(
-                list(getattr(preconsume_inputs, "deferred_priority_forbidden_libraries", []) or [])
-            )
-            normal_libraries_for_36t.extend(
-                list(getattr(priority_preconsume_result, "remaining_priority_forbidden_libraries", []) or [])
-            )
-            normal_libraries_for_36t.extend(
-                list(getattr(priority_preconsume_result, "remaining_filler_forbidden_libraries", []) or [])
-            )
-            normal_libraries_for_36t.extend(
-                lib
-                for lib in list(dispatch_result.pool_1_1_forbidden or [])
-                if id(lib) not in {
-                    id(filler)
-                    for filler in list(getattr(preconsume_inputs, "filler_forbidden_libraries", []) or [])
-                }
-            )
-        else:
-            normal_libraries_for_36t = (
-                list(dispatch_result.pool_36t_priority) + list(dispatch_result.pool_1_1_forbidden)
-            )
-    else:
-        logger.info(
-            "mode_1_1_service 首轮快速测试模式: 跳过3.6T-NEW预消耗，仅验证1.1首轮可否成Lane"
-        )
-        preconsume_filler_candidates = []
-        priority_preconsume_result = SimpleNamespace(
-            lanes=[],
-            remaining_libraries=[],
-            remaining_priority_forbidden_libraries=list(dispatch_result.pool_36t_priority),
-            remaining_filler_forbidden_libraries=list(dispatch_result.pool_1_1_forbidden),
-            remaining_filler_1_1_libraries=[],
-            scheduling_stats={},
-            scheduling_succeeded=False,
-            scheduling_error=None,
-        )
-        normal_libraries_for_36t = (
-            list(dispatch_result.pool_36t_priority) + list(dispatch_result.pool_1_1_forbidden)
-        )
+    normal_libraries_for_36t: List[EnhancedLibraryInfo] = list(dispatch_result.pool_1_1_forbidden)
 
-    borrowed_fillers_from_1_1 = (
-        {
-            id(lib)
-            for lib in list(preconsume_filler_candidates or [])
-        }
-        if priority_preconsume_result.scheduling_succeeded
-        else set()
-    )
-    first_round_pool = list(priority_36t_remaining_for_1_1)
-    first_round_pool.extend(
-        lib for lib in list(dispatch_result.pool_1_1_normal or [])
-        if id(lib) not in borrowed_fillers_from_1_1
-    )
-    first_round_pool.extend(
-        lib for lib in list(dispatch_result.pool_1_1_quality_risk or [])
-        if id(lib) not in borrowed_fillers_from_1_1
-    )
-    # 1.1兜底池仍属于1.1首轮池，只是不作为3.6T-NEW预消耗补料。
-    first_round_pool.extend(
-        lib for lib in list(dispatch_result.pool_1_1_quality_other or [])
-        if id(lib) not in borrowed_fillers_from_1_1
-    )
-    if priority_preconsume_result.scheduling_succeeded:
-        first_round_pool.extend(
-            list(getattr(priority_preconsume_result, "remaining_filler_1_1_libraries", []) or [])
-        )
+    first_round_pool = []
+    first_round_pool.extend(list(dispatch_result.pool_1_1_normal or []))
+    first_round_pool.extend(list(dispatch_result.pool_1_1_quality_risk or []))
+    first_round_pool.extend(list(dispatch_result.pool_1_1_quality_other or []))
 
     result = Mode11Round1ServiceResult(
         prepared_input=prepared,
         dispatch_result=dispatch_result,
         deferred_round2_identification=deferred_round2_identification,
         first_round_pool=first_round_pool,
-        priority_36t_lanes=list(priority_preconsume_result.lanes or []),
-        priority_36t_remaining_for_1_1=priority_36t_remaining_for_1_1,
-        priority_36t_scheduling_stats=dict(priority_preconsume_result.scheduling_stats or {}),
-        priority_36t_scheduling_error=priority_preconsume_result.scheduling_error,
+        priority_36t_lanes=[],
+        priority_36t_remaining_for_1_1=[],
+        priority_36t_scheduling_stats={},
+        priority_36t_scheduling_error=None,
         normal_libraries_for_36t=normal_libraries_for_36t,
         solution=SimpleNamespace(lane_assignments=[], unassigned_libraries=[]),
     )
@@ -604,6 +520,19 @@ def run_mode_1_1_round1(
             lane.metadata["dispatch_stage"] = "first_round_1_1"
             lane.metadata["selected_seq_mode"] = "1.1"
             lane.metadata["selected_round_label"] = first_round_label
+        add_test_cap_stats = _enforce_mode_1_1_add_test_cap_per_lane(
+            solution,
+            max_add_test_gb_per_lane=float(
+                resolved_config.get("first_round_add_test_max_gb_per_lane", 150.0) or 0.0
+            ),
+        )
+        if add_test_cap_stats["adjusted_lanes"] > 0:
+            logger.info(
+                "mode_1_1_service 单Lane加测/混合封顶完成: 调整Lane={}, 回退文库={}个/{:.1f}G",
+                int(add_test_cap_stats["adjusted_lanes"]),
+                int(add_test_cap_stats["overflow_libraries"]),
+                add_test_cap_stats["removed_add_test_gb"],
+            )
 
         result.lanes = list(solution.lane_assignments or [])
         result.fallback_libraries_for_36t = list(solution.unassigned_libraries or [])

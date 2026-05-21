@@ -8,42 +8,17 @@
   "single_library_contract_limit_gb": 500,
   "first_round_label": "1.1第一轮",
   "second_round_label": "1.1第二轮",
-  "priority_36t_lane_limit_rules": [
-    {
-      "max_data_gb": 1050,
-      "max_lanes": 1
-    },
-    {
-      "max_data_gb": 1600,
-      "max_lanes": 2
-    },
-    {
-      "max_data_gb": 2000,
-      "max_lanes": 3
-    },
-    {
-      "max_data_gb": 3000,
-      "max_lanes": 4
-    }
-  ],
-  "priority_data_types_for_36t": [
-    "临检",
-    "YC",
-    "SJ"
-  ],
-  "priority_36t_preconsume_borrow_fillers_from_1_1": true,
-  "priority_36t_preconsume_max_filler_gb_per_lane": 600,
-  "first_round_priority_max_gb_per_lane": 150,
+  "priority_36t_lane_limit_rules": [],
+  "priority_data_types_for_36t": [],
+  "priority_36t_preconsume_borrow_fillers_from_1_1": false,
+  "priority_36t_preconsume_max_filler_gb_per_lane": 0,
+  "first_round_add_test_max_gb_per_lane": 150,
   "priority_data_types_to_1_1_overflow": {
-    "enabled": true,
-    "trigger_min_pool_gb": 1850,
-    "max_total_gb": 150
+    "enabled": false,
+    "trigger_min_pool_gb": 0,
+    "max_total_gb": 0
   },
-  "eligible_data_types_for_1_1": [
-    "临检",
-    "YC",
-    "SJ"
-  ],
+  "eligible_data_types_for_1_1": [],
   "eligible_sample_prefixes_for_1_1": [
     "FDHE"
   ],

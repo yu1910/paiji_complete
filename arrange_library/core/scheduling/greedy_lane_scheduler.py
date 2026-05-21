@@ -1164,7 +1164,7 @@ class GreedyLaneScheduler:
                     f"剩余池总量{failed_total_data:.1f}GB不足最小成Lane门槛{failed_min_lane_data:.1f}GB，跳过后续随机重试"
                 )
             
-            # 第二轮：打乱输入池做探索，但真正构Lane前仍会按临检/SJ > YC > 其他重排。
+            # 第二轮：打乱输入池做探索，构Lane前再按当前通用排序稳定顺序。
             if failed and len(failed) >= 10 and failed_pool_viable:
                 random.shuffle(failed)
                 logger.info(f"第二轮排机: {len(failed)} 个未分配文库（随机顺序）")
@@ -1180,7 +1180,7 @@ class GreedyLaneScheduler:
                         f"第二轮后剩余池总量{failed_total_data:.1f}GB不足最小成Lane门槛{failed_min_lane_data:.1f}GB，停止继续随机重试"
                     )
             
-            # 第三轮：小文库优先探索，但单条Lane内仍由高优先级重排逻辑主导。
+            # 第三轮：小文库优先探索，单条Lane内仍使用通用候选排序。
             if failed and len(failed) >= 10 and failed_pool_viable:
                 failed.sort(key=lambda lib: lib.get_data_amount_gb())
                 logger.info(f"第三轮排机: {len(failed)} 个未分配文库（小文库优先）")
@@ -2104,17 +2104,12 @@ class GreedyLaneScheduler:
         return str(getattr(lib, "_mode_1_1_seed_group", "") or "").strip()
 
     def _get_scattered_mix_priority_rank(self, lib: EnhancedLibraryInfo) -> int:
-        """散样混排优先级：临检和SJ > YC > 其他。"""
-        data_type = str(getattr(lib, "data_type", "") or "").strip()
-        if data_type in {"临检", "SJ"} or lib.is_clinical_by_code() or lib.is_s_level_customer():
-            return 0
-        if data_type == "YC" or lib.is_yc_library():
-            return 1
+        """历史兼容接口：高优文库逻辑已停用，所有文库同一档。"""
         return 2
 
     def _is_priority_core_rank(self, rank: int) -> bool:
-        """临检/SJ/YC 先占坑，普通文库只作为补位。"""
-        return rank <= 1
+        """历史兼容接口：高优文库占坑逻辑已停用。"""
+        return False
 
     def _is_priority_core_library(self, lib: EnhancedLibraryInfo) -> bool:
         """判断文库是否属于优先占坑核心池。"""
@@ -4922,87 +4917,133 @@ class GreedyLaneScheduler:
             ]
             return [], non_split_pool + inactive_split_fragments + remaining_split_fragments, blocked_originals
 
-        lane_count = max(len(fragments) for fragments in active_families.values())
-        if lane_count <= 0:
-            return [], non_split_pool + inactive_split_fragments, []
-
         machine_type_enum = self._resolve_machine_type_enum(machine_type, libraries)
         if machine_type_enum == MachineType.UNKNOWN:
             machine_type_enum = MachineType.NOVA_X_25B
 
-        lanes: List[LaneAssignment] = []
-        for lane_index in range(lane_count):
-            lane_id = self._get_next_lane_id("GL", machine_type)
-            lane = LaneAssignment(
-                lane_id=lane_id,
-                machine_id=f"M_{lane_id[3:]}",
-                machine_type=machine_type_enum,
-                lane_capacity_gb=self.config.lane_capacity_gb,
-            )
-            lanes.append(lane)
-
-        for family_id, fragments in active_families.items():
-            ordered_fragments = sorted(
-                fragments,
-                key=lambda item: int(getattr(item, "fragment_index", 0) or 0),
-            )
-            for lane, fragment in zip(lanes, ordered_fragments):
-                if not self._can_add_to_lane(lane, fragment):
-                    blocked_originals = self._restore_split_family_sources(
-                        family_ids=list(active_families),
-                        family_context=family_context,
-                    )
-                    return [], non_split_pool + inactive_split_fragments, blocked_originals
-                lane.add_library(fragment)
-
-        remaining_fillers = self._sort_libraries(non_split_pool)
-        for lane in lanes:
-            changed = True
-            while changed:
-                changed = False
-                lane_rule = self._get_scheduling_lane_capacity_range(
-                    libraries=lane.libraries,
-                    machine_type=machine_type_enum.value,
-                    metadata=self._build_lane_validation_metadata(lane),
+        def _new_split_lanes(split_count: int) -> List[LaneAssignment]:
+            lanes_for_batch: List[LaneAssignment] = []
+            for _ in range(split_count):
+                lane_id = self._get_next_lane_id("GL", machine_type)
+                lane = LaneAssignment(
+                    lane_id=lane_id,
+                    machine_id=f"M_{lane_id[3:]}",
+                    machine_type=machine_type_enum,
+                    lane_capacity_gb=self.config.lane_capacity_gb,
                 )
-                if lane.total_data_gb >= lane_rule.effective_min_gb:
-                    break
-                for filler in list(remaining_fillers):
-                    if not self._can_add_to_lane(lane, filler):
-                        continue
-                    lane.add_library(filler)
-                    remaining_fillers.remove(filler)
-                    changed = True
-                    break
+                lane.metadata["selected_seq_mode"] = "3.6T-NEW"
+                lane.metadata["seq_mode"] = "3.6T-NEW"
+                lane.metadata["lcxms"] = "3.6T-NEW"
+                lane.metadata["dispatch_stage"] = "atomic_3_6t_split_family_batch"
+                lanes_for_batch.append(lane)
+            return lanes_for_batch
 
-        all_valid = True
-        for lane in lanes:
+        def _lane_capacity_bounds(lane: LaneAssignment) -> Tuple[float, float]:
             lane_rule = self._get_scheduling_lane_capacity_range(
                 libraries=lane.libraries,
                 machine_type=machine_type_enum.value,
                 metadata=self._build_lane_validation_metadata(lane),
             )
-            if lane.total_data_gb < lane_rule.effective_min_gb:
-                all_valid = False
-                break
-            is_valid, _ = self._validate_completed_lane(lane)
-            if not is_valid:
-                all_valid = False
+            return float(lane_rule.effective_min_gb), float(lane_rule.effective_max_gb)
+
+        def _valid_batch(lanes_for_batch: List[LaneAssignment]) -> bool:
+            for lane in lanes_for_batch:
+                min_allowed, _ = _lane_capacity_bounds(lane)
+                if lane.total_data_gb < min_allowed - 1e-6:
+                    return False
+                is_valid, _ = self._validate_completed_lane(lane)
+                if not is_valid:
+                    return False
+            return True
+
+        def _can_add_family_to_batch(
+            lanes_for_batch: List[LaneAssignment],
+            ordered_fragments: List[EnhancedLibraryInfo],
+        ) -> bool:
+            if len(lanes_for_batch) != len(ordered_fragments):
+                return False
+            for lane, fragment in zip(lanes_for_batch, ordered_fragments):
+                _, max_allowed = _lane_capacity_bounds(lane)
+                if lane.total_data_gb + fragment.get_data_amount_gb() > max_allowed + 1e-6:
+                    return False
+                if not self._can_add_to_lane(lane, fragment):
+                    return False
+            return True
+
+        def _add_family_to_batch(
+            lanes_for_batch: List[LaneAssignment],
+            ordered_fragments: List[EnhancedLibraryInfo],
+        ) -> None:
+            for lane, fragment in zip(lanes_for_batch, ordered_fragments):
+                lane.add_library(fragment)
+
+        families_by_split_count: Dict[Tuple[int, str, str], List[Tuple[str, List[EnhancedLibraryInfo]]]] = {}
+        for family_id, fragments in active_families.items():
+            first_fragment = fragments[0] if fragments else None
+            sample_type_key = self._get_library_sample_type_key(first_fragment) if first_fragment is not None else ""
+            imbalance_group = ""
+            if first_fragment is not None and self.imbalance_handler:
+                imbalance_group = str(self.imbalance_handler.identify_imbalance_type(first_fragment) or "")
+            families_by_split_count.setdefault(
+                (len(fragments), sample_type_key, imbalance_group),
+                [],
+            ).append((family_id, fragments))
+
+        generated_lanes: List[LaneAssignment] = []
+        blocked_family_ids: List[str] = []
+        for (split_count, sample_type_key, imbalance_group), family_items in families_by_split_count.items():
+            pending = sorted(
+                family_items,
+                key=lambda item: -sum(fragment.get_data_amount_gb() for fragment in item[1]) / max(split_count, 1),
+            )
+            while pending:
+                lanes_for_batch = _new_split_lanes(split_count)
+                selected_family_ids: List[str] = []
+                remaining_after_pass: List[Tuple[str, List[EnhancedLibraryInfo]]] = []
+
+                for family_id, fragments in pending:
+                    ordered_fragments = sorted(
+                        fragments,
+                        key=lambda item: int(getattr(item, "fragment_index", 0) or 0),
+                    )
+                    if _can_add_family_to_batch(lanes_for_batch, ordered_fragments):
+                        _add_family_to_batch(lanes_for_batch, ordered_fragments)
+                        selected_family_ids.append(family_id)
+                    else:
+                        remaining_after_pass.append((family_id, fragments))
+
+                if selected_family_ids and _valid_batch(lanes_for_batch):
+                    generated_lanes.extend(lanes_for_batch)
+                    pending = remaining_after_pass
+                    continue
+
+                if selected_family_ids:
+                    lane_totals = [round(float(lane.total_data_gb or 0.0), 3) for lane in lanes_for_batch]
+                    logger.info(
+                        "3.6T-NEW拆分家族分组批量未成Lane: split_count={}, sample_type={}, imbalance_group={}, 选中家族={}, lane_totals={}",
+                        split_count,
+                        sample_type_key,
+                        imbalance_group,
+                        len(selected_family_ids),
+                        lane_totals,
+                    )
+                blocked_family_ids.extend([family_id for family_id, _ in pending])
                 break
 
-        if not all_valid:
+        if blocked_family_ids:
             blocked_originals = self._restore_split_family_sources(
-                family_ids=list(active_families),
+                family_ids=blocked_family_ids,
                 family_context=family_context,
             )
-            return [], non_split_pool + inactive_split_fragments, blocked_originals
+        else:
+            blocked_originals = []
 
         logger.info(
             "3.6T-NEW拆分片段分散成功: 拆分家族{}个，生成{}条Lane，每个家族每Lane最多1片",
-            len(active_families),
-            len(lanes),
+            len(active_families) - len(blocked_family_ids),
+            len(generated_lanes),
         )
-        return lanes, remaining_fillers + inactive_split_fragments, []
+        return generated_lanes, non_split_pool + inactive_split_fragments, blocked_originals
 
     def _restore_split_family_sources(
         self,
@@ -5068,7 +5109,7 @@ class GreedyLaneScheduler:
                     ),
                 )
             else:
-                # 散样混排策略优先于一般排序：临检 > YC > delete_date > 其他，尽量集中到连续Lane。
+                # 散样混排策略优先于一般排序，尽量把同类文库集中到连续Lane。
                 remaining = self._sort_remaining_for_scattered_mix_lane(remaining)
             seed_lib = remaining[0]
             lane_candidate_order = (
