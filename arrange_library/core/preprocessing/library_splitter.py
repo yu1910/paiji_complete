@@ -45,8 +45,9 @@ class LibrarySplitter:
         logger.info("=" * 60)
         logger.info("[拆分] 开始文库拆分预处理")
         logger.info(
-            "  拆分规则: 1.1模式文库（兼容旧名1.0）不拆分；3.6T-NEW模式按逗号识别index对数，单对index等效合同量 >{}G 拆分".format(
+            "  拆分规则: 1.1模式文库（兼容旧名1.0）不拆分；3.6T-NEW单对index >{}G 拆分，多对index >{}G 拆分".format(
                 self.single_index_non_1_0_threshold,
+                self.multi_index_threshold,
             )
         )
         logger.info(f"  最小保留数据量: >{self.min_split_size}G")
@@ -95,8 +96,9 @@ class LibrarySplitter:
 
         新规则：
         1. 1.1模式文库（兼容旧名1.0）不拆分
-        2. 3.6T-NEW模式按逗号识别index对数，合同量均摊到每对index后 >130G 时拆分
-        3. index序列保持原样，index对数只参与拆分份数计算
+        2. 3.6T-NEW模式按逗号识别index对数
+        3. 单对index合同量 >130G 才拆，多对index合同量 >300G 才拆
+        4. index序列保持原样，index对数只参与阈值分档
         """
         # 1. 包FC/指定Lane不拆分；带包Lane编号的文库按包Lane规则允许拆分。
         if not self._has_package_lane_binding(lib) and self._has_fixed_lane_binding(lib):
@@ -111,17 +113,8 @@ class LibrarySplitter:
         if data_amount <= 0:
             return False
 
-        if self._is_forced_36t_split_after_mode_1_1_exhausted(lib, data_amount):
-            logger.debug(
-                "  文库 {} 触发1.1耗尽后3.6T强制拆分: 合同量={}G".format(
-                    getattr(lib, "origrec", ""),
-                    round(data_amount, 3),
-                )
-            )
-            return True
-
-        rule_label, max_data_per_index_pair = self._resolve_split_rule(lib)
-        if math.isinf(max_data_per_index_pair):
+        rule_label, split_threshold = self._resolve_split_rule(lib)
+        if math.isinf(split_threshold):
             logger.debug(
                 "  文库 {} 命中 {}，跳过拆分".format(
                     getattr(lib, "origrec", ""),
@@ -131,17 +124,15 @@ class LibrarySplitter:
             return False
 
         index_pair_count = self._count_index_pairs(lib)
-        effective_data_per_index_pair = data_amount / max(index_pair_count, 1)
-        should_split = effective_data_per_index_pair > max_data_per_index_pair
+        should_split = data_amount > split_threshold
         if should_split:
             logger.debug(
-                "  文库 {} 触发拆分: 合同量={}G, index对数={}, 等效单对={}G, 规则={}, 单对阈值={}G".format(
+                "  文库 {} 触发拆分: 合同量={}G, index对数={}, 规则={}, 阈值={}G".format(
                     lib.origrec,
                     round(data_amount, 3),
                     index_pair_count,
-                    round(effective_data_per_index_pair, 3),
                     rule_label,
-                    round(max_data_per_index_pair, 3),
+                    round(split_threshold, 3),
                 )
             )
         return should_split
@@ -156,7 +147,7 @@ class LibrarySplitter:
 
         index_count = self._count_index_pairs(lib)
         if index_count > 1:
-            return "3.6t_new_multi_index_pair_equivalent", self.single_index_non_1_0_threshold
+            return "3.6t_new_multi_index_pair", self.multi_index_threshold
 
         return "3.6t_new_single_index_pair", self.single_index_non_1_0_threshold
 
@@ -165,12 +156,8 @@ class LibrarySplitter:
         lib: EnhancedLibraryInfo,
         data_amount: float,
     ) -> bool:
-        """1.1多轮失败后的小原始文库，允许强制拆分后进入3.6T。"""
-        if not bool(getattr(lib, "_mode_1_1_exhausted_allow_36t_split", False)):
-            return False
-        if self._detect_sequence_mode(lib) != self.MODE_3_6T_NEW:
-            return False
-        return data_amount / 2.0 > self.min_split_size
+        """兼容旧调用点；拆分必须统一走单对130G/多对300G阈值，不再强制绕过。"""
+        return False
 
     def _is_single_end_index(self, lib: EnhancedLibraryInfo) -> bool:
         """历史兼容接口：没有逗号分隔的都按单对index处理。"""
@@ -316,25 +303,19 @@ class LibrarySplitter:
         """执行拆分操作 - 支持多级拆分
 
         规则：
-        - 多对index只参与份数计算，不拆改index序列
-        - 拆分后每个子文库的等效单对index合同量不超过单对阈值
+        - index序列不拆改
+        - 单对index按130G阈值拆，多对index按300G阈值拆
         - 确保每个子文库数据量在合理范围内
         """
         data_amount = float(lib.contract_data_raw)
 
-        rule_label, max_data_per_index_pair = self._resolve_split_rule(lib)
+        rule_label, split_threshold = self._resolve_split_rule(lib)
 
-        force_after_mode_1_1 = self._is_forced_36t_split_after_mode_1_1_exhausted(
-            lib,
-            data_amount,
-        )
         split_count = self._calculate_split_count(
             data_amount=data_amount,
             index_pair_count=self._count_index_pairs(lib),
-            max_data_per_index_pair=max_data_per_index_pair,
+            split_threshold=split_threshold,
         )
-        if force_after_mode_1_1 and split_count <= 1:
-            split_count = 2
         if split_count <= 1:
             return [lib]
 
@@ -415,25 +396,21 @@ class LibrarySplitter:
         self,
         data_amount: float,
         index_pair_count: int,
-        max_data_per_index_pair: float,
+        split_threshold: float,
     ) -> int:
         """计算拆分份数。
 
-        多对index不拆改index序列，只将合同量先按index对数折算；
-        每对index折算量仍超过单对阈值时，继续按同一倍数拆分。
+        index序列不拆改；单对按130G阈值，多对按300G阈值，把每片拆到不再触发。
         """
-        if math.isinf(max_data_per_index_pair):
+        if math.isinf(split_threshold):
             return 1
-        resolved_index_pair_count = max(1, int(index_pair_count or 1))
         if data_amount <= 0:
             return 1
 
-        data_per_index_pair = data_amount / resolved_index_pair_count
-        if data_per_index_pair <= max_data_per_index_pair:
+        if data_amount <= split_threshold:
             return 1
 
-        split_multiplier = math.ceil(data_per_index_pair / max_data_per_index_pair)
-        split_count = resolved_index_pair_count * split_multiplier
+        split_count = math.ceil(data_amount / split_threshold)
 
         # 若极小阈值或异常输入导致拆分后每份过小，则回退到能满足最小保留量的最大份数。
         while split_count > 2 and (data_amount / split_count) < self.min_split_size:
