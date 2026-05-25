@@ -24,6 +24,7 @@ import random
 import re
 import signal
 import sys
+import time
 from collections import Counter
 from dataclasses import dataclass, field
 from copy import deepcopy
@@ -31,7 +32,7 @@ from datetime import datetime
 from enum import Enum
 from functools import lru_cache
 from pathlib import Path
-from typing import Any, Dict, List, Optional, Set, Tuple, Union
+from typing import Any, Dict, List, Optional, Sequence, Set, Tuple, Union
 from uuid import uuid4
 
 import numpy as np
@@ -126,6 +127,7 @@ from prediction_delivery import MODELS_DIR, predict_pooling
 # ==================== 排机超时控制 ====================
 # 排机最长允许运行时间（秒）。超过此时间视为异常，强制中断并返回失败。
 SCHEDULING_TIMEOUT_SECONDS = 600  # 10 分钟
+TERMINAL_GLOBAL_36T_TIME_BUDGET_SECONDS = 45
 
 
 class SchedulingTimeoutError(Exception):
@@ -3538,6 +3540,8 @@ def _enforce_mode_1_1_add_test_cap_per_lane(
         lane_libraries = list(getattr(lane, "libraries", []) or [])
         if not lane_libraries:
             continue
+        if _is_mode_1_1_second_round_lane(lane):
+            continue
         if not _is_mode_1_1_lane_context(lane, lane_libraries):
             continue
         add_test_libraries = [
@@ -5309,6 +5313,11 @@ def _attempt_build_lane_from_pool(
                     )
                     if total + data > trial_max_allowed:
                         continue
+                    if _violates_mode_1_1_add_test_cap(
+                        trial_libs,
+                        lane_metadata=extra_metadata,
+                    ):
+                        continue
                     candidate_light_valid, _ = _quick_check_lane_candidate(
                         libraries=trial_libs,
                         machine_type=machine_type,
@@ -5354,6 +5363,11 @@ def _attempt_build_lane_from_pool(
                     lane_metadata=extra_metadata,
                 )
                 if total + data > trial_max_allowed:
+                    continue
+                if _violates_mode_1_1_add_test_cap(
+                    trial_libs,
+                    lane_metadata=extra_metadata,
+                ):
                     continue
                 ss_valid, _, _ = _validate_lane_special_split_rule(trial_libs)
                 if not ss_valid:
@@ -6299,8 +6313,6 @@ def _get_library_detail_output_key(lib: EnhancedLibraryInfo) -> str:
 
 def _is_ai_balance_library(lib: Any) -> bool:
     """判断是否为排机后新增的AI平衡文库。"""
-    if bool(getattr(lib, BALANCE_LIBRARY_MARKER_COLUMN, False)):
-        return True
     sample_id = _safe_str(getattr(lib, "sample_id", None) or getattr(lib, "wksampleid", None), default="")
     return sample_id.lower() == "phix"
 
@@ -8537,6 +8549,7 @@ def _try_build_global_mode_1_1_rescue_lane_from_pool(
         Dict[Tuple[str, Tuple[Tuple[str, str], ...], Tuple[str, ...]], Any]
     ] = None,
 ) -> Tuple[Optional[LaneAssignment], List[EnhancedLibraryInfo]]:
+    deadline = time.monotonic() + TERMINAL_GLOBAL_36T_TIME_BUDGET_SECONDS
     lane_metadata = {
         "selected_seq_mode": "1.1",
         "seq_mode": "1.1",
@@ -8560,6 +8573,7 @@ def _try_build_global_mode_1_1_rescue_lane_from_pool(
             lane_id_prefix="GL",
             extra_metadata=lane_metadata,
             max_candidates=240,
+            deadline=deadline,
         )
     if lane and used:
         for lib in list(getattr(lane, "libraries", []) or []):
@@ -9104,6 +9118,57 @@ def _is_mode_1_1_add_test_limited_library(lib: EnhancedLibraryInfo) -> bool:
     if remark and remark not in negative_remarks:
         return any(keyword in remark for keyword in ("加测", "混合"))
     return False
+
+
+def _mode_1_1_add_test_limited_data_gb(libraries: Sequence[EnhancedLibraryInfo]) -> float:
+    return sum(
+        float(getattr(lib, "contract_data_raw", 0.0) or lib.get_data_amount_gb() or 0.0)
+        for lib in libraries
+        if _is_mode_1_1_add_test_limited_library(lib)
+    )
+
+
+def _is_mode_1_1_metadata(metadata: Optional[Dict[str, Any]]) -> bool:
+    for key in ("selected_seq_mode", "seq_mode", "lcxms", "sequencing_mode"):
+        value = _safe_str((metadata or {}).get(key), default="").strip()
+        if value:
+            return value in {"1", "1.0", "1.1"}
+    return False
+
+
+def _is_mode_1_1_second_round_metadata(metadata: Optional[Dict[str, Any]]) -> bool:
+    if not metadata:
+        return False
+    second_round_label = str(
+        get_scheduling_config().get_mode_1_1_config().get("second_round_label", "1.1第二轮")
+    ).strip()
+    return _safe_str(metadata.get("selected_round_label"), default="").strip() == second_round_label
+
+
+def _violates_mode_1_1_add_test_cap(
+    libraries: Sequence[EnhancedLibraryInfo],
+    *,
+    lane_metadata: Optional[Dict[str, Any]] = None,
+    max_add_test_gb_per_lane: float = 150.0,
+) -> bool:
+    if max_add_test_gb_per_lane <= 0 or not libraries:
+        return False
+    if _is_mode_1_1_second_round_metadata(lane_metadata):
+        return False
+    is_mode_1_1 = _is_mode_1_1_metadata(lane_metadata) or any(
+        _safe_str(
+            getattr(lib, "_current_seq_mode_raw", None)
+            or getattr(lib, "selected_seq_mode", None)
+            or getattr(lib, "current_seq_mode", None)
+            or getattr(lib, "lcxms", None),
+            default="",
+        ).strip()
+        in {"1", "1.0", "1.1"}
+        for lib in libraries
+    )
+    if not is_mode_1_1:
+        return False
+    return _mode_1_1_add_test_limited_data_gb(libraries) > max_add_test_gb_per_lane + 1e-6
 
 
 def _is_forbidden_in_mode_1_1_by_secondary_36t_policy(lib: EnhancedLibraryInfo) -> bool:
@@ -11308,6 +11373,14 @@ def _validate_lane_state(
     skip_peak_size=True：跳过 peak_size 错误/警告的判断。专用不均衡 lane 注入平衡文库
     时使用——该 lane 的 peak_size 分布是排机时就已形成的既成事实，平衡文库不应因此被阻止。
     """
+    if _is_mode_1_1_second_round_lane(lane):
+        return LaneValidationResult(
+            lane_id=lane.lane_id,
+            is_valid=True,
+            errors=[],
+            warnings=[],
+        )
+
     if _is_package_lane_assignment(lane):
         package_errors = _validate_package_lane_rules(lane, libraries=libraries)
         return LaneValidationResult(
@@ -11631,6 +11704,10 @@ def _filter_valid_lanes(
     valid_lanes: List[LaneAssignment] = []
     failed_lanes: List[LaneAssignment] = []
     for lane in lanes:
+        if _is_mode_1_1_second_round_lane(lane):
+            valid_lanes.append(lane)
+            continue
+
         if _is_split_lane_forbidden_by_mode(lane):
             failed_lanes.append(lane)
             logger.warning(
@@ -11687,7 +11764,14 @@ def _candidate_can_join_terminal_repair_lane(
         return False
     if _shares_split_family_with_selected(current_libs, candidate):
         return False
-    if _is_mode_1_1_lane_context(lane, current_libs):
+    is_mode_1_1_repair_context = (
+        not _is_mode_1_1_second_round_lane(lane)
+        and (
+            _is_mode_1_1_lane_context(lane, current_libs)
+            or _normalize_mode_1_1_alias(_get_lane_selected_mode(lane)) == "1.1"
+        )
+    )
+    if is_mode_1_1_repair_context:
         if not _is_allowed_mode_1_1_candidate_library(candidate):
             return False
     candidate_data = float(getattr(candidate, "contract_data_raw", 0.0) or 0.0)
@@ -11695,7 +11779,7 @@ def _candidate_can_join_terminal_repair_lane(
         return False
 
     trial_libs = list(current_libs) + [candidate]
-    if _is_mode_1_1_lane_context(lane, current_libs):
+    if is_mode_1_1_repair_context:
         add_test_total = sum(
             float(getattr(lib, "contract_data_raw", 0.0) or 0.0)
             for lib in trial_libs
@@ -11756,7 +11840,11 @@ def _try_repair_failed_lane_with_unassigned_pool(
         [
             lib for lib in list(unassigned_pool)
             if not (
-                _is_mode_1_1_lane_context(lane, current_libs)
+                not _is_mode_1_1_second_round_lane(lane)
+                and (
+                    _is_mode_1_1_lane_context(lane, current_libs)
+                    or _normalize_mode_1_1_alias(_get_lane_selected_mode(lane)) == "1.1"
+                )
                 and not _is_allowed_mode_1_1_candidate_library(lib)
             )
         ],
@@ -11789,6 +11877,20 @@ def _try_repair_failed_lane_with_unassigned_pool(
     final_result = _validate_lane_state(validator, lane, current_libs)
     if not final_result.is_valid:
         return stats
+    if (
+        not _is_mode_1_1_second_round_lane(lane)
+        and (
+            _is_mode_1_1_lane_context(lane, current_libs)
+            or _normalize_mode_1_1_alias(_get_lane_selected_mode(lane)) == "1.1"
+        )
+    ):
+        mode_1_1_config = get_scheduling_config().get_mode_1_1_config()
+        max_add_test_gb = float(
+            (mode_1_1_config or {}).get("first_round_add_test_max_gb_per_lane", 150.0)
+            or 0.0
+        )
+        if _mode_1_1_add_test_limited_data_gb(current_libs) > max_add_test_gb + 1e-6:
+            return stats
 
     for candidate in additions:
         lane.add_library(candidate)
@@ -12941,8 +13043,15 @@ def _attempt_build_terminal_dedicated_lane_from_group(
     lane_id_prefix: str,
     extra_metadata: Dict[str, Any],
     max_candidates: int = 120,
+    deadline: Optional[float] = None,
 ) -> Tuple[Optional[LaneAssignment], List[EnhancedLibraryInfo], str]:
     """在单一文库类型池内做有限顺序贪心搜索，避免全DFS组合爆炸。"""
+    def timed_out() -> bool:
+        return deadline is not None and time.monotonic() >= deadline
+
+    if timed_out():
+        return None, [], "time_budget_exhausted"
+
     hard_skip_reason = _terminal_dedicated_pool_hard_skip_reason(
         pool,
         machine_type=machine_type,
@@ -13027,6 +13136,8 @@ def _attempt_build_terminal_dedicated_lane_from_group(
         selected: List[EnhancedLibraryInfo] = []
         total_gb = 0.0
         for lib in order:
+            if timed_out():
+                return None, []
             if _shares_split_family_with_selected(selected, lib):
                 continue
             trial_selected = selected + [lib]
@@ -13061,6 +13172,8 @@ def _attempt_build_terminal_dedicated_lane_from_group(
         rotated = candidates[offset:] + candidates[:offset]
         orders.append(rotated)
     for order in orders:
+        if timed_out():
+            return None, [], "time_budget_exhausted"
         lane, used = greedy_from_order(order)
         if lane is not None:
             return lane, used, "success"
@@ -13834,6 +13947,11 @@ def _try_add_terminal_global_36t_mixed_lanes(
     max_lanes: int = 32,
 ) -> Dict[str, int]:
     """终态全局3.6混排救援：跨桶组合已通过1.1门禁的3.6T候选。"""
+    deadline = time.monotonic() + TERMINAL_GLOBAL_36T_TIME_BUDGET_SECONDS
+
+    def time_budget_exhausted() -> bool:
+        return time.monotonic() >= deadline
+
     stats = {
         "new_lanes": 0,
         "used_originals": 0,
@@ -14069,6 +14187,13 @@ def _try_add_terminal_global_36t_mixed_lanes(
         ]
         group_added = 0
         while split_pack_added <= 0 and incremental_added <= 0 and filler_pool and group_added < max_lanes:
+            if time_budget_exhausted():
+                logger.warning(
+                    "终态全局3.6跨机型普通混排补Lane达到时间预算{}秒，跳过剩余兜底搜索".format(
+                        TERMINAL_GLOBAL_36T_TIME_BUDGET_SECONDS,
+                    )
+                )
+                break
             machine_type = resolve_terminal_lane_machine_type(filler_pool)
             lane_metadata = {
                 "selected_seq_mode": "3.6T-NEW",
@@ -14083,8 +14208,15 @@ def _try_add_terminal_global_36t_mixed_lanes(
                 lane_id_prefix="GM",
                 extra_metadata=lane_metadata,
                 max_candidates=360,
+                deadline=deadline,
             )
             if lane is None or not used_libraries:
+                if time_budget_exhausted():
+                    logger.warning(
+                        "终态全局3.6跨机型普通混排补Lane达到时间预算{}秒，停止本阶段".format(
+                            TERMINAL_GLOBAL_36T_TIME_BUDGET_SECONDS,
+                        )
+                    )
                 break
             lane_used_ids = {id(lib) for lib in used_libraries}
             added_lanes.append(lane)

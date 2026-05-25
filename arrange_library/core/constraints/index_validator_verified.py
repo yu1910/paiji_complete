@@ -8,7 +8,7 @@ Index验证器 - 基于真实数据验证的Index冲突检测
 修改记录：2026-05-08 - 调整Index冲突判定：单双混排只核对P7，双端按P7/P5联合判定
 """
 
-from typing import List, Tuple, Optional
+from typing import List, Tuple, Optional, Set
 from dataclasses import dataclass
 from enum import Enum
 from loguru import logger
@@ -20,6 +20,7 @@ from arrange_library.models.library_info import EnhancedLibraryInfo
 
 # 单端默认右端序列基准（从真实数据验证程序复制）
 DEFAULT_SINGLE_RIGHT_BASE = "ACCGAGATCT"
+_LOGGED_CONFLICT_SIGNATURES: Set[Tuple[str, ...]] = set()
 
 
 class ConflictType(Enum):
@@ -72,6 +73,7 @@ class IndexValidatorVerified:
     def __init__(self):
         """初始化校验器"""
         self.default_right_base = DEFAULT_SINGLE_RIGHT_BASE
+        self._parsed_indices_cache = {}
         logger.info("Index校验器初始化完成（真实数据验证版本）")
 
     @staticmethod
@@ -151,9 +153,25 @@ class IndexValidatorVerified:
         
         is_valid = len(conflicts) == 0
         
-        # 静默模式下不打印警告，避免启发式改进时产生大量日志
+        # 静默模式下不打印警告，避免启发式改进时产生大量日志。
+        # 非静默校验也只对同一批文库首次告警，排后多轮复核会反复验证同一Lane。
         if not is_valid and not silent:
-            logger.warning(f"Lane内发现 {len(conflicts)} 个Index冲突")
+            conflict_signature = tuple(
+                sorted(
+                    "{}|{}|{}|{}|{}|{}".format(
+                        conflict.library1_id,
+                        conflict.library2_id,
+                        conflict.conflict_type.value,
+                        conflict.left1,
+                        conflict.right1,
+                        conflict.left2,
+                    )
+                    for conflict in conflicts
+                )
+            )
+            if conflict_signature not in _LOGGED_CONFLICT_SIGNATURES:
+                _LOGGED_CONFLICT_SIGNATURES.add(conflict_signature)
+                logger.warning(f"Lane内发现 {len(conflicts)} 个Index冲突")
         
         return ValidationResult(
             is_valid=is_valid,
@@ -305,8 +323,13 @@ class IndexValidatorVerified:
             List[Tuple[str, Optional[str]]]: [(left, right), ...] 列表
         """
         index_seq = getattr(lib, 'index_seq', None) or getattr(lib, 'indexseq', '')
+        cache_key = (id(lib), str(index_seq or ""))
+        cached = self._parsed_indices_cache.get(cache_key)
+        if cached is not None:
+            return list(cached)
         
         if not index_seq or str(index_seq).strip().upper() == "NO INDEX":
+            self._parsed_indices_cache[cache_key] = ()
             return []
         
         index_seq = str(index_seq).strip()
@@ -327,6 +350,7 @@ class IndexValidatorVerified:
                 # 单端Index
                 parsed.append((item, None))
         
+        self._parsed_indices_cache[cache_key] = tuple(parsed)
         return parsed
     
     def _check_index_pair_repeat(

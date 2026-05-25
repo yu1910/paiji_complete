@@ -32,6 +32,7 @@
 import random
 import time
 import math
+import heapq
 from typing import Any, List, Dict, Optional, Tuple, Set
 from dataclasses import dataclass, field, replace
 from loguru import logger
@@ -87,6 +88,10 @@ class GreedyLaneConfig:
     # ===== 碱基不均衡数据量限制 =====
     # [2026-01-30 修正] 调整为：Nova X-25B 特殊文库总量 350G
     max_special_library_data_gb: float = 350.0
+
+    # 1.1 首轮/补排单 Lane 内“加测/混合”文库合同量封顶。
+    # 这是终态封顶规则的前置准入版本，避免先排入再整 lane 回退重排。
+    mode_1_1_add_test_max_gb_per_lane: float = 150.0
     
     # ===== 碱基不均衡占比上限 =====
     # [2026-01-30 修正] 调整为：3.6T-NEW模式碱基不均衡占比 ≤35%
@@ -1324,7 +1329,55 @@ class GreedyLaneScheduler:
             removed_libs: List[EnhancedLibraryInfo] = []  # 记录被踢出的文库
             fill_candidates = self._sort_remaining_for_scattered_mix_lane(unassigned)
             lane_fill_capacity_cache: Dict[int, Tuple[str, float]] = {}
+            post_fill_index_cache: Dict[Tuple[int, ...], bool] = {}
+            post_fill_peak_cache: Dict[Tuple[int, ...], bool] = {}
             post_fill_lane_window = min(len(all_lanes), 8 if len(all_lanes) > 8 else len(all_lanes))
+
+            def _post_fill_lib_signature(libs: List[EnhancedLibraryInfo]) -> Tuple[int, ...]:
+                return tuple(
+                    sorted(
+                        int(getattr(candidate, "origrec", 0) or id(candidate))
+                        for candidate in libs
+                    )
+                )
+
+            def _post_fill_index_ok(libs: List[EnhancedLibraryInfo]) -> bool:
+                signature = _post_fill_lib_signature(libs)
+                cached = post_fill_index_cache.get(signature)
+                if cached is not None:
+                    return cached
+                result = self.index_validator.validate_lane_quick(libs)
+                post_fill_index_cache[signature] = result
+                return result
+
+            def _post_fill_incremental_index_ok(
+                existing_libs: List[EnhancedLibraryInfo],
+                new_lib: EnhancedLibraryInfo,
+            ) -> bool:
+                existing_signature = _post_fill_lib_signature(existing_libs)
+                existing_ok = post_fill_index_cache.get(existing_signature)
+                if existing_ok is None:
+                    existing_ok = self.index_validator.validate_lane_quick(existing_libs)
+                    post_fill_index_cache[existing_signature] = existing_ok
+                if not existing_ok:
+                    return False
+
+                combined_signature = _post_fill_lib_signature(existing_libs + [new_lib])
+                cached = post_fill_index_cache.get(combined_signature)
+                if cached is not None:
+                    return cached
+                result = self.index_validator.validate_new_lib_quick(existing_libs, new_lib)
+                post_fill_index_cache[combined_signature] = result
+                return result
+
+            def _post_fill_peak_ok(libs: List[EnhancedLibraryInfo]) -> bool:
+                signature = _post_fill_lib_signature(libs)
+                cached = post_fill_peak_cache.get(signature)
+                if cached is not None:
+                    return cached
+                result = self._check_peak_size_compatible(libs)
+                post_fill_peak_cache[signature] = result
+                return result
 
             def _refresh_fill_lane_capacity(lane: LaneAssignment) -> Tuple[str, float]:
                 machine_type_str = lane.machine_type.value if lane.machine_type else "Nova X-25B"
@@ -1357,8 +1410,14 @@ class GreedyLaneScheduler:
                             lane,
                         )
                     )
-                scored_lanes.sort(key=lambda item: item[0])
-                return [lane for _, lane in scored_lanes[:post_fill_lane_window]]
+                return [
+                    lane
+                    for _, lane in heapq.nsmallest(
+                        post_fill_lane_window,
+                        scored_lanes,
+                        key=lambda item: item[0],
+                    )
+                ]
             
             for lib in fill_candidates:
                 placed = False
@@ -1413,14 +1472,13 @@ class GreedyLaneScheduler:
                     
                     # 检查Index兼容性
                     if self.config.enable_index_check:
-                        test_libs = lane.libraries + [lib]
-                        if not self.index_validator.validate_lane_quick(test_libs):
+                        if not _post_fill_incremental_index_ok(lane.libraries, lib):
                             continue
                         initial_index_checked = True
                     
                     # [2025-12-25 新增] Peak Size约束检查
                     test_libs_for_peak = lane.libraries + [lib]
-                    if not self._check_peak_size_compatible(test_libs_for_peak):
+                    if not _post_fill_peak_ok(test_libs_for_peak):
                         continue
                     initial_peak_checked = True
                     
@@ -1577,10 +1635,9 @@ class GreedyLaneScheduler:
                     
                     # 6. 最终Index冲突检查（确保添加后没有Index冲突）
                     if self.config.enable_index_check:
-                        final_test_libs = lane.libraries + [lib]
                         if (
                             (not initial_index_checked or lane_mutated_during_attempt)
-                            and not self.index_validator.validate_lane_quick(final_test_libs)
+                            and not _post_fill_incremental_index_ok(lane.libraries, lib)
                         ):
                             continue  # 最终Index冲突检查失败，拒绝添加
                     
@@ -3428,6 +3485,61 @@ class GreedyLaneScheduler:
         )
         add_test_ratio = add_test_data / total_data
         return add_test_ratio <= effective_limit
+
+    def _is_mode_1_1_context(
+        self,
+        libraries: List[EnhancedLibraryInfo],
+        metadata: Optional[Dict[str, Any]] = None,
+    ) -> bool:
+        metadata = metadata or {}
+        for key in ("selected_seq_mode", "seq_mode", "lcxms", "sequencing_mode"):
+            value = str(metadata.get(key, "") or "").strip()
+            if value:
+                return value in {"1", "1.0", "1.1"}
+        return any(
+            str(
+                getattr(lib, "_current_seq_mode_raw", None)
+                or getattr(lib, "selected_seq_mode", None)
+                or getattr(lib, "current_seq_mode", None)
+                or getattr(lib, "lcxms", None)
+                or ""
+            ).strip()
+            in {"1", "1.0", "1.1"}
+            for lib in libraries
+        )
+
+    @staticmethod
+    def _is_mode_1_1_add_test_limited_library(lib: EnhancedLibraryInfo) -> bool:
+        remark = str(
+            getattr(lib, "add_tests_remark", None)
+            or getattr(lib, "wkaddtestsremark", None)
+            or getattr(lib, "add_test_remark", None)
+            or getattr(lib, "wkjcbz", None)
+            or getattr(lib, "remark", None)
+            or ""
+        ).strip()
+        if remark in {"非加测", "无加测", "不加测", "无需加测", "未加测"}:
+            return False
+        return bool(remark) and any(keyword in remark for keyword in ("加测", "混合"))
+
+    def _check_mode_1_1_add_test_cap_compatible(
+        self,
+        libraries: List[EnhancedLibraryInfo],
+        metadata: Optional[Dict[str, Any]] = None,
+    ) -> bool:
+        max_gb = float(getattr(self.config, "mode_1_1_add_test_max_gb_per_lane", 0.0) or 0.0)
+        if max_gb <= 0 or not libraries:
+            return True
+        if str((metadata or {}).get("selected_round_label", "") or "").strip() == "1.1第二轮":
+            return True
+        if not self._is_mode_1_1_context(libraries, metadata):
+            return True
+        add_test_data = sum(
+            lib.get_data_amount_gb()
+            for lib in libraries
+            if self._is_mode_1_1_add_test_limited_library(lib)
+        )
+        return add_test_data <= max_gb + 1e-6
     
     def _library_has_10bp_index(self, lib: EnhancedLibraryInfo) -> bool:
         """
@@ -5441,6 +5553,16 @@ class GreedyLaneScheduler:
         is_sl_lane = lane.lane_id.startswith('SL_')
         machine_type_str = lane.machine_type.value if lane.machine_type else (lib.eq_type or "Nova X-25B")
         lane_metadata = self._build_lane_validation_metadata(lane)
+
+        if not self._check_mode_1_1_add_test_cap_compatible(test_libraries, lane_metadata):
+            self._log_can_add_reject(
+                "mode_1_1_add_test_cap",
+                "1.1单Lane加测/混合文库合同量超过150G上限",
+                lane,
+                lib,
+                test_libraries,
+            )
+            return False
 
         if is_dl_lane:
             if not self._is_dedicated_imbalance_library(lib):
