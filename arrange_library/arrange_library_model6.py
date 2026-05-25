@@ -13936,6 +13936,24 @@ def _try_add_terminal_sample_type_dedicated_lanes(
 
     if added_lanes:
         solution.lane_assignments.extend(added_lanes)
+    assigned_identity_keys = {
+        _get_library_identity_key(lib)
+        for lane in added_lanes
+        for lib in list(getattr(lane, "libraries", []) or [])
+        if not _is_ai_balance_library(lib)
+    }
+    if assigned_identity_keys:
+        before_unassigned = len(passthrough)
+        passthrough = [
+            lib for lib in passthrough
+            if _get_library_identity_key(lib) not in assigned_identity_keys
+        ]
+        removed_overlap = before_unassigned - len(passthrough)
+        if removed_overlap > 0:
+            logger.warning(
+                "终态文库类型专池提交后清理未分配重叠文库: {}个",
+                removed_overlap,
+            )
     solution.unassigned_libraries = passthrough
     stats["remaining_unassigned"] = len(solution.unassigned_libraries)
     return stats
@@ -17758,6 +17776,16 @@ def arrange_library(
                     final_export_cleanup_stats["recovered_libs"],
                 )
             )
+
+    final_export_dedup_stats = _deduplicate_solution_libraries(solution)
+    if any(v > 0 for v in final_export_dedup_stats.values()):
+        logger.warning(
+            "最终导出前文库去重: Lane内重复移除={}，空Lane移除={}，未分配与已分配冲突移除={}，未分配重复移除={}",
+            final_export_dedup_stats["removed_assigned_duplicates"],
+            final_export_dedup_stats["removed_empty_lanes"],
+            final_export_dedup_stats["removed_unassigned_assigned_overlap"],
+            final_export_dedup_stats["removed_unassigned_duplicates"],
+        )
 
     final_renamed_lane_ids = _ensure_unique_lane_ids(solution.lane_assignments)
     if final_renamed_lane_ids > 0:
