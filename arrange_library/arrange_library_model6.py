@@ -12734,6 +12734,9 @@ def _try_pack_cross_split_fragments_into_lanes(
         lane_id = f"XS_{machine_type.value}_{_reserve_auto_lane_serial('XS', machine_type):03d}"
         lane.lane_id = lane_id
         lane.machine_id = f"M_{lane_id}"
+        lane.metadata["_terminal_used_original_libraries"] = [
+            source for source, _, _ in source_records
+        ]
     return lanes
 
 
@@ -12850,6 +12853,9 @@ def _try_pack_sample_type_split_fragments_greedy(
         lane_id = f"{lane_id_prefix}_{machine_type.value}_{_reserve_auto_lane_serial(lane_id_prefix, machine_type):03d}"
         lane.lane_id = lane_id
         lane.machine_id = f"M_{lane_id}"
+        lane.metadata["_terminal_used_original_libraries"] = [
+            source for source, _, _ in source_records
+        ]
         added_lanes.append(lane)
 
         used_fragment_keys = {id(fragment) for fragment in picked_fragments}
@@ -13068,6 +13074,9 @@ def _try_pack_sample_type_split_fragments_with_fillers(
         for lane in lanes:
             lane.metadata["_terminal_used_filler_ids"] = [id(lib) for lib in used_fillers]
             lane.metadata["_terminal_used_source_ids"] = [id(source) for source, _, _ in selected_split_records]
+            lane.metadata["_terminal_used_original_libraries"] = (
+                [source for source, _, _ in selected_split_records] + list(used_fillers)
+            )
         return lanes
 
     for lane_count in candidate_lane_counts:
@@ -14757,30 +14766,53 @@ def _final_non_package_validation_cleanup(
     for lane in failed_lanes:
         # 只回收原始合同文库，AI生成的平衡文库不放回未分配池
         original_libs: List[EnhancedLibraryInfo] = []
-        for lib in list(lane.libraries or []):
-            if _is_ai_balance_library(lib):
-                continue
-            if _is_split_library(lib):
-                family_id = _get_split_family_id_for_lane_build(lib)
-                source_library = getattr(lib, "_split_source_library", None)
-                if source_library is not None:
-                    source_library.is_split = False
-                    source_library.wkissplit = ""
-                    source_library.split_status = "rolled_back"
-                    source_library.original_library_id = ""
-                    source_library.fragment_index = 0
-                    source_library.total_fragments = 0
-                    source_library.fragment_id = ""
-                    if family_id:
-                        recovered_split_family_ids.add(family_id)
-                    source_key = _get_library_source_origrec_key(source_library)
-                    if not source_key or source_key not in recovered_source_keys:
-                        original_libs.append(source_library)
-                        if source_key:
-                            recovered_source_keys.add(source_key)
+        terminal_used_originals = []
+        if isinstance(getattr(lane, "metadata", None), dict):
+            terminal_used_originals = list(
+                lane.metadata.get("_terminal_used_original_libraries") or []
+            )
+        if terminal_used_originals:
+            for source_library in terminal_used_originals:
+                if source_library is None or _is_ai_balance_library(source_library):
                     continue
-                # 没有 source 上下文时才保留片段，后续拆分兜底复核继续处理。
-            original_libs.append(lib)
+                source_library.is_split = False
+                source_library.wkissplit = ""
+                source_library.split_status = "rolled_back"
+                source_library.original_library_id = ""
+                source_library.fragment_index = 0
+                source_library.total_fragments = 0
+                source_library.fragment_id = ""
+                source_key = _get_library_source_origrec_key(source_library)
+                if not source_key or source_key not in recovered_source_keys:
+                    original_libs.append(source_library)
+                    if source_key:
+                        recovered_source_keys.add(source_key)
+        else:
+            lane_libraries_for_recovery = list(lane.libraries or [])
+            for lib in lane_libraries_for_recovery:
+                if _is_ai_balance_library(lib):
+                    continue
+                if _is_split_library(lib):
+                    family_id = _get_split_family_id_for_lane_build(lib)
+                    source_library = getattr(lib, "_split_source_library", None)
+                    if source_library is not None:
+                        source_library.is_split = False
+                        source_library.wkissplit = ""
+                        source_library.split_status = "rolled_back"
+                        source_library.original_library_id = ""
+                        source_library.fragment_index = 0
+                        source_library.total_fragments = 0
+                        source_library.fragment_id = ""
+                        if family_id:
+                            recovered_split_family_ids.add(family_id)
+                        source_key = _get_library_source_origrec_key(source_library)
+                        if not source_key or source_key not in recovered_source_keys:
+                            original_libs.append(source_library)
+                            if source_key:
+                                recovered_source_keys.add(source_key)
+                        continue
+                    # 没有 source 上下文时才保留片段，后续拆分兜底复核继续处理。
+                original_libs.append(lib)
 
         solution.unassigned_libraries.extend(original_libs)
         recovered_libs += len(original_libs)
