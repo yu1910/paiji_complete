@@ -46,7 +46,7 @@
   "lane_rule_profiles": [
     {
       "rule_code": "tj_1595_special_combo_36t",
-      "priority": 400,
+      "priority": 250,
       "process_codes": [1595],
       "test_nos": ["Novaseq X Plus-PE150"],
       "machine_types": ["Nova X-25B", "NovaSeq X Plus"],
@@ -66,7 +66,7 @@
     },
     {
       "rule_code": "tj_1595_mode_1_1_normal_prefer_single_lane",
-      "priority": 370,
+      "priority": 420,
       "process_codes": [1595],
       "test_nos": ["Novaseq X Plus-PE150"],
       "machine_types": ["Nova X-25B", "NovaSeq X Plus"],
@@ -88,7 +88,7 @@
     },
     {
       "rule_code": "tj_1595_mode_1_1_risk_prefer_single_lane",
-      "priority": 360,
+      "priority": 410,
       "process_codes": [1595],
       "test_nos": ["Novaseq X Plus-PE150"],
       "machine_types": ["Nova X-25B", "NovaSeq X Plus"],
@@ -110,7 +110,7 @@
     },
     {
       "rule_code": "tj_1595_mode_1_1_special_combo",
-      "priority": 380,
+      "priority": 430,
       "process_codes": [1595],
       "test_nos": ["Novaseq X Plus-PE150"],
       "machine_types": ["Nova X-25B", "NovaSeq X Plus"],
@@ -130,7 +130,7 @@
     },
     {
       "rule_code": "tj_1595_mode_1_1",
-      "priority": 300,
+      "priority": 400,
       "process_codes": [1595],
       "test_nos": ["Novaseq X Plus-PE150"],
       "machine_types": ["Nova X-25B", "NovaSeq X Plus"],

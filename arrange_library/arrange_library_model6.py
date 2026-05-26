@@ -4416,6 +4416,75 @@ def _validate_package_lane_rules(
     return errors
 
 
+def _resolve_lane_validation_profile(
+    lane: LaneAssignment,
+    libraries: Optional[List[EnhancedLibraryInfo]] = None,
+) -> str:
+    """解析终态复核应采用的校验口径。"""
+    lane_libraries = libraries if libraries is not None else (getattr(lane, "libraries", []) or [])
+    if _is_mode_1_1_second_round_lane(lane):
+        return "mode_1_1_second_round"
+    if _is_package_lane_assignment(lane):
+        return "package_lane"
+    if _is_lane_seq_10_plus_24_lane_assignment(lane):
+        return "lane_seq_10_plus_24"
+    return "capacity_rule_table"
+
+
+def _resolve_lane_validation_capacity_window(
+    lane: LaneAssignment,
+    libraries: Optional[List[EnhancedLibraryInfo]] = None,
+) -> Dict[str, Any]:
+    """返回终态复核使用的容量窗口及来源说明。"""
+    lane_libraries = list(libraries if libraries is not None else (getattr(lane, "libraries", []) or []))
+    profile = _resolve_lane_validation_profile(lane, lane_libraries)
+    if profile == "mode_1_1_second_round":
+        return {
+            "profile": profile,
+            "capacity_check_enabled": False,
+            "source": "mode_1_1_second_round_exempt",
+        }
+    if profile == "package_lane":
+        return {
+            "profile": profile,
+            "capacity_check_enabled": True,
+            "min_gb": PACKAGE_LANE_MIN_GB,
+            "max_gb": PACKAGE_LANE_MAX_GB,
+            "source": "package_lane_fixed_window",
+        }
+    if profile == "lane_seq_10_plus_24":
+        return {
+            "profile": profile,
+            "capacity_check_enabled": True,
+            "min_gb": LANE_SEQ_10_PLUS_24_TARGET_TOTAL_GB - LANE_SEQ_10_PLUS_24_TOLERANCE_GB,
+            "max_gb": LANE_SEQ_10_PLUS_24_TARGET_TOTAL_GB + LANE_SEQ_10_PLUS_24_TOLERANCE_GB,
+            "source": "lane_seq_10_plus_24_fixed_window",
+        }
+
+    machine_type = lane.machine_type.value if lane.machine_type else "Nova X-25B"
+    metadata = getattr(lane, "metadata", None)
+    min_gb, max_gb = _resolve_lane_capacity_limits(
+        lane_libraries,
+        machine_type,
+        lane_id=_safe_str(getattr(lane, "lane_id", None), default=""),
+        lane_metadata=metadata if isinstance(metadata, dict) else None,
+    )
+    selection = _resolve_lane_capacity_selection(
+        lane_libraries,
+        machine_type,
+        lane_id=_safe_str(getattr(lane, "lane_id", None), default=""),
+        lane_metadata=metadata if isinstance(metadata, dict) else None,
+    )
+    return {
+        "profile": profile,
+        "capacity_check_enabled": True,
+        "min_gb": min_gb,
+        "max_gb": max_gb,
+        "rule_code": _safe_str(getattr(selection, "rule_code", ""), default=""),
+        "source": "capacity_rule_table",
+    }
+
+
 def _cleanup_stale_package_lanes_before_validation(solution: Any) -> Dict[str, int]:
     """移除拆分回滚后只剩平衡文库/无真实包Lane文库的残留包Lane。"""
     lanes = list(getattr(solution, "lane_assignments", []) or [])
@@ -4966,6 +5035,147 @@ def _is_customer_library_candidate(lib: EnhancedLibraryInfo) -> bool:
     """识别客户文库。"""
     sample_id = _safe_library_text(lib, "sample_id", "wksampleid")
     return sample_id.upper().startswith("FKDL")
+
+
+CUSTOMER_IMBALANCE_LANE_GROUP = "G55"
+CUSTOMER_IMBALANCE_LANE_BALANCE_RATIO = 0.05
+CUSTOMER_MIX_IMBALANCE_MAX_RATIO = 0.35
+
+
+def _split_customer_imbalance_libraries(
+    libraries: List[EnhancedLibraryInfo],
+) -> tuple[List[EnhancedLibraryInfo], List[EnhancedLibraryInfo]]:
+    """拆分客户文库中的碱基不均/碱基均衡文库。"""
+    imbalance: List[EnhancedLibraryInfo] = []
+    balanced: List[EnhancedLibraryInfo] = []
+    for lib in list(libraries or []):
+        if _is_imbalance_library_candidate(lib):
+            imbalance.append(lib)
+        else:
+            balanced.append(lib)
+    return imbalance, balanced
+
+
+def _build_customer_mixed_lane_candidate_pool(
+    libraries: List[EnhancedLibraryInfo],
+    max_add_test_gb_per_lane: float,
+) -> List[EnhancedLibraryInfo]:
+    """为CK客户纯lane构建满足35/65约束的候选池。"""
+    non_add_libraries = [
+        lib for lib in list(libraries or [])
+        if not _is_mode_1_1_add_test_limited_library(lib)
+    ]
+    add_libraries = [
+        lib for lib in list(libraries or [])
+        if _is_mode_1_1_add_test_limited_library(lib)
+    ]
+    add_selected: List[EnhancedLibraryInfo] = []
+    add_selected_gb = 0.0
+    for lib in sorted(
+        add_libraries,
+        key=lambda item: float(getattr(item, "contract_data_raw", 0.0) or 0.0),
+        reverse=True,
+    ):
+        lib_data = float(getattr(lib, "contract_data_raw", 0.0) or 0.0)
+        if lib_data <= 0:
+            continue
+        if add_selected_gb + lib_data <= max_add_test_gb_per_lane + 1e-6:
+            add_selected.append(lib)
+            add_selected_gb += lib_data
+
+    eligible = non_add_libraries + add_selected
+    imbalance, balanced = _split_customer_imbalance_libraries(eligible)
+    if not balanced:
+        return []
+
+    selected: List[EnhancedLibraryInfo] = []
+    selected_ids: Set[int] = set()
+    balanced_total = 0.0
+    imbalance_total = 0.0
+
+    for lib in sorted(
+        balanced,
+        key=lambda item: float(getattr(item, "contract_data_raw", 0.0) or 0.0),
+        reverse=True,
+    ):
+        lib_data = float(getattr(lib, "contract_data_raw", 0.0) or 0.0)
+        if lib_data <= 0:
+            continue
+        selected.append(lib)
+        selected_ids.add(id(lib))
+        balanced_total += lib_data
+
+    max_imbalance_total = balanced_total * CUSTOMER_MIX_IMBALANCE_MAX_RATIO / max(
+        1.0 - CUSTOMER_MIX_IMBALANCE_MAX_RATIO,
+        1e-6,
+    )
+    for lib in sorted(
+        imbalance,
+        key=lambda item: float(getattr(item, "contract_data_raw", 0.0) or 0.0),
+        reverse=True,
+    ):
+        lib_data = float(getattr(lib, "contract_data_raw", 0.0) or 0.0)
+        if lib_data <= 0:
+            continue
+        if imbalance_total + lib_data <= max_imbalance_total + 1e-6:
+            selected.append(lib)
+            selected_ids.add(id(lib))
+            imbalance_total += lib_data
+
+    return selected
+
+
+def _validate_customer_pure_lane_shape(
+    lane: LaneAssignment,
+    libraries: List[EnhancedLibraryInfo],
+) -> List[str]:
+    """校验CK客户纯lane只允许两种形态：全不均G55或35/65客户混排。"""
+    lane_id = _safe_str(getattr(lane, "lane_id", None), default="")
+    if not lane_id.startswith("CK_"):
+        return []
+
+    real_libraries = [
+        lib for lib in list(libraries or [])
+        if not _is_ai_balance_library(lib)
+    ]
+    if not real_libraries:
+        return []
+    if any(not _is_customer_library_candidate(lib) for lib in real_libraries):
+        return ["CK客户纯lane混入了非客户文库"]
+
+    metadata = getattr(lane, "metadata", None)
+    if not isinstance(metadata, dict):
+        metadata = {}
+
+    imbalance, balanced = _split_customer_imbalance_libraries(real_libraries)
+    imbalance_total = _total_lane_data(imbalance)
+    balanced_total = _total_lane_data(balanced)
+    total = imbalance_total + balanced_total
+    if total <= 0:
+        return []
+
+    if not balanced:
+        errors: List[str] = []
+        if metadata.get("customer_imbalance_group") != CUSTOMER_IMBALANCE_LANE_GROUP:
+            errors.append("CK全碱基不均lane未标记G55")
+        ratio = _safe_float(
+            metadata.get("customer_balance_ratio"),
+            default=0.0,
+        )
+        if abs(ratio - CUSTOMER_IMBALANCE_LANE_BALANCE_RATIO) > 1e-6:
+            errors.append("CK全碱基不均lane平衡比例不是5%")
+        return errors
+
+    imbalance_ratio = imbalance_total / total
+    if imbalance_ratio > CUSTOMER_MIX_IMBALANCE_MAX_RATIO + 1e-6:
+        return [
+            "CK客户混排lane碱基不均占比{:.1%}超过35%上限".format(
+                imbalance_ratio,
+            )
+        ]
+    if metadata.get("customer_imbalance_group") == CUSTOMER_IMBALANCE_LANE_GROUP:
+        return ["CK客户混排lane不应标记G55/5%平衡"]
+    return []
 
 
 def _is_scattered_library_candidate(lib: EnhancedLibraryInfo) -> bool:
@@ -6506,7 +6716,7 @@ def _is_dedicated_imbalance_lane_context(
     metadata = lane_metadata or {}
     if lane_id_text.startswith("DL_") or bool(metadata.get("is_dedicated_imbalance_lane")):
         return True
-    return _is_all_real_libraries_base_imbalanced(libraries)
+    return False
 
 
 def _is_explicit_dedicated_imbalance_lane(lane: LaneAssignment) -> bool:
@@ -6605,6 +6815,17 @@ def _resolve_balance_reservation_context(
         return {"applied": False}
 
     explicit_balance_gb = _get_explicit_balance_data_from_context(libraries, metadata)
+    customer_balance_ratio = _safe_float(
+        metadata.get("customer_balance_ratio"),
+        default=0.0,
+    )
+    if metadata.get("customer_imbalance_group") == CUSTOMER_IMBALANCE_LANE_GROUP and customer_balance_ratio > 0:
+        return {
+            "applied": True,
+            "mode": "ratio",
+            "reserve_gb": round(explicit_balance_gb, 3) if explicit_balance_gb > 0 else 0.0,
+            "reserve_ratio": min(max(float(customer_balance_ratio), 0.0), 0.999999),
+        }
     if _is_package_lane_context(libraries, lane_metadata=metadata):
         if explicit_balance_gb <= 0:
             return {"applied": False}
@@ -6794,8 +7015,26 @@ def _resolve_lane_balance_data_gb(lane: LaneAssignment) -> float:
             return round(explicit_value, 3)
         denominator = max(1.0 - history_ratio, MIN_BALANCE_RATIO_DENOMINATOR)
         return round(non_balance_order * history_ratio / denominator, 3)
+    metadata = getattr(lane, "metadata", None)
+    if isinstance(metadata, dict) and metadata.get("customer_imbalance_group") == CUSTOMER_IMBALANCE_LANE_GROUP:
+        ratio = _safe_float(
+            metadata.get("customer_balance_ratio"),
+            default=CUSTOMER_IMBALANCE_LANE_BALANCE_RATIO,
+        )
+        if ratio <= 0:
+            return 0.0
+        if explicit_value > 0:
+            return round(explicit_value, 3)
+        non_balance_data = sum(
+            float(getattr(lib, "contract_data_raw", 0.0) or 0.0)
+            for lib in list(getattr(lane, "libraries", []) or [])
+            if not _is_ai_balance_library(lib)
+        )
+        return round(
+            _calculate_balance_amount_for_final_ratio(non_balance_data, ratio),
+            3,
+        )
     if not _is_explicit_dedicated_imbalance_lane(lane):
-        metadata = getattr(lane, "metadata", None)
         if isinstance(metadata, dict) and metadata.get("is_lane_seq_10_plus_24_lane"):
             if explicit_value > 0:
                 return round(explicit_value, 3)
@@ -8905,26 +9144,84 @@ def _consume_customer_libraries_as_mode_1_1_lanes(
                 total_data,
             )
             break
-        for lib in candidates:
-            lib._current_seq_mode_raw = "1.1"
-            lib.selected_seq_mode = "1.1"
-            lib.current_seq_mode = "1.1"
-            lib.lcxms = "1.1"
-        lane, used = _attempt_build_lane_from_pool(
-            pool=candidates,
-            validator=validator,
-            machine_type=MachineType.NOVA_X_25B,
-            lane_id_prefix="CK",
-            lane_serial=serial,
-            index_conflict_attempts=DEFAULT_INDEX_CONFLICT_ATTEMPTS * 4,
-            other_failure_attempts=DEFAULT_OTHER_FAILURE_ATTEMPTS * 4,
-            extra_metadata={
-                "selected_seq_mode": "1.1",
-                "seq_mode": "1.1",
-                "lcxms": "1.1",
-            },
-            prioritize_scattered_mix=False,
-        )
+        imbalance_candidates, balanced_candidates = _split_customer_imbalance_libraries(candidates)
+        lane = None
+        used: List[EnhancedLibraryInfo] = []
+
+        if imbalance_candidates and not balanced_candidates:
+            for lib in imbalance_candidates:
+                lib._current_seq_mode_raw = "1.1"
+                lib.selected_seq_mode = "1.1"
+                lib.current_seq_mode = "1.1"
+                lib.lcxms = "1.1"
+            lane, used = _attempt_build_lane_from_pool(
+                pool=imbalance_candidates,
+                validator=validator,
+                machine_type=MachineType.NOVA_X_25B,
+                lane_id_prefix="CK",
+                lane_serial=serial,
+                index_conflict_attempts=DEFAULT_INDEX_CONFLICT_ATTEMPTS * 4,
+                other_failure_attempts=DEFAULT_OTHER_FAILURE_ATTEMPTS * 4,
+                extra_metadata={
+                    "selected_seq_mode": "1.1",
+                    "seq_mode": "1.1",
+                    "lcxms": "1.1",
+                    "customer_imbalance_group": CUSTOMER_IMBALANCE_LANE_GROUP,
+                    "customer_balance_ratio": CUSTOMER_IMBALANCE_LANE_BALANCE_RATIO,
+                },
+                prioritize_scattered_mix=False,
+            )
+        else:
+            # CK非全不均场景优先尝试纯客户均衡lane；若均衡库自身不足1.1，再回退到35/65混排池。
+            balanced_only_candidates = list(balanced_candidates)
+            if _total_lane_data(balanced_only_candidates) + 1e-6 >= 2095.0:
+                for lib in balanced_only_candidates:
+                    lib._current_seq_mode_raw = "1.1"
+                    lib.selected_seq_mode = "1.1"
+                    lib.current_seq_mode = "1.1"
+                    lib.lcxms = "1.1"
+                lane, used = _attempt_build_lane_from_pool(
+                    pool=balanced_only_candidates,
+                    validator=validator,
+                    machine_type=MachineType.NOVA_X_25B,
+                    lane_id_prefix="CK",
+                    lane_serial=serial,
+                    index_conflict_attempts=DEFAULT_INDEX_CONFLICT_ATTEMPTS * 4,
+                    other_failure_attempts=DEFAULT_OTHER_FAILURE_ATTEMPTS * 4,
+                    extra_metadata={
+                        "selected_seq_mode": "1.1",
+                        "seq_mode": "1.1",
+                        "lcxms": "1.1",
+                        "customer_balance_ratio": 0.0,
+                    },
+                    prioritize_scattered_mix=False,
+                )
+            if not lane or not used:
+                mixed_candidates = _build_customer_mixed_lane_candidate_pool(
+                    candidates,
+                    max_add_test_gb_per_lane=max_add_test_gb_per_lane,
+                )
+                for lib in mixed_candidates:
+                    lib._current_seq_mode_raw = "1.1"
+                    lib.selected_seq_mode = "1.1"
+                    lib.current_seq_mode = "1.1"
+                    lib.lcxms = "1.1"
+                lane, used = _attempt_build_lane_from_pool(
+                    pool=mixed_candidates,
+                    validator=validator,
+                    machine_type=MachineType.NOVA_X_25B,
+                    lane_id_prefix="CK",
+                    lane_serial=serial,
+                    index_conflict_attempts=DEFAULT_INDEX_CONFLICT_ATTEMPTS * 4,
+                    other_failure_attempts=DEFAULT_OTHER_FAILURE_ATTEMPTS * 4,
+                    extra_metadata={
+                        "selected_seq_mode": "1.1",
+                        "seq_mode": "1.1",
+                        "lcxms": "1.1",
+                        "customer_balance_ratio": 0.0,
+                    },
+                    prioritize_scattered_mix=False,
+                )
         if not lane or not used:
             break
         if not isinstance(lane.metadata, dict):
@@ -8934,6 +9231,17 @@ def _consume_customer_libraries_as_mode_1_1_lanes(
         lane.metadata["seq_mode"] = "1.1"
         lane.metadata["lcxms"] = "1.1"
         lane.metadata["selected_round_label"] = stage_label
+        customer_shape_errors = _validate_customer_pure_lane_shape(
+            lane,
+            list(lane.libraries or []),
+        )
+        if customer_shape_errors:
+            logger.info(
+                "客户文库1.1优先Lane跳过: CK候选形态不满足规则, lane={}, reason={}",
+                getattr(lane, "lane_id", ""),
+                "; ".join(customer_shape_errors),
+            )
+            break
         for lib in list(lane.libraries or []):
             lib._current_seq_mode_raw = "1.1"
             lib.selected_seq_mode = "1.1"
@@ -11352,8 +11660,6 @@ def _infer_terminal_lane_constraint_metadata(
     libs_10bp, libs_non_10bp = _split_10bp_and_non_10bp(real_libraries, validator)
     if libs_non_10bp and not libs_10bp:
         inferred["is_pure_non_10bp_lane"] = True
-    if all(_is_imbalance_library_candidate(lib) for lib in real_libraries):
-        inferred["is_dedicated_imbalance_lane"] = True
     return inferred
 
 
@@ -11373,7 +11679,8 @@ def _validate_lane_state(
     skip_peak_size=True：跳过 peak_size 错误/警告的判断。专用不均衡 lane 注入平衡文库
     时使用——该 lane 的 peak_size 分布是排机时就已形成的既成事实，平衡文库不应因此被阻止。
     """
-    if _is_mode_1_1_second_round_lane(lane):
+    validation_profile = _resolve_lane_validation_profile(lane, libraries)
+    if validation_profile == "mode_1_1_second_round":
         return LaneValidationResult(
             lane_id=lane.lane_id,
             is_valid=True,
@@ -11381,7 +11688,7 @@ def _validate_lane_state(
             warnings=[],
         )
 
-    if _is_package_lane_assignment(lane):
+    if validation_profile == "package_lane":
         package_errors = _validate_package_lane_rules(lane, libraries=libraries)
         return LaneValidationResult(
             lane_id=lane.lane_id,
@@ -11396,7 +11703,7 @@ def _validate_lane_state(
             ],
         )
 
-    if _is_lane_seq_10_plus_24_lane_assignment(lane):
+    if validation_profile == "lane_seq_10_plus_24":
         lane_seq_errors = _validate_lane_seq_10_plus_24_rules(lane, libraries=libraries)
         return LaneValidationResult(
             lane_id=lane.lane_id,
@@ -11408,6 +11715,22 @@ def _validate_lane_state(
                     message=message,
                 )
                 for message in lane_seq_errors
+            ],
+            warnings=[],
+        )
+
+    customer_pure_lane_errors = _validate_customer_pure_lane_shape(lane, libraries)
+    if customer_pure_lane_errors:
+        return LaneValidationResult(
+            lane_id=lane.lane_id,
+            is_valid=False,
+            errors=[
+                ValidationError(
+                    rule_type=ValidationRuleType.SPECIAL_LIBRARY_LIMIT,
+                    severity=ValidationSeverity.ERROR,
+                    message=message,
+                )
+                for message in customer_pure_lane_errors
             ],
             warnings=[],
         )
@@ -17243,6 +17566,48 @@ def arrange_library(
                 len(normal_libs),
             )
 
+    # ===== 步骤1.7: 1.1前文库类型专池预抽取 =====
+    early_sample_type_dedicated_lanes: List[LaneAssignment] = []
+    if normal_libs:
+        logger.info("\n" + "=" * 80)
+        logger.info("步骤1.7: 1.1前文库类型专池预抽取")
+        logger.info("=" * 80)
+        from types import SimpleNamespace
+
+        early_sample_type_solution = SimpleNamespace(
+            lane_assignments=list(
+                package_lanes
+                + lane_seq_10_plus_24_lanes
+                + dedicated_imbalance_lanes
+                + customer_mode_1_1_lanes
+                + proactive_split_lanes
+                + mode_1_1_lanes
+                + trailing_dedicated_imbalance_lanes
+            ),
+            unassigned_libraries=list(normal_libs),
+        )
+        before_lane_count = len(early_sample_type_solution.lane_assignments)
+        early_sample_type_stats = _try_add_terminal_sample_type_dedicated_lanes(
+            solution=early_sample_type_solution,
+            validator=LaneValidator(strict_mode=True),
+        )
+        early_sample_type_dedicated_lanes = list(early_sample_type_solution.lane_assignments[before_lane_count:])
+        if early_sample_type_dedicated_lanes:
+            mode_1_1_lanes.extend(early_sample_type_dedicated_lanes)
+        normal_libs = list(early_sample_type_solution.unassigned_libraries or [])
+        if early_sample_type_stats["new_lanes"] > 0:
+            logger.info(
+                "1.1前文库类型专池预抽取完成: 新增Lane={}, 使用文库={}, 剩余待排={}",
+                early_sample_type_stats["new_lanes"],
+                early_sample_type_stats["used_libraries"],
+                early_sample_type_stats["remaining_unassigned"],
+            )
+        else:
+            logger.info(
+                "1.1前文库类型专池预抽取未新增Lane: 剩余待排={}",
+                early_sample_type_stats["remaining_unassigned"],
+            )
+
     final_small_original_holdout: List[EnhancedLibraryInfo] = []
     if normal_libs:
         normal_libs, final_small_original_holdout = (
@@ -17304,6 +17669,7 @@ def arrange_library(
             proactive_split_lanes,
             mode_1_1_lanes,
             trailing_dedicated_imbalance_lanes,
+            early_sample_type_dedicated_lanes,
         )
     )
     if normal_libs or has_prebuilt_lanes:
@@ -17343,6 +17709,7 @@ def arrange_library(
                 + list(proactive_split_lanes)
                 + list(mode_1_1_lanes)
                 + list(trailing_dedicated_imbalance_lanes)
+                + list(early_sample_type_dedicated_lanes)
             )
             stats, solution = test_with_model(
                 deepcopy(normal_libs),
