@@ -17518,6 +17518,7 @@ def arrange_library(
     # ===== 步骤1.6: 尾货1.1专Lane与普通Lane二次抽取 =====
     trailing_dedicated_imbalance_lanes: List[LaneAssignment] = []
     tail_mode_1_1_lanes: List[LaneAssignment] = []
+    proactive_split_lanes: List[LaneAssignment] = []
     if normal_libs:
         logger.info("\n" + "=" * 80)
         logger.info("步骤1.6: 尾货1.1专Lane与普通Lane二次抽取")
@@ -17646,7 +17647,6 @@ def arrange_library(
     logger.info("步骤2: 处理普通文库（使用GreedyLaneScheduler）")
     logger.info("=" * 80)
 
-    proactive_split_lanes: List[LaneAssignment] = []
     if normal_libs:
         proactive_split_lanes, normal_libs, proactive_split_stats = _proactively_build_split_family_lanes_from_pool(
             libraries=normal_libs,
