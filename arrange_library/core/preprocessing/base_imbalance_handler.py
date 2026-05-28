@@ -119,6 +119,10 @@ class BaseImbalanceHandler:
             and float(getattr(group, "phix_ratio", 0.0) or 0.0) >= 0.20
             for lib_type in group.library_types
         }
+        self.group58_types_normalized = {
+            self._normalize_type_name(lib_type)
+            for lib_type in self.groups.get("G58", GroupDefinition("G58", "", set())).library_types
+        }
 
     @staticmethod
     def _normalize_type_name(value: str) -> str:
@@ -616,6 +620,8 @@ class BaseImbalanceHandler:
                 else:
                     if not all(lib_type in self.group55_candidate_types for lib_type in types):
                         return False, "仅碱基不均衡类型可按分组55混排"
+                    if types & self.group58_types_normalized and types & self.group54_types_normalized:
+                        return False, "10x HD Visium空间转录组文库(新)不能与G54混排"
                     total_lane_data = sum(float(getattr(lib, "contract_data_raw", 0.0) or 0.0) for lib in imbalance_libs)
                     high_phix_data = sum(
                         float(getattr(lib, "contract_data_raw", 0.0) or 0.0)

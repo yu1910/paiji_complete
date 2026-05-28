@@ -45,6 +45,16 @@ from arrange_library.core.config.scheduling_config import get_scheduling_config
 from arrange_library.core.preprocessing.base_imbalance_handler import BaseImbalanceHandler
 from arrange_library.models.library_info import EnhancedLibraryInfo
 
+_SHARED_INDEX_VALIDATOR = None
+
+
+def _get_shared_index_validator():
+    global _SHARED_INDEX_VALIDATOR
+    if _SHARED_INDEX_VALIDATOR is None:
+        from arrange_library.core.constraints.index_validator_verified import IndexConflictValidator
+        _SHARED_INDEX_VALIDATOR = IndexConflictValidator()
+    return _SHARED_INDEX_VALIDATOR
+
 
 class ValidationRuleType(Enum):
     """校验规则类型"""
@@ -149,10 +159,8 @@ class LaneValidator:
         self._imbalance_handler = BaseImbalanceHandler()
         self._current_metadata: Dict = {}
 
-        # 复用同一个 IndexConflictValidator 实例，避免每次 _validate_index_conflicts
-        # 调用时都重复初始化（每次初始化会打印 INFO 日志，高频调用时有明显开销）
-        from arrange_library.core.constraints.index_validator_verified import IndexConflictValidator
-        self._index_validator = IndexConflictValidator()
+        # 复用同一个 IndexConflictValidator 实例，避免高频创建校验器时重复初始化。
+        self._index_validator = _get_shared_index_validator()
 
         logger.info(
             f"成Lane校验程序初始化完成 (严格模式: {strict_mode}, "
