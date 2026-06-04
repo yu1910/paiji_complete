@@ -6249,39 +6249,15 @@ def _resolve_mode_1_1_round2_last_phix_ratio(lane: LaneAssignment) -> float:
     return resolved_ratio
 
 
-def _resolve_mode_1_1_round2_order_for_balance_library(
+def _resolve_mode_1_1_round2_contract_for_balance_library(
     lib: EnhancedLibraryInfo,
     lane: Optional[LaneAssignment] = None,
 ) -> Optional[float]:
-    """为1.1第二轮平衡文库补量解析普通文库的下单量。"""
+    """为1.1第二轮平衡文库补量解析普通文库对应合同量。"""
     contract_data = _get_lib_attr_float(lib, ["contract_data_raw", "contractdata"])
     if contract_data is None or contract_data <= 0:
         return None
-
-    pooling_factor = None
-    lane_meta = getattr(lane, "metadata", None)
-    if isinstance(lane_meta, dict):
-        low_output_origrecs = {
-            str(item).strip()
-            for item in (lane_meta.get("mode_1_1_round2_low_output_origrecs") or [])
-            if str(item).strip()
-        }
-        origrec = str(getattr(lib, "origrec", "") or "").strip()
-        if origrec and origrec in low_output_origrecs:
-            pooling_factor = _safe_float(
-                lane_meta.get("mode_1_1_round2_pooling_factor"),
-                default=None,
-            )
-    if pooling_factor is not None and pooling_factor > 0:
-        return round(float(contract_data) * float(pooling_factor), 6)
-
-    add_test_output_rate = _normalize_rate_to_decimal(
-        _get_lib_attr_float(lib, ["output_rate", "outputrate", "wkoutputrate"])
-    )
-    if add_test_output_rate is not None and add_test_output_rate > 0:
-        return round(float(contract_data) / float(add_test_output_rate), 6)
-
-    return None
+    return round(float(contract_data), 6)
 
 
 def _resolve_lane_balance_data_gb(lane: LaneAssignment) -> float:
@@ -6293,20 +6269,20 @@ def _resolve_lane_balance_data_gb(lane: LaneAssignment) -> float:
         history_ratio = _resolve_mode_1_1_round2_last_phix_ratio(lane)
         if history_ratio <= 0:
             return 0.0
-        non_balance_order = 0.0
+        non_balance_contract = 0.0
         for lib in list(getattr(lane, "libraries", []) or []):
             if _is_ai_balance_library(lib):
                 continue
-            resolved_order = _resolve_mode_1_1_round2_order_for_balance_library(lib, lane)
-            if resolved_order is None or resolved_order <= 0:
+            resolved_contract = _resolve_mode_1_1_round2_contract_for_balance_library(lib, lane)
+            if resolved_contract is None or resolved_contract <= 0:
                 continue
-            non_balance_order += float(resolved_order)
-        if non_balance_order <= 0:
+            non_balance_contract += float(resolved_contract)
+        if non_balance_contract <= 0:
             return 0.0
         if explicit_value > 0:
             return round(explicit_value, 3)
         denominator = max(1.0 - history_ratio, MIN_BALANCE_RATIO_DENOMINATOR)
-        return round(non_balance_order * history_ratio / denominator, 3)
+        return round(non_balance_contract * history_ratio / denominator, 3)
     metadata = getattr(lane, "metadata", None)
     if isinstance(metadata, dict) and metadata.get("customer_imbalance_group") == CUSTOMER_IMBALANCE_LANE_GROUP:
         ratio = _safe_float(
@@ -11029,31 +11005,12 @@ def _apply_mode_1_1_round2_pooling_rule_to_prediction_df(
     return df
 
 
-def _resolve_mode_1_1_round2_order_for_balance_row(row: pd.Series) -> Optional[float]:
-    """为第二轮平衡文库占比计算解析普通文库的下单量。
-
-    计算优先级：
-    1. 命中第二轮默认 pooling 系数时，按 `合同量 * pooling系数`
-    2. 存在加测产出率时，按 `合同量 / (加测产出率 / 100)`
-    3. 否则回退到当前 `lorderdata`
-
-    这里的值只用于得到 lane 级总下单量，不直接覆盖普通文库展示字段。
-    """
+def _resolve_mode_1_1_round2_contract_for_balance_row(row: pd.Series) -> Optional[float]:
+    """为第二轮平衡文库占比计算解析普通文库对应合同量。"""
     contract_data = _get_row_attr_float(row, ["wkcontractdata", "contractdata"])
     if contract_data is None or contract_data <= 0:
         return None
-
-    pooling_factor = _get_row_attr_float(row, ["resolved_round2_pooling_factor"])
-    if pooling_factor is not None and pooling_factor > 0:
-        return round(float(contract_data) * float(pooling_factor), 6)
-
-    add_test_output_rate = _normalize_rate_to_decimal(
-        _get_row_attr_float(row, ["wkoutputrate", "outputrate", "output_rate"])
-    )
-    if add_test_output_rate is not None and add_test_output_rate > 0:
-        return round(float(contract_data) / float(add_test_output_rate), 6)
-
-    return None
+    return round(float(contract_data), 6)
 
 
 def _apply_mode_1_1_round2_balance_rule_to_prediction_df(
@@ -11111,22 +11068,22 @@ def _apply_mode_1_1_round2_balance_rule_to_prediction_df(
         if balance_ratio <= 0:
             continue
 
-        non_balance_order_sum = 0.0
+        non_balance_contract_sum = 0.0
         non_balance_rows = df.loc[lane_mask & (~marker)]
         for _, non_balance_row in non_balance_rows.iterrows():
-            resolved_order = _resolve_mode_1_1_round2_order_for_balance_row(non_balance_row)
-            if resolved_order is None or resolved_order <= 0:
+            resolved_contract = _resolve_mode_1_1_round2_contract_for_balance_row(non_balance_row)
+            if resolved_contract is None or resolved_contract <= 0:
                 continue
-            non_balance_order_sum += float(resolved_order)
-        if non_balance_order_sum <= 0:
+            non_balance_contract_sum += float(resolved_contract)
+        if non_balance_contract_sum <= 0:
             continue
 
         denominator = 1.0 - balance_ratio
         if denominator <= 0:
             continue
 
-        lane_total_order = non_balance_order_sum / denominator
-        balance_amount = round(lane_total_order * balance_ratio, 6)
+        lane_total_contract = non_balance_contract_sum / denominator
+        balance_amount = round(lane_total_contract * balance_ratio, 6)
         balance_row_count = int(balance_mask.sum())
         if balance_row_count <= 0:
             continue
