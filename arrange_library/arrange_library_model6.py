@@ -3548,7 +3548,7 @@ def _build_repaired_candidate_lane(
     max_replace_remove_candidates: int = 24,
     max_replace_add_candidates: int = 80,
 ) -> Tuple[Optional[LaneAssignment], List[EnhancedLibraryInfo], str]:
-    """通用候选Lane修复：超上限剔除，低于下限补入，必要时做一换一替换。"""
+    """通用候选Lane修复：容量达标候选进入后，按失败规则做低成本定向修复。"""
     selected = list(libraries or [])
     if not selected:
         return None, [], "empty"
@@ -3769,6 +3769,117 @@ def _build_repaired_candidate_lane(
                 return lane, working, action
         return None, [], ""
 
+    def _try_index_conflict_directed_repair(
+        base_items: List[EnhancedLibraryInfo],
+    ) -> Tuple[Optional[LaneAssignment], List[EnhancedLibraryInfo], str]:
+        conflicts = list(_validate_index_conflicts_latest(base_items) or [])
+        if not conflicts:
+            return None, [], ""
+        conflict_counts: Counter[str] = Counter()
+        for conflict in conflicts:
+            for record_id in (
+                getattr(conflict, "record_id_1", None),
+                getattr(conflict, "record_id_2", None),
+            ):
+                record_key = _safe_str(record_id, default="")
+                if record_key:
+                    conflict_counts[record_key] += 1
+        if not conflict_counts:
+            return None, [], ""
+
+        working = list(base_items)
+        for _ in range(min(max_replace_remove_candidates, len(working))):
+            removable = [
+                lib for lib in working
+                if conflict_counts.get(_safe_str(getattr(lib, "origrec", ""), default=""), 0) > 0
+            ]
+            if not removable:
+                break
+            removable.sort(
+                key=lambda lib: (
+                    -conflict_counts.get(_safe_str(getattr(lib, "origrec", ""), default=""), 0),
+                    _data(lib),
+                    _safe_str(getattr(lib, "origrec", ""), default=""),
+                )
+            )
+            working = [lib for lib in working if lib is not removable[0]]
+            valid, lane, _ = _validate_items(working)
+            if valid and lane is not None:
+                return lane, working, "trimmed_index_conflict"
+            lane, repaired, action = _try_add_candidates_until_valid(
+                working,
+                lambda lib: True,
+                action="trimmed_index_conflict_filled",
+                max_candidates=max_fill_candidates,
+            )
+            if lane is not None:
+                return lane, repaired, action
+            conflicts = list(_validate_index_conflicts_latest(working) or [])
+            if not conflicts:
+                break
+            conflict_counts = Counter()
+            for conflict in conflicts:
+                for record_id in (
+                    getattr(conflict, "record_id_1", None),
+                    getattr(conflict, "record_id_2", None),
+                ):
+                    record_key = _safe_str(record_id, default="")
+                    if record_key:
+                        conflict_counts[record_key] += 1
+        return None, [], ""
+
+    def _try_peak_size_directed_repair(
+        base_items: List[EnhancedLibraryInfo],
+    ) -> Tuple[Optional[LaneAssignment], List[EnhancedLibraryInfo], str]:
+        error_types = _error_types_for_items(base_items)
+        if ValidationRuleType.PEAK_SIZE not in error_types:
+            return None, [], ""
+        ps_min, ps_max, window_items = _find_best_peak_size_window(
+            base_items,
+            window_bp=int(getattr(validator, "peak_size_max_diff", 150) or 150),
+        )
+        if not window_items or len(window_items) == len(base_items):
+            return None, [], ""
+        kept_ids = {id(lib) for lib in window_items}
+        kept = [lib for lib in base_items if id(lib) in kept_ids]
+        valid, lane, _ = _validate_items(kept)
+        if valid and lane is not None:
+            return lane, kept, "trimmed_peak_size_window"
+        lane, repaired, action = _try_add_candidates_until_valid(
+            kept,
+            lambda lib: (
+                float(getattr(lib, "peak_size", 0) or 0) <= 0
+                or ps_min <= float(getattr(lib, "peak_size", 0) or 0) <= ps_max
+            ),
+            action="trimmed_peak_size_window_filled",
+            max_candidates=max_fill_candidates,
+        )
+        if lane is not None:
+            return lane, repaired, action
+        return None, [], ""
+
+    def _try_split_mode_directed_repair(
+        base_items: List[EnhancedLibraryInfo],
+    ) -> Tuple[Optional[LaneAssignment], List[EnhancedLibraryInfo], str]:
+        lane = _make_lane(base_items)
+        if not _is_split_lane_forbidden_by_mode(lane):
+            return None, [], ""
+        kept = [lib for lib in base_items if not _is_split_library(lib)]
+        if not kept or len(kept) == len(base_items):
+            return None, [], ""
+        valid, lane, _ = _validate_items(kept)
+        if valid and lane is not None:
+            return lane, kept, "trimmed_split_mode_forbidden"
+        lane, repaired, action = _try_add_candidates_until_valid(
+            kept,
+            lambda lib: not _is_split_library(lib),
+            action="trimmed_split_mode_forbidden_filled",
+            max_candidates=max_fill_candidates,
+        )
+        if lane is not None:
+            return lane, repaired, action
+        return None, [], ""
+
     def _try_special_split_directed_repair(
         base_items: List[EnhancedLibraryInfo],
     ) -> Tuple[Optional[LaneAssignment], List[EnhancedLibraryInfo], str]:
@@ -3806,8 +3917,7 @@ def _build_repaired_candidate_lane(
         base_items: List[EnhancedLibraryInfo],
     ) -> Tuple[Optional[LaneAssignment], List[EnhancedLibraryInfo], str]:
         if (
-            bool(metadata.get("is_dedicated_imbalance_lane"))
-            or bool(metadata.get("is_pure_10bp_lane"))
+            bool(metadata.get("is_pure_10bp_lane"))
             or bool(metadata.get("is_pure_non_10bp_lane"))
         ):
             return None, [], ""
@@ -3934,9 +4044,21 @@ def _build_repaired_candidate_lane(
     if valid and lane is not None:
         return lane, selected, "already_valid"
 
+    index_lane, index_selected, index_action = _try_index_conflict_directed_repair(selected)
+    if index_lane is not None:
+        return index_lane, index_selected, index_action
+
+    split_lane, split_selected, split_action = _try_split_mode_directed_repair(selected)
+    if split_lane is not None:
+        return split_lane, split_selected, split_action
+
     special_lane, special_selected, special_action = _try_special_split_directed_repair(selected)
     if special_lane is not None:
         return special_lane, special_selected, special_action
+
+    peak_lane, peak_selected, peak_action = _try_peak_size_directed_repair(selected)
+    if peak_lane is not None:
+        return peak_lane, peak_selected, peak_action
 
     directed_lane, directed_selected, directed_action = _try_ratio_directed_repairs(selected)
     if directed_lane is not None:
@@ -11183,6 +11305,124 @@ def _build_runid_by_lane(
     return runid_by_lane
 
 
+def _resolve_process_code_for_mode_1_1_library(lib: EnhancedLibraryInfo) -> Optional[int]:
+    """为1.1排机候选补齐规则矩阵需要的工序编码。"""
+    for attr_name in ("process_code", "test_code"):
+        raw_value = getattr(lib, attr_name, None)
+        try:
+            parsed = int(float(str(raw_value).strip()))
+        except (TypeError, ValueError):
+            parsed = 0
+        if parsed > 0:
+            return parsed
+
+    lab_name = _normalize_text_for_match(
+        getattr(lib, "lab_name", None)
+        or getattr(lib, "dept", None)
+        or getattr(lib, "wkdept", None)
+        or getattr(lib, "_wkdept_raw", None)
+    )
+    lab_process_codes = {
+        _normalize_text_for_match("天津"): 1595,
+        _normalize_text_for_match("天津科技服务实验室"): 1595,
+        _normalize_text_for_match("北京"): 1749,
+        _normalize_text_for_match("北京科技服务实验室"): 1749,
+        _normalize_text_for_match("上海"): 1601,
+        _normalize_text_for_match("上海科技服务实验室"): 1601,
+        _normalize_text_for_match("新加坡"): 1738,
+        _normalize_text_for_match("新加坡科技服务实验室"): 1738,
+        _normalize_text_for_match("日本"): 1699,
+        _normalize_text_for_match("日本科技服务实验室"): 1699,
+        _normalize_text_for_match("美国科技服务实验室"): 1598,
+        _normalize_text_for_match("美国俄勒冈科"): 1653,
+        _normalize_text_for_match("美国俄勒冈科技服务实验室"): 1653,
+        _normalize_text_for_match("英国"): 1599,
+        _normalize_text_for_match("英国科技服务实验室"): 1599,
+        _normalize_text_for_match("德国"): 1676,
+        _normalize_text_for_match("德国科技服务实验室"): 1676,
+    }
+    return lab_process_codes.get(lab_name)
+
+
+def _canonicalize_mode_1_1_test_no(lib: EnhancedLibraryInfo) -> None:
+    """固化1.1规则表使用的工序文本，避免空格/连字符差异导致规则未命中。"""
+    raw_test_no = str(
+        getattr(lib, "test_no", None)
+        or getattr(lib, "wktestno", None)
+        or getattr(lib, "testno", None)
+        or ""
+    ).strip()
+    normalized_keyword = re.sub(r"\s+", "", raw_test_no).upper()
+    if "NOVASEQXPLUS" in normalized_keyword and "PE150" in normalized_keyword:
+        canonical = "Novaseq X Plus-PE150"
+        lib.test_no = canonical
+        lib.wktestno = canonical
+        lib.testno = canonical
+        lib._lane_sj_mode_raw = "PE150"
+
+
+def _prepare_libraries_for_mode_1_1_scheduling(
+    libraries: Sequence[EnhancedLibraryInfo],
+) -> None:
+    """在调用通用排机器前写实1.1上下文，确保容量规则按1.1命中。"""
+    for lib in list(libraries or []):
+        lib._current_seq_mode_raw = "1.1"
+        lib.selected_seq_mode = "1.1"
+        lib.current_seq_mode = "1.1"
+        lib.seq_mode = "1.1"
+        lib.lcxms = "1.1"
+        process_code = _resolve_process_code_for_mode_1_1_library(lib)
+        if process_code is not None:
+            lib.process_code = process_code
+            lib.test_code = process_code
+        _canonicalize_mode_1_1_test_no(lib)
+
+
+def _prepare_libraries_for_3_6t_scheduling(
+    libraries: Sequence[EnhancedLibraryInfo],
+) -> None:
+    """1.1尝试失败后回流3.6T时，清理1.1上下文并锁定3.6T-NEW。"""
+    for lib in list(libraries or []):
+        lib._current_seq_mode_raw = "3.6T-NEW"
+        lib.selected_seq_mode = "3.6T-NEW"
+        lib.current_seq_mode = "3.6T-NEW"
+        lib.seq_mode = "3.6T-NEW"
+        lib.lcxms = "3.6T-NEW"
+        setattr(lib, "_normal_1_1_attempted_before_36t", True)
+
+
+def _recycle_invalid_mode_1_1_lanes_to_36t(
+    lanes: List[LaneAssignment],
+    normal_pool: List[EnhancedLibraryInfo],
+    validator: Any,
+    stage_label: str,
+) -> Tuple[List[LaneAssignment], List[EnhancedLibraryInfo], Dict[str, int]]:
+    """步骤2前过滤不达标1.1 Lane，并把文库回收到3.6T候选池。"""
+    if not lanes:
+        return [], list(normal_pool or []), {"valid_lanes": 0, "failed_lanes": 0, "recycled_libraries": 0}
+
+    valid_lanes, failed_lanes = _filter_valid_lanes(list(lanes or []), validator)
+    recycled_libraries: List[EnhancedLibraryInfo] = []
+    for lane in failed_lanes:
+        recycled_libraries.extend(list(getattr(lane, "libraries", []) or []))
+
+    if recycled_libraries:
+        _prepare_libraries_for_3_6t_scheduling(recycled_libraries)
+        normal_pool = list(normal_pool or []) + recycled_libraries
+        logger.warning(
+            "{}: {}条1.1 Lane未通过终态严格校验，回收{}个文库进入3.6T-NEW候选池",
+            stage_label,
+            len(failed_lanes),
+            len(recycled_libraries),
+        )
+
+    return valid_lanes, list(normal_pool or []), {
+        "valid_lanes": len(valid_lanes),
+        "failed_lanes": len(failed_lanes),
+        "recycled_libraries": len(recycled_libraries),
+    }
+
+
 def _partition_remaining_package_libraries(
     libraries: List[EnhancedLibraryInfo],
 ) -> Tuple[List[EnhancedLibraryInfo], List[EnhancedLibraryInfo]]:
@@ -12865,6 +13105,9 @@ def _try_build_single_36t_mixed_lane_from_items(
     selected_sources: Set[int] = set()
     best_total = 0.0
     best_index_pairs = 0
+    best_repair_items: List[Tuple[EnhancedLibraryInfo, int, EnhancedLibraryInfo]] = []
+    best_repair_total = 0.0
+    best_repair_index_pairs = 0
     validation_failures: Dict[str, int] = {}
     lane_metadata = {
         "selected_seq_mode": "3.6T-NEW",
@@ -12873,7 +13116,10 @@ def _try_build_single_36t_mixed_lane_from_items(
         "dispatch_stage": "terminal_global_36t_mixed_incremental",
     }
 
-    def build_lane(lane_id: str) -> LaneAssignment:
+    def build_lane(
+        lane_id: str,
+        lane_items: Optional[List[Tuple[EnhancedLibraryInfo, int, EnhancedLibraryInfo]]] = None,
+    ) -> LaneAssignment:
         lane = LaneAssignment(
             lane_id=lane_id,
             machine_id=f"M_{lane_id}",
@@ -12881,7 +13127,7 @@ def _try_build_single_36t_mixed_lane_from_items(
             lane_capacity_gb=_lane_capacity_for_machine(machine_type),
         )
         lane.metadata.update(lane_metadata)
-        for _, _, lib in selected:
+        for _, _, lib in (lane_items if lane_items is not None else selected):
             lib._current_seq_mode_raw = "3.6T-NEW"
             lib.selected_seq_mode = "3.6T-NEW"
             lib.current_seq_mode = "3.6T-NEW"
@@ -12929,6 +13175,14 @@ def _try_build_single_36t_mixed_lane_from_items(
             _is_eligible_for_36t_after_mode_priority(item) for item in trial_libs
         ):
             continue
+        trial_index_pairs = _count_lane_index_pairs(trial_libs)
+        if trial_total > best_repair_total + 1e-6 or (
+            abs(trial_total - best_repair_total) <= 1e-6
+            and trial_index_pairs > best_repair_index_pairs
+        ):
+            best_repair_items = list(selected)
+            best_repair_total = trial_total
+            best_repair_index_pairs = trial_index_pairs
         trial_lane = build_lane(f"{lane_id_prefix}_TMP")
         validation_result = _validate_lane_state(validator, trial_lane, trial_libs)
         if not getattr(validation_result, "is_valid", False):
@@ -12952,13 +13206,49 @@ def _try_build_single_36t_mixed_lane_from_items(
         break
 
     if best_lane is None:
+        if best_repair_items:
+            repair_lane_id = f"{lane_id_prefix}_{machine_type.value}_{_reserve_auto_lane_serial(lane_id_prefix, machine_type):03d}"
+            repair_seed_lane = build_lane(repair_lane_id, lane_items=best_repair_items)
+            repair_seed_libs = list(getattr(repair_seed_lane, "libraries", []) or [])
+            repaired_lane, repaired_selected, repair_action = _build_repaired_candidate_lane(
+                libraries=repair_seed_libs,
+                pool=[item[2] for item in ordered_items],
+                validator=validator,
+                machine_type=machine_type,
+                lane_id=repair_seed_lane.lane_id,
+                lane_metadata=repair_seed_lane.metadata,
+                stage_label=f"{lane_id_prefix}_terminal_global_36t_failed_candidate_repair",
+                max_fill_candidates=80,
+                max_replace_remove_candidates=16,
+                max_replace_add_candidates=60,
+            )
+            if repaired_lane is not None:
+                if repair_action != "already_valid":
+                    logger.info(
+                        "终态全局3.6增量混排失败候选通用修复成功: lane={}, action={}, 原始{}个/{:.1f}G, 修复后{}个/{:.1f}G",
+                        repaired_lane.lane_id,
+                        repair_action,
+                        len(repair_seed_libs),
+                        _total_lane_data(repair_seed_libs),
+                        len(repaired_selected),
+                        _total_lane_data(repaired_selected),
+                    )
+                repaired_identity_keys = {_get_library_identity_key(lib) for lib in repaired_selected}
+                repaired_used_sources = {
+                    id(source)
+                    for source, _, lib in ordered_items
+                    if _get_library_identity_key(lib) in repaired_identity_keys
+                }
+                return repaired_lane, repaired_used_sources
         top_failures = sorted(validation_failures.items(), key=lambda item: -item[1])[:3]
         logger.info(
-            "终态全局3.6增量混排未成Lane明细: 机型={}, 候选items={}, best_total={:.1f}G, best_index_pairs={}, validation_top={}".format(
+            "终态全局3.6增量混排未成Lane明细: 机型={}, 候选items={}, best_total={:.1f}G, best_index_pairs={}, repair_seed={:.1f}G/{}对index, validation_top={}".format(
                 machine_type.value,
                 len(ordered_items),
                 best_total,
                 best_index_pairs,
+                best_repair_total,
+                best_repair_index_pairs,
                 top_failures,
             )
         )
@@ -16725,10 +17015,10 @@ def _schedule_rollback_libraries_in_mode_1_1(
         lib.wkissplit = ""
         lib.is_split = False
         lib.split_status = "rolled_back"
-        lib._current_seq_mode_raw = "1.1"
         if hasattr(lib, "_split_family_rollback_unassigned_only"):
             delattr(lib, "_split_family_rollback_unassigned_only")
         candidates.append(lib)
+    _prepare_libraries_for_mode_1_1_scheduling(candidates)
 
     logger.info(
         "拆分回滚原始文库回流1.1启动: 候选{}个，合同量阈值<={}G",
@@ -17160,8 +17450,8 @@ def arrange_library(
 
         if pool_1_1_all:
             logger.info("步骤1.5-1: 1.1首轮使用剩余未成Lane全集，候选{}个文库", len(pool_1_1_all))
+            _prepare_libraries_for_mode_1_1_scheduling(pool_1_1_all)
             for lib in pool_1_1_all:
-                lib._current_seq_mode_raw = "1.1"
                 allocator._apply_mode_1_1_quality_seed_hint(lib)
             first_round_enable_expensive_rescue = bool(
                 mode_1_1_config.get("first_round_enable_expensive_rescue", True)
@@ -17240,16 +17530,14 @@ def arrange_library(
                 if split_rule_fallback_blocked_libs:
                     blocked_ids = {id(lib) for lib in split_rule_fallback_blocked_libs}
                     fallback_libs = [lib for lib in fallback_libs if id(lib) not in blocked_ids]
-                    for lib in split_rule_fallback_blocked_libs:
-                        lib._current_seq_mode_raw = ""
+                    _prepare_libraries_for_3_6t_scheduling(split_rule_fallback_blocked_libs)
                     normal_libs_for_36t.extend(split_rule_fallback_blocked_libs)
                     logger.info(
                         "1.1首轮剩余中{}个拆分规则且当前合同量>500G文库回3.6T-NEW，不参与1.1二次补排",
                         len(split_rule_fallback_blocked_libs),
                     )
                 if fallback_libs and first_round_enable_second_pass_for_normal:
-                    for lib in fallback_libs:
-                        lib._current_seq_mode_raw = "1.1"
+                    _prepare_libraries_for_mode_1_1_scheduling(fallback_libs)
                     logger.info("1.1首轮二次补排启动: 首轮剩余文库={}个", len(fallback_libs))
                     logger.info(
                         "1.1首轮二次补排策略: expensive_rescue={}, peak_window_mixed={}, post_fill_optimization={}",
@@ -17314,9 +17602,7 @@ def arrange_library(
                             "1.1首轮剩余中{}个<=500G未拆分原始文库继续保留给1.1尾货抽取，不进入普通3.6T候选池",
                             len(small_original_fallback_libs),
                         )
-                    for lib in fallback_libs_for_36t:
-                        lib._current_seq_mode_raw = ""
-                        setattr(lib, "_normal_1_1_attempted_before_36t", True)
+                    _prepare_libraries_for_3_6t_scheduling(fallback_libs_for_36t)
                     normal_libs_for_36t.extend(fallback_libs_for_36t)
                     logger.info(
                         "步骤1.5-3候选池接收1.1剩余可进3.6T文库{}个，继续进入3.6T-NEW",
@@ -17334,9 +17620,7 @@ def arrange_library(
                         "1.1首轮异常后{}个<=500G未拆分原始文库仍保留给1.1尾货抽取，不回退普通3.6T",
                         len(small_original_fallback_libs),
                     )
-                for lib in pool_for_36t:
-                    lib._current_seq_mode_raw = ""
-                    setattr(lib, "_normal_1_1_attempted_before_36t", True)
+                _prepare_libraries_for_3_6t_scheduling(pool_for_36t)
                 normal_libs_for_36t.extend(pool_for_36t)
         else:
             logger.info("步骤1.5-1: 无剩余文库进入1.1首轮")
@@ -17451,6 +17735,23 @@ def arrange_library(
         else:
             logger.info(
                 "尾货1.1普通Lane二次抽取未形成新Lane，剩余进入普通3.6T排机文库={}",
+                len(normal_libs),
+            )
+
+    if mode_1_1_lanes:
+        mode_1_1_lanes, normal_libs, mode_1_1_recycle_stats = (
+            _recycle_invalid_mode_1_1_lanes_to_36t(
+                lanes=mode_1_1_lanes,
+                normal_pool=normal_libs,
+                validator=stage_validator,
+                stage_label="步骤2前1.1 Lane严格预过滤",
+            )
+        )
+        if mode_1_1_recycle_stats["failed_lanes"] > 0:
+            logger.info(
+                "步骤2前1.1 Lane严格预过滤完成: 保留Lane={}，回收失败Lane={}，3.6T候选池={}",
+                mode_1_1_recycle_stats["valid_lanes"],
+                mode_1_1_recycle_stats["failed_lanes"],
                 len(normal_libs),
             )
 
