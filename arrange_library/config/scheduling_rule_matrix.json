@@ -2,6 +2,71 @@
   "description": "统一排机规则总配置表",
   "created_at": "2026-03-06 13:55:15",
   "updated_at": "2026-06-02 00:00:00",
+  "lab_process_mappings": [
+    {
+      "process_code": 1595,
+      "lab_names": [
+        "天津科技服务实验室",
+        "天津"
+      ]
+    },
+    {
+      "process_code": 1749,
+      "lab_names": [
+        "北京致谷科技服务实验室",
+        "北京"
+      ]
+    },
+    {
+      "process_code": 1601,
+      "lab_names": [
+        "上海科技服务实验室",
+        "上海"
+      ]
+    },
+    {
+      "process_code": 1738,
+      "lab_names": [
+        "新加坡科技服务实验室",
+        "新加坡"
+      ]
+    },
+    {
+      "process_code": 1699,
+      "lab_names": [
+        "日本单细胞实验室",
+        "日本"
+      ]
+    },
+    {
+      "process_code": 1653,
+      "lab_names": [
+        "美国俄勒冈科技服务实验室",
+        "美国俄勒冈"
+      ]
+    },
+    {
+      "process_code": 1598,
+      "lab_names": [
+        "美国科技服务实验室",
+        "美国"
+      ]
+    },
+    {
+      "process_code": 1599,
+      "lab_names": [
+        "英国科技服务实验室",
+        "英国"
+      ]
+    },
+    {
+      "process_code": 1676,
+      "lab_names": [
+        "德国科技服务实验室",
+        "德国"
+      ]
+    }
+  ],
   "sample_type_groups": {
     "special_combo_group_a": {
       "description": "10X 5端和VDJ组合",

@@ -4982,16 +4982,8 @@ class GreedyLaneScheduler:
         return True
     
     def _group_by_machine_type(self, libraries: List[EnhancedLibraryInfo]) -> Dict[str, List[EnhancedLibraryInfo]]:
-        """按机器类型分组"""
-        groups: Dict[str, List[EnhancedLibraryInfo]] = {}
-        
-        for lib in libraries:
-            machine_type = lib.eq_type or "Unknown"
-            if machine_type not in groups:
-                groups[machine_type] = []
-            groups[machine_type].append(lib)
-        
-        return groups
+        """排机不再按输入机型拆分，统一作为同一候选池处理。"""
+        return {MachineType.NOVA_X_25B.value: list(libraries)}
 
     def _build_retry_pool_signature(
         self,

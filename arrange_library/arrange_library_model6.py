@@ -1311,6 +1311,7 @@ def _consume_g53_g54_imbalance_as_mode_lanes(
             candidates = sorted(
                 candidates,
                 key=lambda item: (
+                    _mode_1_1_small_split_imbalance_priority_rank(item, mode_name=mode_name),
                     -float(getattr(item, "contract_data_raw", 0.0) or 0.0),
                     -_count_library_index_pairs(item),
                     _safe_str(getattr(item, "origrec", ""), default=""),
@@ -1369,6 +1370,11 @@ def _consume_g53_g54_imbalance_as_mode_lanes(
                             failure_counter[reason] = failure_counter.get(reason, 0) + 1
                             continue
                         score = (
+                            -sum(
+                                1
+                                for item in subset_list
+                                if _is_mode_1_1_small_split_imbalance_priority_library(item)
+                            ),
                             abs(subset_total - float(getattr(selection, "soft_target_gb", 0.0) or 0.0)),
                             -subset_total,
                             -_count_lane_index_pairs(subset_list),
@@ -3698,6 +3704,7 @@ def _build_repaired_candidate_lane(
         return sorted(
             candidates,
             key=lambda item: (
+                _mode_1_1_small_split_original_priority_rank(item, lane_metadata=metadata),
                 abs(_data(item) - fill_gap) if fill_gap > 0 else _data(item),
                 -_count_library_index_pairs(item),
                 _safe_str(getattr(item, "origrec", ""), default=""),
@@ -4107,6 +4114,7 @@ def _build_repaired_candidate_lane(
     candidate_pool = sorted(
         candidate_pool,
         key=lambda item: (
+            _mode_1_1_small_split_original_priority_rank(item, lane_metadata=metadata),
             abs(_data(item) - fill_gap) if fill_gap > 0 else 0.0,
             -_count_library_index_pairs(item),
             _data(item),
@@ -4333,6 +4341,10 @@ def _attempt_build_lane_from_pool(
         for libs in grouped.values():
             libs.sort(
                 key=lambda lib: (
+                    _mode_1_1_small_split_original_priority_rank(
+                        lib,
+                        lane_metadata=extra_metadata,
+                    ),
                     -_count_library_index_pairs(lib),
                     -float(getattr(lib, "contract_data_raw", 0.0) or lib.get_data_amount_gb()),
                     _safe_str(getattr(lib, "origrec", ""), default=""),
@@ -7364,12 +7376,7 @@ def _try_increase_lane_count(
     if not lanes and not unassigned:
         return 0
 
-    machine_types = set()
-    for lane in lanes:
-        if lane.machine_type:
-            machine_types.add(lane.machine_type)
-    if not machine_types:
-        machine_types.add(MachineType.NOVA_X_25B)
+    machine_types = {MachineType.NOVA_X_25B}
 
     added = 0
     for machine_type in machine_types:
@@ -7496,12 +7503,7 @@ def try_multi_lib_swap_rebalance(
         )
         return {"new_lanes": 0, "remaining_unassigned": len(unassigned)}
 
-    machine_types = set()
-    for lane in lanes:
-        if lane.machine_type:
-            machine_types.add(lane.machine_type)
-    if not machine_types:
-        machine_types.add(MachineType.NOVA_X_25B)
+    machine_types = {MachineType.NOVA_X_25B}
 
     new_lanes_count = 0
     for machine_type in machine_types:
@@ -8054,6 +8056,7 @@ def _try_build_near_min_global_mode_1_1_lane_from_pool(
         else:
             data_key = -data
         return (
+            _mode_1_1_small_split_original_priority_rank(lib, lane_metadata=lane_metadata),
             _get_scattered_mix_delete_date_sort_value(lib),
             1 if is_imbalance else 0,
             1 if group else 0,
@@ -8288,6 +8291,10 @@ def _try_build_global_mode_1_1_lane_from_pool(
         pool = sorted(
             original_pool,
             key=lambda lib: (
+                _mode_1_1_small_split_original_priority_rank(
+                    lib,
+                    lane_metadata={"selected_seq_mode": "1.1"},
+                ),
                 _get_scattered_mix_priority_rank(lib),
                 -_count_library_index_pairs(lib),
                 -float(getattr(lib, "contract_data_raw", 0.0) or lib.get_data_amount_gb()),
@@ -9238,6 +9245,65 @@ def _violates_mode_1_1_add_test_cap(
 def _is_forbidden_in_mode_1_1_by_secondary_36t_policy(lib: EnhancedLibraryInfo) -> bool:
     """历史兼容接口：DHE/加测/混合不再禁止进入1.1。"""
     return False
+
+
+def _is_mode_1_1_small_split_original_priority_library(lib: EnhancedLibraryInfo) -> bool:
+    """普通<=500G且3.6T应拆的原始文库，优先进普通1.1。"""
+    if _is_imbalance_library_candidate(lib):
+        return False
+    return _is_small_unsplit_original_reserved_for_mode_1_1(lib)
+
+
+def _is_mode_1_1_small_split_imbalance_priority_library(lib: EnhancedLibraryInfo) -> bool:
+    """碱基不均<=500G且3.6T应拆的原始文库，优先进不均专Lane。"""
+    return (
+        _is_imbalance_library_candidate(lib)
+        and _is_small_unsplit_original_reserved_for_mode_1_1(lib)
+    )
+
+
+def _apply_mode_1_1_small_split_original_seed_hint(lib: EnhancedLibraryInfo) -> None:
+    """让1.1首轮调度器优先以小拆分原始文库做成Lane种子。"""
+    if not _is_mode_1_1_small_split_original_priority_library(lib):
+        return
+    current_rank = getattr(lib, "_mode_1_1_seed_rank", None)
+    try:
+        current_rank_int = int(current_rank) if current_rank is not None else None
+    except (TypeError, ValueError):
+        current_rank_int = None
+    if current_rank_int is None or current_rank_int > 0:
+        lib._mode_1_1_seed_rank = 0
+    lib._mode_1_1_seed_group = "mode_1_1_small_split_original"
+
+
+def _mode_1_1_small_split_original_priority_rank(
+    lib: EnhancedLibraryInfo,
+    *,
+    lane_metadata: Optional[Dict[str, Any]] = None,
+    mode_name: Optional[str] = None,
+) -> int:
+    """仅作为1.1排序权重，不改变候选合法性。"""
+    normalized_mode = _normalize_mode_1_1_alias(
+        mode_name
+        or (lane_metadata or {}).get("selected_seq_mode")
+        or (lane_metadata or {}).get("seq_mode")
+        or (lane_metadata or {}).get("lcxms")
+        or (lane_metadata or {}).get("sequencing_mode")
+    )
+    if normalized_mode != "1.1":
+        return 1
+    return 0 if _is_mode_1_1_small_split_original_priority_library(lib) else 1
+
+
+def _mode_1_1_small_split_imbalance_priority_rank(
+    lib: EnhancedLibraryInfo,
+    *,
+    mode_name: Optional[str] = None,
+) -> int:
+    """仅作为不均专Lane排序权重，不改变候选合法性。"""
+    if _normalize_mode_1_1_alias(mode_name) != "1.1":
+        return 1
+    return 0 if _is_mode_1_1_small_split_imbalance_priority_library(lib) else 1
 
 
 def _is_allowed_mode_1_1_candidate_library(lib: EnhancedLibraryInfo) -> bool:
@@ -10290,6 +10356,22 @@ def _resolve_lane_output_rule_fields(
     """
     if not libraries:
         return "", "", "empty_lane"
+    lane_context = LaneAssignment(
+        lane_id=lane_id or "OUTPUT_RULE_CHECK",
+        machine_id="OUTPUT_RULE_CHECK",
+        machine_type=(
+            machine_type
+            if isinstance(machine_type, MachineType)
+            else _resolve_machine_type_enum_simple(_machine_type_to_text(machine_type, default=""))
+        ),
+        lane_capacity_gb=_lane_capacity_for_machine(
+            machine_type
+            if isinstance(machine_type, MachineType)
+            else _resolve_machine_type_enum_simple(_machine_type_to_text(machine_type, default=""))
+        ),
+        libraries=list(libraries or []),
+        metadata=dict(lane_metadata or {}),
+    )
     selection = _resolve_lane_capacity_selection(
         libraries=libraries,
         machine_type=machine_type,
@@ -10302,51 +10384,75 @@ def _resolve_lane_output_rule_fields(
     sequencing_mode = str(getattr(selection, "sequencing_mode", "") or "").strip()
     rule_code = str(getattr(selection, "rule_code", "") or "").strip()
 
-    if (
-        _normalize_text_for_match(sequencing_mode) == _normalize_text_for_match("3.6T-NEW")
-        and not _is_lane_seq_10_plus_24_lane_assignment(
-            LaneAssignment(
-                lane_id=lane_id or "OUTPUT_MODE_CHECK",
-                machine_id="OUTPUT_MODE_CHECK",
-                machine_type=(
-                    machine_type
-                    if isinstance(machine_type, MachineType)
-                    else _resolve_machine_type_enum_simple(_machine_type_to_text(machine_type, default=""))
-                ),
-                lane_capacity_gb=_lane_capacity_for_machine(
-                    machine_type
-                    if isinstance(machine_type, MachineType)
-                    else _resolve_machine_type_enum_simple(_machine_type_to_text(machine_type, default=""))
-                ),
-                libraries=list(libraries or []),
-                metadata=dict(lane_metadata or {}),
-            )
-        )
-        ):
-        mode_1_1_metadata = dict(lane_metadata or {})
-        mode_1_1_metadata.pop("capacity_rule_code", None)
-        mode_1_1_metadata["selected_seq_mode"] = "1.1"
-        mode_1_1_metadata["seq_mode"] = "1.1"
-        mode_1_1_metadata["lcxms"] = "1.1"
-        mode_1_1_metadata["sequencing_mode"] = "1.1"
-        mode_1_1_selection = _resolve_lane_capacity_selection(
-            libraries=libraries,
-            machine_type=machine_type,
-            lane_id=lane_id,
-            lane_metadata=mode_1_1_metadata,
-        )
+    if not _is_package_lane_assignment(lane_context):
         total_data_gb = _total_lane_data(list(libraries or []))
-        mode_1_1_min_gb = float(getattr(mode_1_1_selection, "effective_min_gb", 0.0) or 0.0)
-        mode_1_1_max_gb = float(getattr(mode_1_1_selection, "effective_max_gb", 0.0) or 0.0)
-        mode_1_1_rule_code = str(getattr(mode_1_1_selection, "rule_code", "") or "").strip()
-        if (
-            _is_mode_1_1_capacity_rule(mode_1_1_rule_code)
-            and total_data_gb + 1e-6 >= mode_1_1_min_gb
-            and total_data_gb <= mode_1_1_max_gb + 1e-6
-        ):
-            loading_method = str(getattr(mode_1_1_selection, "loading_method", "") or "").strip() or loading_method
-            sequencing_mode = "1.1"
-            rule_code = mode_1_1_rule_code
+
+        def _selection_is_contract_match(candidate_selection: Any) -> bool:
+            candidate_rule_code = str(getattr(candidate_selection, "rule_code", "") or "").strip()
+            candidate_seq_mode = str(getattr(candidate_selection, "sequencing_mode", "") or "").strip()
+            if not candidate_rule_code or candidate_rule_code == "fallback_machine_capacity" or not candidate_seq_mode:
+                return False
+            min_gb = float(getattr(candidate_selection, "effective_min_gb", 0.0) or 0.0)
+            max_gb = float(getattr(candidate_selection, "effective_max_gb", 0.0) or 0.0)
+            return total_data_gb + 1e-6 >= min_gb and total_data_gb <= max_gb + 1e-6
+
+        if not _selection_is_contract_match(selection):
+            mode_candidates: List[str] = []
+            for raw_mode in (
+                sequencing_mode,
+                (lane_metadata or {}).get("selected_seq_mode"),
+                (lane_metadata or {}).get("seq_mode"),
+                (lane_metadata or {}).get("lcxms"),
+                (lane_metadata or {}).get("sequencing_mode"),
+                "3.6T-NEW",
+                "1.1",
+                "Lane seq",
+            ):
+                normalized_mode = _normalize_mode_1_1_alias(raw_mode)
+                if normalized_mode and normalized_mode not in mode_candidates:
+                    mode_candidates.append(normalized_mode)
+
+            for candidate_mode in mode_candidates:
+                candidate_metadata = dict(lane_metadata or {})
+                candidate_metadata.pop("capacity_rule_code", None)
+                candidate_metadata["selected_seq_mode"] = candidate_mode
+                candidate_metadata["seq_mode"] = candidate_mode
+                candidate_metadata["lcxms"] = candidate_mode
+                candidate_metadata["sequencing_mode"] = candidate_mode
+                if candidate_mode == "3.6T-NEW":
+                    candidate_metadata["mode"] = "mode_36t"
+                candidate_libraries = deepcopy(list(libraries or []))
+                for candidate_lib in candidate_libraries:
+                    candidate_lib._current_seq_mode_raw = candidate_mode
+                    candidate_lib.selected_seq_mode = candidate_mode
+                    candidate_lib.current_seq_mode = candidate_mode
+                    candidate_lib.lcxms = candidate_mode
+                candidate_selection = _resolve_lane_capacity_selection(
+                    libraries=candidate_libraries,
+                    machine_type=machine_type,
+                    lane_id=lane_id,
+                    lane_metadata=candidate_metadata,
+                )
+                if _selection_is_contract_match(candidate_selection):
+                    selection = candidate_selection
+                    loading_method = str(getattr(selection, "loading_method", "") or "").strip()
+                    sequencing_mode = str(getattr(selection, "sequencing_mode", "") or "").strip()
+                    rule_code = str(getattr(selection, "rule_code", "") or "").strip()
+                    break
+
+        if not _selection_is_contract_match(selection):
+            message = (
+                "Lane输出规则未命中合同规则配置表: lane_id={}, machine_type={}, total={:.3f}G, "
+                "rule_code={}, sequencing_mode={}"
+            ).format(
+                lane_id,
+                machine_type_text,
+                total_data_gb,
+                rule_code or "unknown",
+                sequencing_mode or "",
+            )
+            logger.error(message)
+            raise ValueError(message)
 
     # Nova X-25B 与 NovaSeq X Plus 业务上统一按 25B 上机方式输出。
     if not loading_method and normalized_machine_type in {
@@ -11333,6 +11439,7 @@ def _prepare_libraries_for_mode_1_1_scheduling(
             lib.process_code = process_code
             lib.test_code = process_code
         _canonicalize_mode_1_1_test_no(lib)
+        _apply_mode_1_1_small_split_original_seed_hint(lib)
 
 
 def _prepare_libraries_for_3_6t_scheduling(
@@ -11920,6 +12027,9 @@ def _get_lane_selected_mode(lane: LaneAssignment) -> str:
 
 def _is_split_lane_forbidden_by_mode(lane: LaneAssignment) -> bool:
     """判断Lane是否违反按最终模式约束的拆分硬规则。"""
+    if _is_lane_seq_10_plus_24_lane_assignment(lane):
+        return False
+
     lane_mode = _get_lane_selected_mode(lane)
     if _is_mode_1_1_second_round_lane(lane) and lane_mode == "1.1":
         return False
@@ -12245,10 +12355,14 @@ def _try_repair_failed_lane_with_unassigned_pool(
             )
         ],
         key=lambda lib: (
-            _count_lane_index_pairs([lib]),
-            float(getattr(lib, "contract_data_raw", 0.0) or 0.0),
+            _mode_1_1_small_split_original_priority_rank(
+                lib,
+                lane_metadata=getattr(lane, "metadata", {}) or {},
+                mode_name=_get_lane_selected_mode(lane),
+            ),
+            -_count_lane_index_pairs([lib]),
+            -float(getattr(lib, "contract_data_raw", 0.0) or 0.0),
         ),
-        reverse=True,
     )
 
     for candidate in candidate_pool:
@@ -13841,6 +13955,21 @@ def _is_g55_mode_1_1_candidate(lib: EnhancedLibraryInfo) -> bool:
     return True
 
 
+def _is_g55_mode_3_6_candidate(lib: EnhancedLibraryInfo) -> bool:
+    """G55 3.6候选；不能因G55绕过3.6应拆未拆硬规则。"""
+    if not _resolve_g55_base_group_id(lib):
+        return False
+    if _is_split_library(lib):
+        return False
+    if _get_package_lane_number_from_library(lib) or _is_truthy_flag(getattr(lib, "is_package_lane", None)):
+        return False
+    if _library_has_10_plus_24_seq_scheme(lib) or _is_10_plus_24_library(lib):
+        return False
+    if _should_library_split_in_3_6t(lib):
+        return False
+    return _is_terminal_36t_candidate_after_1_1_gate(lib)
+
+
 def _validate_g55_mode_1_1_selection(
     selected: List[EnhancedLibraryInfo],
     *,
@@ -13855,8 +13984,12 @@ def _validate_g55_mode_1_1_selection(
 ) -> Tuple[Optional[LaneAssignment], str]:
     if not selected:
         return None, "empty"
-    if any(not _is_g55_mode_1_1_candidate(lib) for lib in selected):
-        return None, "non_g55_1_1_candidate"
+    if mode_name in {"1", "1.0", "1.1"}:
+        if any(not _is_g55_mode_1_1_candidate(lib) for lib in selected):
+            return None, "non_g55_1_1_candidate"
+    else:
+        if any(not _is_g55_mode_3_6_candidate(lib) for lib in selected):
+            return None, "non_g55_3_6_candidate"
     group_ids = {_resolve_g55_base_group_id(lib) for lib in selected}
     group_ids.discard("")
     if len(group_ids) < 2:
@@ -13973,6 +14106,7 @@ def _consume_g55_imbalance_as_mode_lanes(
 
     def candidate_sort_key(lib: EnhancedLibraryInfo) -> Tuple[Any, ...]:
         return (
+            _mode_1_1_small_split_imbalance_priority_rank(lib, mode_name=mode_name),
             _is_g55_high_phix_library(lib),
             _is_customer_library_candidate(lib),
             -float(getattr(lib, "contract_data_raw", 0.0) or 0.0),
@@ -13982,7 +14116,14 @@ def _consume_g55_imbalance_as_mode_lanes(
 
     while len(lanes) < max_lanes:
         candidates = sorted(
-            [lib for lib in remaining if _is_g55_mode_1_1_candidate(lib)],
+            [
+                lib for lib in remaining
+                if (
+                    _is_g55_mode_1_1_candidate(lib)
+                    if mode_name in {"1", "1.0", "1.1"}
+                    else _is_g55_mode_3_6_candidate(lib)
+                )
+            ],
             key=candidate_sort_key,
         )
         if not candidates:
@@ -14021,6 +14162,7 @@ def _consume_g55_imbalance_as_mode_lanes(
         best_lane: Optional[LaneAssignment] = None
         best_used: List[EnhancedLibraryInfo] = []
         validation_attempts = 0
+        max_full_validation_candidates = 48
         for sub_pool in pools:
             states: List[List[EnhancedLibraryInfo]] = [[]]
             validation_queue: List[List[EnhancedLibraryInfo]] = []
@@ -14049,6 +14191,11 @@ def _consume_g55_imbalance_as_mode_lanes(
                 next_states.sort(
                     key=lambda selected: (
                         0 if min_allowed <= _g55_real_data_gb(selected) <= max_allowed else 1,
+                        -sum(
+                            1
+                            for item in selected
+                            if _is_mode_1_1_small_split_imbalance_priority_library(item)
+                        ),
                         abs(_g55_real_data_gb(selected) - soft_target),
                         sum(float(getattr(item, "contract_data_raw", 0.0) or 0.0) for item in selected if _is_g55_high_phix_library(item)) / max(_g55_real_data_gb(selected), 1e-6),
                         -len({_resolve_g55_base_group_id(item) for item in selected}),
@@ -14059,10 +14206,22 @@ def _consume_g55_imbalance_as_mode_lanes(
             validation_queue = sorted(
                 validation_queue,
                 key=lambda selected: (
+                    -sum(
+                        1
+                        for item in selected
+                        if _is_mode_1_1_small_split_imbalance_priority_library(item)
+                    ),
                     abs(_g55_real_data_gb(selected) - soft_target),
                     -_count_lane_index_pairs(selected),
                 ),
-            )[:300]
+            )
+            if len(validation_queue) > max_full_validation_candidates:
+                failure_counter["g55_full_validation_trimmed"] = (
+                    failure_counter.get("g55_full_validation_trimmed", 0)
+                    + len(validation_queue)
+                    - max_full_validation_candidates
+                )
+                validation_queue = validation_queue[:max_full_validation_candidates]
             for selected in validation_queue:
                 validation_attempts += 1
                 lane, reason = _validate_g55_mode_1_1_selection(
@@ -15761,7 +15920,7 @@ def _collect_prediction_rows(
                         else round(float(lane_loading_concentration), 3)
                     ),
                     "resolved_lsjfs": lane_loading_method or None,
-                    "resolved_lcxms": lane_selected_seq_mode or lane_sequencing_mode or None,
+                    "resolved_lcxms": lane_sequencing_mode or lane_selected_seq_mode or None,
                     "resolved_index_check_rule": lane_index_rule or None,
                     "resolved_round2_pooling_factor": (
                         round2_pooling_factor
@@ -15791,7 +15950,7 @@ def _collect_prediction_rows(
                     "wklastoutrate": last_outrate,
                     "wklastphix": last_phix,
                     "loutput": loutput,
-                    "resolved_seq_mode": lane_selected_seq_mode or lane_sequencing_mode or None,
+                    "resolved_seq_mode": lane_sequencing_mode or lane_selected_seq_mode or None,
                     "resolved_round_label": lane_selected_round_label or None,
                     BALANCE_LIBRARY_MARKER_COLUMN: is_balance_lib,
                 }
@@ -17444,18 +17603,13 @@ def arrange_library(
             logger.info("\n" + "=" * 80)
             logger.info("步骤1.2: 处理10+24 Lane seq文库")
             logger.info("=" * 80)
-            grouped_10_plus_24: Dict[MachineType, List[EnhancedLibraryInfo]] = {}
-            for lib in lane_seq_10_plus_24_libs:
-                machine_type = getattr(lib, "machine_type", None) or _resolve_machine_type_enum_simple(getattr(lib, "eq_type", ""))
-                grouped_10_plus_24.setdefault(machine_type, []).append(lib)
             lane_seq_unassigned: List[EnhancedLibraryInfo] = []
-            for machine_type, group_libs in grouped_10_plus_24.items():
-                lanes, unassigned = _build_10_plus_24_lane_seq_lanes(
-                    group_libs,
-                    machine_type=machine_type,
-                )
-                lane_seq_10_plus_24_lanes.extend(lanes)
-                lane_seq_unassigned.extend(unassigned)
+            lanes, unassigned = _build_10_plus_24_lane_seq_lanes(
+                lane_seq_10_plus_24_libs,
+                machine_type=MachineType.NOVA_X_25B,
+            )
+            lane_seq_10_plus_24_lanes.extend(lanes)
+            lane_seq_unassigned.extend(unassigned)
             if lane_seq_unassigned:
                 deferred_after_1_1_libs.extend(lane_seq_unassigned)
             logger.info(

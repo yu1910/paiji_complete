@@ -699,6 +699,22 @@ class SchedulingConfigManager:
                 if self._normalize_text(item)
             }
 
+        lab_process_mappings: List[Dict[str, Any]] = []
+        for mapping in raw_config.get('lab_process_mappings', []):
+            process_code = self._parse_valid_process_code(mapping.get('process_code'))
+            if process_code is None:
+                continue
+            lab_names = _normalize_scope_list(mapping.get('lab_names', []))
+            if not lab_names:
+                continue
+            lab_process_mappings.append(
+                {
+                    **mapping,
+                    'process_code': process_code,
+                    'lab_names': lab_names,
+                }
+            )
+
         lane_rule_profiles: List[Dict[str, Any]] = []
         for profile in raw_config.get('lane_rule_profiles', []):
             normalized_profile = dict(profile)
@@ -782,15 +798,17 @@ class SchedulingConfigManager:
 
         self._rule_matrix_config = {
             'sample_type_groups': sample_type_groups,
+            'lab_process_mappings': lab_process_mappings,
             'lane_rule_profiles': lane_rule_profiles,
             'lane_constraints': lane_constraints,
             'loading_concentration_rules': loading_rules,
         }
         logger.info(
-            "统一排机规则配置已加载: profiles={}, constraints={}, loading_rules={}".format(
+            "统一排机规则配置已加载: profiles={}, constraints={}, loading_rules={}, lab_mappings={}".format(
                 len(lane_rule_profiles),
                 len(lane_constraints),
                 len(loading_rules),
+                len(lab_process_mappings),
             )
         )
 
@@ -1018,33 +1036,26 @@ class SchedulingConfigManager:
         """按实验室名称+工序文本反推工序码，用于输入缺少工序编码的排机数据。"""
         if not normalized_lab_name or not normalized_test_no:
             return None
-        lab_process_codes = {
-            self._normalize_text("天津"): 1595,
-            self._normalize_text("天津科技服务实验室"): 1595,
-            self._normalize_text("北京"): 1749,
-            self._normalize_text("北京科技服务实验室"): 1749,
-            self._normalize_text("上海"): 1601,
-            self._normalize_text("上海科技服务实验室"): 1601,
-            self._normalize_text("新加坡"): 1738,
-            self._normalize_text("新加坡科技服务实验室"): 1738,
-            self._normalize_text("日本"): 1699,
-            self._normalize_text("日本科技服务实验室"): 1699,
-            self._normalize_text("美国科技服务实验室"): 1598,
-            self._normalize_text("美国俄勒冈科"): 1653,
-            self._normalize_text("美国俄勒冈科技服务实验室"): 1653,
-            self._normalize_text("英国"): 1599,
-            self._normalize_text("英国科技服务实验室"): 1599,
-            self._normalize_text("德国"): 1676,
-            self._normalize_text("德国科技服务实验室"): 1676,
-        }
-        process_code = lab_process_codes.get(normalized_lab_name)
-        if process_code is None:
+        mapping_process_code = None
+        for mapping in self._rule_matrix_config.get('lab_process_mappings', []):
+            candidate_code = self._parse_valid_process_code(mapping.get('process_code'))
+            if candidate_code is None:
+                continue
+            lab_names = [
+                self._normalize_text(item)
+                for item in (mapping.get('lab_names') or [])
+                if self._normalize_text(item)
+            ]
+            if any(lab_name and lab_name in normalized_lab_name for lab_name in lab_names):
+                mapping_process_code = candidate_code
+                break
+        if mapping_process_code is None:
             return None
         for profile in self._rule_matrix_config.get('lane_rule_profiles', []):
-            if process_code not in set(profile.get('process_codes', set()) or set()):
+            if mapping_process_code not in set(profile.get('process_codes', set()) or set()):
                 continue
             if normalized_test_no in set(profile.get('test_nos', set()) or set()):
-                return process_code
+                return mapping_process_code
         return None
 
     def _resolve_test_no(self, libraries: List[Any], metadata: Optional[Dict[str, Any]] = None) -> str:
