@@ -283,15 +283,7 @@ class LaneValidator:
         # 5. 碱基不均衡占比校验
         # [2025-12-26] 如果是碱基不均衡专用Lane（DL Lane），跳过此检查
         is_dedicated_imbalance_lane = metadata.get('is_dedicated_imbalance_lane', False)
-        is_mode_36t = str(
-            metadata.get('mode')
-            or metadata.get('selected_seq_mode')
-            or metadata.get('seq_mode')
-            or metadata.get('lcxms')
-            or metadata.get('sequencing_mode')
-            or ''
-        ).strip() == 'mode_36t'
-        if not (is_dedicated_imbalance_lane and is_mode_36t):
+        if not is_dedicated_imbalance_lane:
             imbalance_result = self._validate_base_imbalance_ratio(libraries, machine_type)
             if imbalance_result:
                 if imbalance_result.severity == ValidationSeverity.ERROR:
