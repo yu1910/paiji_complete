@@ -130,7 +130,5 @@
   "second_round_output_rate_threshold": 40.0,
   "second_round_default_pooling_factor": 2.5,
   "first_round_enable_post_fill_optimization": true,
-  "first_round_enable_rule_bucket_prescheduling": true,
-  "first_round_second_pass_enable_post_fill_optimization": true,
-  "first_round_second_pass_enable_rule_bucket_prescheduling": true
+  "first_round_second_pass_enable_post_fill_optimization": true
 }

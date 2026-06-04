@@ -949,11 +949,6 @@ class SchedulingConfigManager:
     def _resolve_process_code(self, libraries: List[Any], metadata: Optional[Dict[str, Any]] = None) -> Optional[int]:
         """解析Lane工序编码。"""
         metadata = metadata or {}
-        inferred = self._infer_process_code_from_test_no(
-            self._resolve_test_no(libraries, metadata)
-        )
-        if inferred is not None:
-            return inferred
         for key in ('process_code', 'test_code'):
             parsed = self._parse_valid_process_code(metadata.get(key))
             if parsed is not None:
@@ -963,6 +958,16 @@ class SchedulingConfigManager:
                 parsed = self._parse_valid_process_code(getattr(lib, attr_name, None))
                 if parsed is not None:
                     return parsed
+        test_no = self._resolve_test_no(libraries, metadata)
+        inferred = self._infer_process_code_from_lab_and_test_no(
+            self._resolve_lab_name(libraries, metadata),
+            test_no,
+        )
+        if inferred is not None:
+            return inferred
+        inferred = self._infer_process_code_from_test_no(test_no)
+        if inferred is not None:
+            return inferred
         return None
 
     @staticmethod
@@ -992,15 +997,67 @@ class SchedulingConfigManager:
             return next(iter(candidates))
         return None
 
+    def _resolve_lab_name(self, libraries: List[Any], metadata: Optional[Dict[str, Any]] = None) -> str:
+        """解析Lane实验室名称。"""
+        metadata = metadata or {}
+        for key in ('lab_name', 'dept', 'wkdept'):
+            if metadata.get(key):
+                return self._normalize_text(metadata.get(key))
+        for lib in libraries:
+            for attr_name in ('lab_name', 'dept', 'wkdept', '_wkdept_raw'):
+                value = getattr(lib, attr_name, None)
+                if value is not None and str(value).strip() != '':
+                    return self._normalize_text(value)
+        return ""
+
+    def _infer_process_code_from_lab_and_test_no(
+        self,
+        normalized_lab_name: str,
+        normalized_test_no: str,
+    ) -> Optional[int]:
+        """按实验室名称+工序文本反推工序码，用于输入缺少工序编码的排机数据。"""
+        if not normalized_lab_name or not normalized_test_no:
+            return None
+        lab_process_codes = {
+            self._normalize_text("天津"): 1595,
+            self._normalize_text("天津科技服务实验室"): 1595,
+            self._normalize_text("北京"): 1749,
+            self._normalize_text("北京科技服务实验室"): 1749,
+            self._normalize_text("上海"): 1601,
+            self._normalize_text("上海科技服务实验室"): 1601,
+            self._normalize_text("新加坡"): 1738,
+            self._normalize_text("新加坡科技服务实验室"): 1738,
+            self._normalize_text("日本"): 1699,
+            self._normalize_text("日本科技服务实验室"): 1699,
+            self._normalize_text("美国科技服务实验室"): 1598,
+            self._normalize_text("美国俄勒冈科"): 1653,
+            self._normalize_text("美国俄勒冈科技服务实验室"): 1653,
+            self._normalize_text("英国"): 1599,
+            self._normalize_text("英国科技服务实验室"): 1599,
+            self._normalize_text("德国"): 1676,
+            self._normalize_text("德国科技服务实验室"): 1676,
+        }
+        process_code = lab_process_codes.get(normalized_lab_name)
+        if process_code is None:
+            return None
+        for profile in self._rule_matrix_config.get('lane_rule_profiles', []):
+            if process_code not in set(profile.get('process_codes', set()) or set()):
+                continue
+            if normalized_test_no in set(profile.get('test_nos', set()) or set()):
+                return process_code
+        return None
+
     def _resolve_test_no(self, libraries: List[Any], metadata: Optional[Dict[str, Any]] = None) -> str:
         """解析Lane工序文本。"""
         metadata = metadata or {}
-        if metadata.get('test_no'):
-            return self._normalize_text(metadata.get('test_no'))
+        for key in ('test_no', 'wktestno', 'testno'):
+            if metadata.get(key):
+                return self._normalize_text(metadata.get(key))
         for lib in libraries:
-            value = getattr(lib, 'test_no', None)
-            if value is not None and str(value).strip() != '':
-                return self._normalize_text(value)
+            for attr_name in ('test_no', 'wktestno', 'testno'):
+                value = getattr(lib, attr_name, None)
+                if value is not None and str(value).strip() != '':
+                    return self._normalize_text(value)
         return ""
 
     def _resolve_seq_mode(self, libraries: List[Any], metadata: Optional[Dict[str, Any]] = None) -> str:

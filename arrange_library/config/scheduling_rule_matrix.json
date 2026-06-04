@@ -1,7 +1,7 @@
 {
   "description": "统一排机规则总配置表",
   "created_at": "2026-03-06 13:55:15",
-  "updated_at": "2026-05-11 16:02:39",
+  "updated_at": "2026-06-02 00:00:00",
   "sample_type_groups": {
     "special_combo_group_a": {
       "description": "10X 5端和VDJ组合",
@@ -45,37 +45,358 @@
   },
   "lane_rule_profiles": [
     {
-      "rule_code": "tj_1595_special_combo_36t",
-      "priority": 250,
-      "process_codes": [1595],
-      "test_nos": ["Novaseq X Plus-PE150"],
-      "machine_types": ["Nova X-25B", "NovaSeq X Plus"],
-      "seq_strategy_keywords_any": ["PE150"],
-      "seq_strategy_keywords_exclude": ["10+24"],
-      "seq_modes": ["3.6T-NEW"],
-      "project_types": ["其他"],
-      "sample_type_group_codes_any": ["special_combo_group_a", "special_combo_group_b"],
-      "soft_target_gb": 1037.5,
-      "min_target_gb": 975.0,
-      "max_target_gb": 1100.0,
+      "rule_code": "tj_1595_mode_1_1_special_combo",
+      "priority": 430,
+      "process_codes": [
+        1595
+      ],
+      "test_nos": [
+        "Novaseq X Plus-PE150"
+      ],
+      "machine_types": [
+        "Nova X-25B",
+        "NovaSeq X Plus"
+      ],
+      "seq_strategy_keywords_any": [
+        "PE150"
+      ],
+      "seq_strategy_keywords_exclude": [
+        "10+24"
+      ],
+      "seq_modes": [
+        "1.1"
+      ],
+      "project_types": [],
+      "sample_type_group_codes_any": [
+        "special_combo_group_a",
+        "special_combo_group_b"
+      ],
+      "soft_target_gb": 2050.0,
+      "min_target_gb": 2000.0,
+      "max_target_gb": 2100.0,
       "tolerance_gb": 5.0,
       "lane_count": 8,
       "loading_method": "25B",
-      "sequencing_mode": "3.6T-NEW",
+      "sequencing_mode": "1.1",
+      "fc_min_data_gb": 1150.0
+    },
+    {
+      "rule_code": "bj_1749_mode_1_1_special_combo",
+      "priority": 430,
+      "process_codes": [
+        1749
+      ],
+      "test_nos": [
+        "Novaseq X Plus-PE150"
+      ],
+      "machine_types": [
+        "Nova X-25B",
+        "NovaSeq X Plus"
+      ],
+      "seq_strategy_keywords_any": [
+        "PE150"
+      ],
+      "seq_strategy_keywords_exclude": [
+        "10+24"
+      ],
+      "seq_modes": [
+        "1.1"
+      ],
+      "project_types": [],
+      "sample_type_group_codes_any": [
+        "special_combo_group_a",
+        "special_combo_group_b"
+      ],
+      "soft_target_gb": 2050.0,
+      "min_target_gb": 2000.0,
+      "max_target_gb": 2100.0,
+      "tolerance_gb": 5.0,
+      "lane_count": 8,
+      "loading_method": "25B",
+      "sequencing_mode": "1.1",
+      "fc_min_data_gb": 1150.0
+    },
+    {
+      "rule_code": "sh_1601_mode_1_1_special_combo",
+      "priority": 430,
+      "process_codes": [
+        1601
+      ],
+      "test_nos": [
+        "Novaseq X Plus-PE150"
+      ],
+      "machine_types": [
+        "Nova X-25B",
+        "NovaSeq X Plus"
+      ],
+      "seq_strategy_keywords_any": [
+        "PE150"
+      ],
+      "seq_strategy_keywords_exclude": [
+        "10+24"
+      ],
+      "seq_modes": [
+        "1.1"
+      ],
+      "project_types": [],
+      "sample_type_group_codes_any": [
+        "special_combo_group_a",
+        "special_combo_group_b"
+      ],
+      "soft_target_gb": 2050.0,
+      "min_target_gb": 2000.0,
+      "max_target_gb": 2100.0,
+      "tolerance_gb": 5.0,
+      "lane_count": 8,
+      "loading_method": "25B",
+      "sequencing_mode": "1.1",
+      "fc_min_data_gb": 1150.0
+    },
+    {
+      "rule_code": "sg_1738_mode_1_1_special_combo",
+      "priority": 430,
+      "process_codes": [
+        1738
+      ],
+      "test_nos": [
+        "Novaseq X Plus-PE150"
+      ],
+      "machine_types": [
+        "Nova X-25B",
+        "NovaSeq X Plus"
+      ],
+      "seq_strategy_keywords_any": [
+        "PE150"
+      ],
+      "seq_strategy_keywords_exclude": [
+        "10+24"
+      ],
+      "seq_modes": [
+        "1.1"
+      ],
+      "project_types": [],
+      "sample_type_group_codes_any": [
+        "special_combo_group_a",
+        "special_combo_group_b"
+      ],
+      "soft_target_gb": 2050.0,
+      "min_target_gb": 2000.0,
+      "max_target_gb": 2100.0,
+      "tolerance_gb": 5.0,
+      "lane_count": 8,
+      "loading_method": "25B",
+      "sequencing_mode": "1.1",
+      "fc_min_data_gb": 1150.0
+    },
+    {
+      "rule_code": "jp_1699_mode_1_1_special_combo",
+      "priority": 430,
+      "process_codes": [
+        1699
+      ],
+      "test_nos": [
+        "Novaseq X Plus-PE150"
+      ],
+      "machine_types": [
+        "Nova X-25B",
+        "NovaSeq X Plus"
+      ],
+      "seq_strategy_keywords_any": [
+        "PE150"
+      ],
+      "seq_strategy_keywords_exclude": [
+        "10+24"
+      ],
+      "seq_modes": [
+        "1.1"
+      ],
+      "project_types": [],
+      "sample_type_group_codes_any": [
+        "special_combo_group_a",
+        "special_combo_group_b"
+      ],
+      "soft_target_gb": 2050.0,
+      "min_target_gb": 2000.0,
+      "max_target_gb": 2100.0,
+      "tolerance_gb": 5.0,
+      "lane_count": 8,
+      "loading_method": "25B",
+      "sequencing_mode": "1.1",
+      "fc_min_data_gb": 1150.0
+    },
+    {
+      "rule_code": "us_service_1598_mode_1_1_special_combo",
+      "priority": 430,
+      "process_codes": [
+        1598
+      ],
+      "test_nos": [
+        "Novaseq X Plus-PE150"
+      ],
+      "machine_types": [
+        "Nova X-25B",
+        "NovaSeq X Plus"
+      ],
+      "seq_strategy_keywords_any": [
+        "PE150"
+      ],
+      "seq_strategy_keywords_exclude": [
+        "10+24"
+      ],
+      "seq_modes": [
+        "1.1"
+      ],
+      "project_types": [],
+      "sample_type_group_codes_any": [
+        "special_combo_group_a",
+        "special_combo_group_b"
+      ],
+      "soft_target_gb": 2050.0,
+      "min_target_gb": 2000.0,
+      "max_target_gb": 2100.0,
+      "tolerance_gb": 5.0,
+      "lane_count": 8,
+      "loading_method": "25B",
+      "sequencing_mode": "1.1",
+      "fc_min_data_gb": 1150.0
+    },
+    {
+      "rule_code": "us_oregon_1653_mode_1_1_special_combo",
+      "priority": 430,
+      "process_codes": [
+        1653
+      ],
+      "test_nos": [
+        "Novaseq X Plus-PE150"
+      ],
+      "machine_types": [
+        "Nova X-25B",
+        "NovaSeq X Plus"
+      ],
+      "seq_strategy_keywords_any": [
+        "PE150"
+      ],
+      "seq_strategy_keywords_exclude": [
+        "10+24"
+      ],
+      "seq_modes": [
+        "1.1"
+      ],
+      "project_types": [],
+      "sample_type_group_codes_any": [
+        "special_combo_group_a",
+        "special_combo_group_b"
+      ],
+      "soft_target_gb": 2050.0,
+      "min_target_gb": 2000.0,
+      "max_target_gb": 2100.0,
+      "tolerance_gb": 5.0,
+      "lane_count": 8,
+      "loading_method": "25B",
+      "sequencing_mode": "1.1",
+      "fc_min_data_gb": 1150.0
+    },
+    {
+      "rule_code": "uk_1599_mode_1_1_special_combo",
+      "priority": 430,
+      "process_codes": [
+        1599
+      ],
+      "test_nos": [
+        "Novaseq X Plus-PE150"
+      ],
+      "machine_types": [
+        "Nova X-25B",
+        "NovaSeq X Plus"
+      ],
+      "seq_strategy_keywords_any": [
+        "PE150"
+      ],
+      "seq_strategy_keywords_exclude": [
+        "10+24"
+      ],
+      "seq_modes": [
+        "1.1"
+      ],
+      "project_types": [],
+      "sample_type_group_codes_any": [
+        "special_combo_group_a",
+        "special_combo_group_b"
+      ],
+      "soft_target_gb": 2050.0,
+      "min_target_gb": 2000.0,
+      "max_target_gb": 2100.0,
+      "tolerance_gb": 5.0,
+      "lane_count": 8,
+      "loading_method": "25B",
+      "sequencing_mode": "1.1",
+      "fc_min_data_gb": 1150.0
+    },
+    {
+      "rule_code": "de_1676_mode_1_1_special_combo",
+      "priority": 430,
+      "process_codes": [
+        1676
+      ],
+      "test_nos": [
+        "Novaseq X Plus-PE150"
+      ],
+      "machine_types": [
+        "Nova X-25B",
+        "NovaSeq X Plus"
+      ],
+      "seq_strategy_keywords_any": [
+        "PE150"
+      ],
+      "seq_strategy_keywords_exclude": [
+        "10+24"
+      ],
+      "seq_modes": [
+        "1.1"
+      ],
+      "project_types": [],
+      "sample_type_group_codes_any": [
+        "special_combo_group_a",
+        "special_combo_group_b"
+      ],
+      "soft_target_gb": 2050.0,
+      "min_target_gb": 2000.0,
+      "max_target_gb": 2100.0,
+      "tolerance_gb": 5.0,
+      "lane_count": 8,
+      "loading_method": "25B",
+      "sequencing_mode": "1.1",
       "fc_min_data_gb": 1150.0
     },
     {
       "rule_code": "tj_1595_mode_1_1_normal_prefer_single_lane",
       "priority": 420,
-      "process_codes": [1595],
-      "test_nos": ["Novaseq X Plus-PE150"],
-      "machine_types": ["Nova X-25B", "NovaSeq X Plus"],
-      "seq_strategy_keywords_any": ["PE150"],
-      "seq_strategy_keywords_exclude": ["10+24"],
-      "seq_modes": ["1.1"],
+      "process_codes": [
+        1595
+      ],
+      "test_nos": [
+        "Novaseq X Plus-PE150"
+      ],
+      "machine_types": [
+        "Nova X-25B",
+        "NovaSeq X Plus"
+      ],
+      "seq_strategy_keywords_any": [
+        "PE150"
+      ],
+      "seq_strategy_keywords_exclude": [
+        "10+24"
+      ],
+      "seq_modes": [
+        "1.1"
+      ],
       "project_types": [],
-      "customer_complex_results_any": ["合格"],
-      "internal_risk_build_flags_any": ["正常建库"],
+      "customer_complex_results_any": [
+        "合格"
+      ],
+      "internal_risk_build_flags_any": [
+        "正常建库"
+      ],
       "soft_single_lane_preferred": true,
       "soft_target_gb": 2175.0,
       "min_target_gb": 2100.0,
@@ -89,15 +410,33 @@
     {
       "rule_code": "tj_1595_mode_1_1_risk_prefer_single_lane",
       "priority": 410,
-      "process_codes": [1595],
-      "test_nos": ["Novaseq X Plus-PE150"],
-      "machine_types": ["Nova X-25B", "NovaSeq X Plus"],
-      "seq_strategy_keywords_any": ["PE150"],
-      "seq_strategy_keywords_exclude": ["10+24"],
-      "seq_modes": ["1.1"],
+      "process_codes": [
+        1595
+      ],
+      "test_nos": [
+        "Novaseq X Plus-PE150"
+      ],
+      "machine_types": [
+        "Nova X-25B",
+        "NovaSeq X Plus"
+      ],
+      "seq_strategy_keywords_any": [
+        "PE150"
+      ],
+      "seq_strategy_keywords_exclude": [
+        "10+24"
+      ],
+      "seq_modes": [
+        "1.1"
+      ],
       "project_types": [],
-      "customer_complex_results_any": ["风险", "不合格"],
-      "internal_risk_build_flags_any": ["风险建库"],
+      "customer_complex_results_any": [
+        "风险",
+        "不合格"
+      ],
+      "internal_risk_build_flags_any": [
+        "风险建库"
+      ],
       "soft_single_lane_preferred": true,
       "soft_target_gb": 2200.0,
       "min_target_gb": 2100.0,
@@ -109,19 +448,319 @@
       "fc_min_data_gb": 1150.0
     },
     {
-      "rule_code": "tj_1595_mode_1_1_special_combo",
-      "priority": 430,
-      "process_codes": [1595],
-      "test_nos": ["Novaseq X Plus-PE150"],
-      "machine_types": ["Nova X-25B", "NovaSeq X Plus"],
-      "seq_strategy_keywords_any": ["PE150"],
-      "seq_strategy_keywords_exclude": ["10+24"],
-      "seq_modes": ["1.1"],
+      "rule_code": "bj_1749_mode_1_1_risk_prefer_single_lane",
+      "priority": 410,
+      "process_codes": [
+        1749
+      ],
+      "test_nos": [
+        "Novaseq X Plus-PE150"
+      ],
+      "machine_types": [
+        "Nova X-25B",
+        "NovaSeq X Plus"
+      ],
+      "seq_strategy_keywords_any": [
+        "PE150"
+      ],
+      "seq_strategy_keywords_exclude": [
+        "10+24"
+      ],
+      "seq_modes": [
+        "1.1"
+      ],
       "project_types": [],
-      "sample_type_group_codes_any": ["special_combo_group_a", "special_combo_group_b"],
-      "soft_target_gb": 2050.0,
-      "min_target_gb": 2000.0,
-      "max_target_gb": 2100.0,
+      "customer_complex_results_any": [
+        "风险",
+        "不合格"
+      ],
+      "internal_risk_build_flags_any": [
+        "风险建库"
+      ],
+      "soft_single_lane_preferred": true,
+      "soft_target_gb": 2200.0,
+      "min_target_gb": 2100.0,
+      "max_target_gb": 2300.0,
+      "tolerance_gb": 5.0,
+      "lane_count": 8,
+      "loading_method": "25B",
+      "sequencing_mode": "1.1",
+      "fc_min_data_gb": 1150.0
+    },
+    {
+      "rule_code": "sh_1601_mode_1_1_risk_prefer_single_lane",
+      "priority": 410,
+      "process_codes": [
+        1601
+      ],
+      "test_nos": [
+        "Novaseq X Plus-PE150"
+      ],
+      "machine_types": [
+        "Nova X-25B",
+        "NovaSeq X Plus"
+      ],
+      "seq_strategy_keywords_any": [
+        "PE150"
+      ],
+      "seq_strategy_keywords_exclude": [
+        "10+24"
+      ],
+      "seq_modes": [
+        "1.1"
+      ],
+      "project_types": [],
+      "customer_complex_results_any": [
+        "风险",
+        "不合格"
+      ],
+      "internal_risk_build_flags_any": [
+        "风险建库"
+      ],
+      "soft_single_lane_preferred": true,
+      "soft_target_gb": 2200.0,
+      "min_target_gb": 2100.0,
+      "max_target_gb": 2300.0,
+      "tolerance_gb": 5.0,
+      "lane_count": 8,
+      "loading_method": "25B",
+      "sequencing_mode": "1.1",
+      "fc_min_data_gb": 1150.0
+    },
+    {
+      "rule_code": "sg_1738_mode_1_1_risk_prefer_single_lane",
+      "priority": 410,
+      "process_codes": [
+        1738
+      ],
+      "test_nos": [
+        "Novaseq X Plus-PE150"
+      ],
+      "machine_types": [
+        "Nova X-25B",
+        "NovaSeq X Plus"
+      ],
+      "seq_strategy_keywords_any": [
+        "PE150"
+      ],
+      "seq_strategy_keywords_exclude": [
+        "10+24"
+      ],
+      "seq_modes": [
+        "1.1"
+      ],
+      "project_types": [],
+      "customer_complex_results_any": [
+        "风险",
+        "不合格"
+      ],
+      "internal_risk_build_flags_any": [
+        "风险建库"
+      ],
+      "soft_single_lane_preferred": true,
+      "soft_target_gb": 2200.0,
+      "min_target_gb": 2100.0,
+      "max_target_gb": 2300.0,
+      "tolerance_gb": 5.0,
+      "lane_count": 8,
+      "loading_method": "25B",
+      "sequencing_mode": "1.1",
+      "fc_min_data_gb": 1150.0
+    },
+    {
+      "rule_code": "jp_1699_mode_1_1_risk_prefer_single_lane",
+      "priority": 410,
+      "process_codes": [
+        1699
+      ],
+      "test_nos": [
+        "Novaseq X Plus-PE150"
+      ],
+      "machine_types": [
+        "Nova X-25B",
+        "NovaSeq X Plus"
+      ],
+      "seq_strategy_keywords_any": [
+        "PE150"
+      ],
+      "seq_strategy_keywords_exclude": [
+        "10+24"
+      ],
+      "seq_modes": [
+        "1.1"
+      ],
+      "project_types": [],
+      "customer_complex_results_any": [
+        "风险",
+        "不合格"
+      ],
+      "internal_risk_build_flags_any": [
+        "风险建库"
+      ],
+      "soft_single_lane_preferred": true,
+      "soft_target_gb": 2200.0,
+      "min_target_gb": 2100.0,
+      "max_target_gb": 2300.0,
+      "tolerance_gb": 5.0,
+      "lane_count": 8,
+      "loading_method": "25B",
+      "sequencing_mode": "1.1",
+      "fc_min_data_gb": 1150.0
+    },
+    {
+      "rule_code": "us_service_1598_mode_1_1_risk_prefer_single_lane",
+      "priority": 410,
+      "process_codes": [
+        1598
+      ],
+      "test_nos": [
+        "Novaseq X Plus-PE150"
+      ],
+      "machine_types": [
+        "Nova X-25B",
+        "NovaSeq X Plus"
+      ],
+      "seq_strategy_keywords_any": [
+        "PE150"
+      ],
+      "seq_strategy_keywords_exclude": [
+        "10+24"
+      ],
+      "seq_modes": [
+        "1.1"
+      ],
+      "project_types": [],
+      "customer_complex_results_any": [
+        "风险",
+        "不合格"
+      ],
+      "internal_risk_build_flags_any": [
+        "风险建库"
+      ],
+      "soft_single_lane_preferred": true,
+      "soft_target_gb": 2200.0,
+      "min_target_gb": 2100.0,
+      "max_target_gb": 2300.0,
+      "tolerance_gb": 5.0,
+      "lane_count": 8,
+      "loading_method": "25B",
+      "sequencing_mode": "1.1",
+      "fc_min_data_gb": 1150.0
+    },
+    {
+      "rule_code": "us_oregon_1653_mode_1_1_risk_prefer_single_lane",
+      "priority": 410,
+      "process_codes": [
+        1653
+      ],
+      "test_nos": [
+        "Novaseq X Plus-PE150"
+      ],
+      "machine_types": [
+        "Nova X-25B",
+        "NovaSeq X Plus"
+      ],
+      "seq_strategy_keywords_any": [
+        "PE150"
+      ],
+      "seq_strategy_keywords_exclude": [
+        "10+24"
+      ],
+      "seq_modes": [
+        "1.1"
+      ],
+      "project_types": [],
+      "customer_complex_results_any": [
+        "风险",
+        "不合格"
+      ],
+      "internal_risk_build_flags_any": [
+        "风险建库"
+      ],
+      "soft_single_lane_preferred": true,
+      "soft_target_gb": 2200.0,
+      "min_target_gb": 2100.0,
+      "max_target_gb": 2300.0,
+      "tolerance_gb": 5.0,
+      "lane_count": 8,
+      "loading_method": "25B",
+      "sequencing_mode": "1.1",
+      "fc_min_data_gb": 1150.0
+    },
+    {
+      "rule_code": "uk_1599_mode_1_1_risk_prefer_single_lane",
+      "priority": 410,
+      "process_codes": [
+        1599
+      ],
+      "test_nos": [
+        "Novaseq X Plus-PE150"
+      ],
+      "machine_types": [
+        "Nova X-25B",
+        "NovaSeq X Plus"
+      ],
+      "seq_strategy_keywords_any": [
+        "PE150"
+      ],
+      "seq_strategy_keywords_exclude": [
+        "10+24"
+      ],
+      "seq_modes": [
+        "1.1"
+      ],
+      "project_types": [],
+      "customer_complex_results_any": [
+        "风险",
+        "不合格"
+      ],
+      "internal_risk_build_flags_any": [
+        "风险建库"
+      ],
+      "soft_single_lane_preferred": true,
+      "soft_target_gb": 2200.0,
+      "min_target_gb": 2100.0,
+      "max_target_gb": 2300.0,
+      "tolerance_gb": 5.0,
+      "lane_count": 8,
+      "loading_method": "25B",
+      "sequencing_mode": "1.1",
+      "fc_min_data_gb": 1150.0
+    },
+    {
+      "rule_code": "de_1676_mode_1_1_risk_prefer_single_lane",
+      "priority": 410,
+      "process_codes": [
+        1676
+      ],
+      "test_nos": [
+        "Novaseq X Plus-PE150"
+      ],
+      "machine_types": [
+        "Nova X-25B",
+        "NovaSeq X Plus"
+      ],
+      "seq_strategy_keywords_any": [
+        "PE150"
+      ],
+      "seq_strategy_keywords_exclude": [
+        "10+24"
+      ],
+      "seq_modes": [
+        "1.1"
+      ],
+      "project_types": [],
+      "customer_complex_results_any": [
+        "风险",
+        "不合格"
+      ],
+      "internal_risk_build_flags_any": [
+        "风险建库"
+      ],
+      "soft_single_lane_preferred": true,
+      "soft_target_gb": 2200.0,
+      "min_target_gb": 2100.0,
+      "max_target_gb": 2300.0,
       "tolerance_gb": 5.0,
       "lane_count": 8,
       "loading_method": "25B",
@@ -131,12 +770,25 @@
     {
       "rule_code": "tj_1595_mode_1_1",
       "priority": 400,
-      "process_codes": [1595],
-      "test_nos": ["Novaseq X Plus-PE150"],
-      "machine_types": ["Nova X-25B", "NovaSeq X Plus"],
-      "seq_strategy_keywords_any": ["PE150"],
-      "seq_strategy_keywords_exclude": ["10+24"],
-      "seq_modes": ["1.1"],
+      "process_codes": [
+        1595
+      ],
+      "test_nos": [
+        "Novaseq X Plus-PE150"
+      ],
+      "machine_types": [
+        "Nova X-25B",
+        "NovaSeq X Plus"
+      ],
+      "seq_strategy_keywords_any": [
+        "PE150"
+      ],
+      "seq_strategy_keywords_exclude": [
+        "10+24"
+      ],
+      "seq_modes": [
+        "1.1"
+      ],
       "project_types": [],
       "soft_target_gb": 2175.0,
       "min_target_gb": 2100.0,
@@ -148,13 +800,862 @@
       "fc_min_data_gb": 1150.0
     },
     {
+      "rule_code": "bj_1749_mode_1_1",
+      "priority": 400,
+      "process_codes": [
+        1749
+      ],
+      "test_nos": [
+        "Novaseq X Plus-PE150"
+      ],
+      "machine_types": [
+        "Nova X-25B",
+        "NovaSeq X Plus"
+      ],
+      "seq_strategy_keywords_any": [
+        "PE150"
+      ],
+      "seq_strategy_keywords_exclude": [
+        "10+24"
+      ],
+      "seq_modes": [
+        "1.1"
+      ],
+      "project_types": [],
+      "soft_target_gb": 2175.0,
+      "min_target_gb": 2100.0,
+      "max_target_gb": 2250.0,
+      "tolerance_gb": 5.0,
+      "lane_count": 8,
+      "loading_method": "25B",
+      "sequencing_mode": "1.1",
+      "fc_min_data_gb": 1150.0
+    },
+    {
+      "rule_code": "sh_1601_mode_1_1",
+      "priority": 400,
+      "process_codes": [
+        1601
+      ],
+      "test_nos": [
+        "Novaseq X Plus-PE150"
+      ],
+      "machine_types": [
+        "Nova X-25B",
+        "NovaSeq X Plus"
+      ],
+      "seq_strategy_keywords_any": [
+        "PE150"
+      ],
+      "seq_strategy_keywords_exclude": [
+        "10+24"
+      ],
+      "seq_modes": [
+        "1.1"
+      ],
+      "project_types": [],
+      "soft_target_gb": 2175.0,
+      "min_target_gb": 2100.0,
+      "max_target_gb": 2250.0,
+      "tolerance_gb": 5.0,
+      "lane_count": 8,
+      "loading_method": "25B",
+      "sequencing_mode": "1.1",
+      "fc_min_data_gb": 1150.0
+    },
+    {
+      "rule_code": "sg_1738_mode_1_1",
+      "priority": 400,
+      "process_codes": [
+        1738
+      ],
+      "test_nos": [
+        "Novaseq X Plus-PE150"
+      ],
+      "machine_types": [
+        "Nova X-25B",
+        "NovaSeq X Plus"
+      ],
+      "seq_strategy_keywords_any": [
+        "PE150"
+      ],
+      "seq_strategy_keywords_exclude": [
+        "10+24"
+      ],
+      "seq_modes": [
+        "1.1"
+      ],
+      "project_types": [],
+      "soft_target_gb": 2175.0,
+      "min_target_gb": 2100.0,
+      "max_target_gb": 2250.0,
+      "tolerance_gb": 5.0,
+      "lane_count": 8,
+      "loading_method": "25B",
+      "sequencing_mode": "1.1",
+      "fc_min_data_gb": 1150.0
+    },
+    {
+      "rule_code": "jp_1699_mode_1_1",
+      "priority": 400,
+      "process_codes": [
+        1699
+      ],
+      "test_nos": [
+        "Novaseq X Plus-PE150"
+      ],
+      "machine_types": [
+        "Nova X-25B",
+        "NovaSeq X Plus"
+      ],
+      "seq_strategy_keywords_any": [
+        "PE150"
+      ],
+      "seq_strategy_keywords_exclude": [
+        "10+24"
+      ],
+      "seq_modes": [
+        "1.1"
+      ],
+      "project_types": [],
+      "soft_target_gb": 2175.0,
+      "min_target_gb": 2100.0,
+      "max_target_gb": 2250.0,
+      "tolerance_gb": 5.0,
+      "lane_count": 8,
+      "loading_method": "25B",
+      "sequencing_mode": "1.1",
+      "fc_min_data_gb": 1150.0
+    },
+    {
+      "rule_code": "us_service_1598_mode_1_1",
+      "priority": 400,
+      "process_codes": [
+        1598
+      ],
+      "test_nos": [
+        "Novaseq X Plus-PE150"
+      ],
+      "machine_types": [
+        "Nova X-25B",
+        "NovaSeq X Plus"
+      ],
+      "seq_strategy_keywords_any": [
+        "PE150"
+      ],
+      "seq_strategy_keywords_exclude": [
+        "10+24"
+      ],
+      "seq_modes": [
+        "1.1"
+      ],
+      "project_types": [],
+      "soft_target_gb": 2175.0,
+      "min_target_gb": 2100.0,
+      "max_target_gb": 2250.0,
+      "tolerance_gb": 5.0,
+      "lane_count": 8,
+      "loading_method": "25B",
+      "sequencing_mode": "1.1",
+      "fc_min_data_gb": 1150.0
+    },
+    {
+      "rule_code": "us_oregon_1653_mode_1_1",
+      "priority": 400,
+      "process_codes": [
+        1653
+      ],
+      "test_nos": [
+        "Novaseq X Plus-PE150"
+      ],
+      "machine_types": [
+        "Nova X-25B",
+        "NovaSeq X Plus"
+      ],
+      "seq_strategy_keywords_any": [
+        "PE150"
+      ],
+      "seq_strategy_keywords_exclude": [
+        "10+24"
+      ],
+      "seq_modes": [
+        "1.1"
+      ],
+      "project_types": [],
+      "soft_target_gb": 2175.0,
+      "min_target_gb": 2100.0,
+      "max_target_gb": 2250.0,
+      "tolerance_gb": 5.0,
+      "lane_count": 8,
+      "loading_method": "25B",
+      "sequencing_mode": "1.1",
+      "fc_min_data_gb": 1150.0
+    },
+    {
+      "rule_code": "uk_1599_mode_1_1",
+      "priority": 400,
+      "process_codes": [
+        1599
+      ],
+      "test_nos": [
+        "Novaseq X Plus-PE150"
+      ],
+      "machine_types": [
+        "Nova X-25B",
+        "NovaSeq X Plus"
+      ],
+      "seq_strategy_keywords_any": [
+        "PE150"
+      ],
+      "seq_strategy_keywords_exclude": [
+        "10+24"
+      ],
+      "seq_modes": [
+        "1.1"
+      ],
+      "project_types": [],
+      "soft_target_gb": 2175.0,
+      "min_target_gb": 2100.0,
+      "max_target_gb": 2250.0,
+      "tolerance_gb": 5.0,
+      "lane_count": 8,
+      "loading_method": "25B",
+      "sequencing_mode": "1.1",
+      "fc_min_data_gb": 1150.0
+    },
+    {
+      "rule_code": "de_1676_mode_1_1",
+      "priority": 400,
+      "process_codes": [
+        1676
+      ],
+      "test_nos": [
+        "Novaseq X Plus-PE150"
+      ],
+      "machine_types": [
+        "Nova X-25B",
+        "NovaSeq X Plus"
+      ],
+      "seq_strategy_keywords_any": [
+        "PE150"
+      ],
+      "seq_strategy_keywords_exclude": [
+        "10+24"
+      ],
+      "seq_modes": [
+        "1.1"
+      ],
+      "project_types": [],
+      "soft_target_gb": 2175.0,
+      "min_target_gb": 2100.0,
+      "max_target_gb": 2250.0,
+      "tolerance_gb": 5.0,
+      "lane_count": 8,
+      "loading_method": "25B",
+      "sequencing_mode": "1.1",
+      "fc_min_data_gb": 1150.0
+    },
+    {
+      "rule_code": "tj_1595_special_combo_36t",
+      "priority": 250,
+      "process_codes": [
+        1595
+      ],
+      "test_nos": [
+        "Novaseq X Plus-PE150"
+      ],
+      "machine_types": [
+        "Nova X-25B",
+        "NovaSeq X Plus"
+      ],
+      "seq_strategy_keywords_any": [
+        "PE150"
+      ],
+      "seq_strategy_keywords_exclude": [
+        "10+24"
+      ],
+      "seq_modes": [
+        "3.6T-NEW"
+      ],
+      "project_types": [
+        "其他"
+      ],
+      "sample_type_group_codes_any": [
+        "special_combo_group_a",
+        "special_combo_group_b"
+      ],
+      "soft_target_gb": 1037.5,
+      "min_target_gb": 975.0,
+      "max_target_gb": 1100.0,
+      "tolerance_gb": 5.0,
+      "lane_count": 8,
+      "loading_method": "25B",
+      "sequencing_mode": "3.6T-NEW",
+      "fc_min_data_gb": 1150.0
+    },
+    {
+      "rule_code": "bj_1749_special_combo_36t",
+      "priority": 250,
+      "process_codes": [
+        1749
+      ],
+      "test_nos": [
+        "Novaseq X Plus-PE150"
+      ],
+      "machine_types": [
+        "Nova X-25B",
+        "NovaSeq X Plus"
+      ],
+      "seq_strategy_keywords_any": [
+        "PE150"
+      ],
+      "seq_strategy_keywords_exclude": [
+        "10+24"
+      ],
+      "seq_modes": [
+        "3.6T-NEW"
+      ],
+      "project_types": [
+        "其他"
+      ],
+      "sample_type_group_codes_any": [
+        "special_combo_group_a",
+        "special_combo_group_b"
+      ],
+      "soft_target_gb": 1037.5,
+      "min_target_gb": 975.0,
+      "max_target_gb": 1100.0,
+      "tolerance_gb": 5.0,
+      "lane_count": 8,
+      "loading_method": "25B",
+      "sequencing_mode": "3.6T-NEW",
+      "fc_min_data_gb": 1150.0
+    },
+    {
+      "rule_code": "sh_1601_special_combo_36t",
+      "priority": 250,
+      "process_codes": [
+        1601
+      ],
+      "test_nos": [
+        "Novaseq X Plus-PE150"
+      ],
+      "machine_types": [
+        "Nova X-25B",
+        "NovaSeq X Plus"
+      ],
+      "seq_strategy_keywords_any": [
+        "PE150"
+      ],
+      "seq_strategy_keywords_exclude": [
+        "10+24"
+      ],
+      "seq_modes": [
+        "3.6T-NEW"
+      ],
+      "project_types": [
+        "其他"
+      ],
+      "sample_type_group_codes_any": [
+        "special_combo_group_a",
+        "special_combo_group_b"
+      ],
+      "soft_target_gb": 1037.5,
+      "min_target_gb": 975.0,
+      "max_target_gb": 1100.0,
+      "tolerance_gb": 5.0,
+      "lane_count": 8,
+      "loading_method": "25B",
+      "sequencing_mode": "3.6T-NEW",
+      "fc_min_data_gb": 1150.0
+    },
+    {
+      "rule_code": "sg_1738_special_combo_36t",
+      "priority": 250,
+      "process_codes": [
+        1738
+      ],
+      "test_nos": [
+        "Novaseq X Plus-PE150"
+      ],
+      "machine_types": [
+        "Nova X-25B",
+        "NovaSeq X Plus"
+      ],
+      "seq_strategy_keywords_any": [
+        "PE150"
+      ],
+      "seq_strategy_keywords_exclude": [
+        "10+24"
+      ],
+      "seq_modes": [
+        "3.6T-NEW"
+      ],
+      "project_types": [
+        "其他"
+      ],
+      "sample_type_group_codes_any": [
+        "special_combo_group_a",
+        "special_combo_group_b"
+      ],
+      "soft_target_gb": 1037.5,
+      "min_target_gb": 975.0,
+      "max_target_gb": 1100.0,
+      "tolerance_gb": 5.0,
+      "lane_count": 8,
+      "loading_method": "25B",
+      "sequencing_mode": "3.6T-NEW",
+      "fc_min_data_gb": 1150.0
+    },
+    {
+      "rule_code": "jp_1699_special_combo_36t",
+      "priority": 250,
+      "process_codes": [
+        1699
+      ],
+      "test_nos": [
+        "Novaseq X Plus-PE150"
+      ],
+      "machine_types": [
+        "Nova X-25B",
+        "NovaSeq X Plus"
+      ],
+      "seq_strategy_keywords_any": [
+        "PE150"
+      ],
+      "seq_strategy_keywords_exclude": [
+        "10+24"
+      ],
+      "seq_modes": [
+        "3.6T-NEW"
+      ],
+      "project_types": [
+        "其他"
+      ],
+      "sample_type_group_codes_any": [
+        "special_combo_group_a",
+        "special_combo_group_b"
+      ],
+      "soft_target_gb": 1037.5,
+      "min_target_gb": 975.0,
+      "max_target_gb": 1100.0,
+      "tolerance_gb": 5.0,
+      "lane_count": 8,
+      "loading_method": "25B",
+      "sequencing_mode": "3.6T-NEW",
+      "fc_min_data_gb": 1150.0
+    },
+    {
+      "rule_code": "us_service_1598_special_combo_36t",
+      "priority": 250,
+      "process_codes": [
+        1598
+      ],
+      "test_nos": [
+        "Novaseq X Plus-PE150"
+      ],
+      "machine_types": [
+        "Nova X-25B",
+        "NovaSeq X Plus"
+      ],
+      "seq_strategy_keywords_any": [
+        "PE150"
+      ],
+      "seq_strategy_keywords_exclude": [
+        "10+24"
+      ],
+      "seq_modes": [
+        "3.6T-NEW"
+      ],
+      "project_types": [
+        "其他"
+      ],
+      "sample_type_group_codes_any": [
+        "special_combo_group_a",
+        "special_combo_group_b"
+      ],
+      "soft_target_gb": 1037.5,
+      "min_target_gb": 975.0,
+      "max_target_gb": 1100.0,
+      "tolerance_gb": 5.0,
+      "lane_count": 8,
+      "loading_method": "25B",
+      "sequencing_mode": "3.6T-NEW",
+      "fc_min_data_gb": 1150.0
+    },
+    {
+      "rule_code": "us_oregon_1653_special_combo_36t",
+      "priority": 250,
+      "process_codes": [
+        1653
+      ],
+      "test_nos": [
+        "Novaseq X Plus-PE150"
+      ],
+      "machine_types": [
+        "Nova X-25B",
+        "NovaSeq X Plus"
+      ],
+      "seq_strategy_keywords_any": [
+        "PE150"
+      ],
+      "seq_strategy_keywords_exclude": [
+        "10+24"
+      ],
+      "seq_modes": [
+        "3.6T-NEW"
+      ],
+      "project_types": [
+        "其他"
+      ],
+      "sample_type_group_codes_any": [
+        "special_combo_group_a",
+        "special_combo_group_b"
+      ],
+      "soft_target_gb": 1037.5,
+      "min_target_gb": 975.0,
+      "max_target_gb": 1100.0,
+      "tolerance_gb": 5.0,
+      "lane_count": 8,
+      "loading_method": "25B",
+      "sequencing_mode": "3.6T-NEW",
+      "fc_min_data_gb": 1150.0
+    },
+    {
+      "rule_code": "uk_1599_special_combo_36t",
+      "priority": 250,
+      "process_codes": [
+        1599
+      ],
+      "test_nos": [
+        "Novaseq X Plus-PE150"
+      ],
+      "machine_types": [
+        "Nova X-25B",
+        "NovaSeq X Plus"
+      ],
+      "seq_strategy_keywords_any": [
+        "PE150"
+      ],
+      "seq_strategy_keywords_exclude": [
+        "10+24"
+      ],
+      "seq_modes": [
+        "3.6T-NEW"
+      ],
+      "project_types": [
+        "其他"
+      ],
+      "sample_type_group_codes_any": [
+        "special_combo_group_a",
+        "special_combo_group_b"
+      ],
+      "soft_target_gb": 1037.5,
+      "min_target_gb": 975.0,
+      "max_target_gb": 1100.0,
+      "tolerance_gb": 5.0,
+      "lane_count": 8,
+      "loading_method": "25B",
+      "sequencing_mode": "3.6T-NEW",
+      "fc_min_data_gb": 1150.0
+    },
+    {
+      "rule_code": "de_1676_special_combo_36t",
+      "priority": 250,
+      "process_codes": [
+        1676
+      ],
+      "test_nos": [
+        "Novaseq X Plus-PE150"
+      ],
+      "machine_types": [
+        "Nova X-25B",
+        "NovaSeq X Plus"
+      ],
+      "seq_strategy_keywords_any": [
+        "PE150"
+      ],
+      "seq_strategy_keywords_exclude": [
+        "10+24"
+      ],
+      "seq_modes": [
+        "3.6T-NEW"
+      ],
+      "project_types": [
+        "其他"
+      ],
+      "sample_type_group_codes_any": [
+        "special_combo_group_a",
+        "special_combo_group_b"
+      ],
+      "soft_target_gb": 1037.5,
+      "min_target_gb": 975.0,
+      "max_target_gb": 1100.0,
+      "tolerance_gb": 5.0,
+      "lane_count": 8,
+      "loading_method": "25B",
+      "sequencing_mode": "3.6T-NEW",
+      "fc_min_data_gb": 1150.0
+    },
+    {
       "rule_code": "tj_1595_10_plus_24_lane_seq",
       "priority": 200,
-      "process_codes": [1595],
-      "test_nos": ["Novaseq X Plus-PE150"],
-      "machine_types": ["Nova X-25B", "NovaSeq X Plus"],
-      "seq_strategy_keywords_any": ["10+24"],
-      "seq_modes": ["Lane seq"],
+      "process_codes": [
+        1595
+      ],
+      "test_nos": [
+        "Novaseq X Plus-PE150"
+      ],
+      "machine_types": [
+        "Nova X-25B",
+        "NovaSeq X Plus"
+      ],
+      "seq_strategy_keywords_any": [
+        "10+24"
+      ],
+      "seq_modes": [
+        "Lane seq"
+      ],
+      "project_types": [],
+      "soft_target_gb": 1000.0,
+      "min_target_gb": 1000.0,
+      "max_target_gb": 1000.0,
+      "tolerance_gb": 5.0,
+      "lane_count": 8,
+      "loading_method": "25B",
+      "sequencing_mode": "Lane seq",
+      "fc_min_data_gb": 1150.0,
+      "additional_balance_ratio": 0.05
+    },
+    {
+      "rule_code": "bj_1749_10_plus_24_lane_seq",
+      "priority": 200,
+      "process_codes": [
+        1749
+      ],
+      "test_nos": [
+        "Novaseq X Plus-PE150"
+      ],
+      "machine_types": [
+        "Nova X-25B",
+        "NovaSeq X Plus"
+      ],
+      "seq_strategy_keywords_any": [
+        "10+24"
+      ],
+      "seq_modes": [
+        "Lane seq"
+      ],
+      "project_types": [],
+      "soft_target_gb": 1000.0,
+      "min_target_gb": 1000.0,
+      "max_target_gb": 1000.0,
+      "tolerance_gb": 5.0,
+      "lane_count": 8,
+      "loading_method": "25B",
+      "sequencing_mode": "Lane seq",
+      "fc_min_data_gb": 1150.0,
+      "additional_balance_ratio": 0.05
+    },
+    {
+      "rule_code": "sh_1601_10_plus_24_lane_seq",
+      "priority": 200,
+      "process_codes": [
+        1601
+      ],
+      "test_nos": [
+        "Novaseq X Plus-PE150"
+      ],
+      "machine_types": [
+        "Nova X-25B",
+        "NovaSeq X Plus"
+      ],
+      "seq_strategy_keywords_any": [
+        "10+24"
+      ],
+      "seq_modes": [
+        "Lane seq"
+      ],
+      "project_types": [],
+      "soft_target_gb": 1000.0,
+      "min_target_gb": 1000.0,
+      "max_target_gb": 1000.0,
+      "tolerance_gb": 5.0,
+      "lane_count": 8,
+      "loading_method": "25B",
+      "sequencing_mode": "Lane seq",
+      "fc_min_data_gb": 1150.0,
+      "additional_balance_ratio": 0.05
+    },
+    {
+      "rule_code": "sg_1738_10_plus_24_lane_seq",
+      "priority": 200,
+      "process_codes": [
+        1738
+      ],
+      "test_nos": [
+        "Novaseq X Plus-PE150"
+      ],
+      "machine_types": [
+        "Nova X-25B",
+        "NovaSeq X Plus"
+      ],
+      "seq_strategy_keywords_any": [
+        "10+24"
+      ],
+      "seq_modes": [
+        "Lane seq"
+      ],
+      "project_types": [],
+      "soft_target_gb": 1000.0,
+      "min_target_gb": 1000.0,
+      "max_target_gb": 1000.0,
+      "tolerance_gb": 5.0,
+      "lane_count": 8,
+      "loading_method": "25B",
+      "sequencing_mode": "Lane seq",
+      "fc_min_data_gb": 1150.0,
+      "additional_balance_ratio": 0.05
+    },
+    {
+      "rule_code": "jp_1699_10_plus_24_lane_seq",
+      "priority": 200,
+      "process_codes": [
+        1699
+      ],
+      "test_nos": [
+        "Novaseq X Plus-PE150"
+      ],
+      "machine_types": [
+        "Nova X-25B",
+        "NovaSeq X Plus"
+      ],
+      "seq_strategy_keywords_any": [
+        "10+24"
+      ],
+      "seq_modes": [
+        "Lane seq"
+      ],
+      "project_types": [],
+      "soft_target_gb": 1000.0,
+      "min_target_gb": 1000.0,
+      "max_target_gb": 1000.0,
+      "tolerance_gb": 5.0,
+      "lane_count": 8,
+      "loading_method": "25B",
+      "sequencing_mode": "Lane seq",
+      "fc_min_data_gb": 1150.0,
+      "additional_balance_ratio": 0.05
+    },
+    {
+      "rule_code": "us_service_1598_10_plus_24_lane_seq",
+      "priority": 200,
+      "process_codes": [
+        1598
+      ],
+      "test_nos": [
+        "Novaseq X Plus-PE150"
+      ],
+      "machine_types": [
+        "Nova X-25B",
+        "NovaSeq X Plus"
+      ],
+      "seq_strategy_keywords_any": [
+        "10+24"
+      ],
+      "seq_modes": [
+        "Lane seq"
+      ],
+      "project_types": [],
+      "soft_target_gb": 1000.0,
+      "min_target_gb": 1000.0,
+      "max_target_gb": 1000.0,
+      "tolerance_gb": 5.0,
+      "lane_count": 8,
+      "loading_method": "25B",
+      "sequencing_mode": "Lane seq",
+      "fc_min_data_gb": 1150.0,
+      "additional_balance_ratio": 0.05
+    },
+    {
+      "rule_code": "us_oregon_1653_10_plus_24_lane_seq",
+      "priority": 200,
+      "process_codes": [
+        1653
+      ],
+      "test_nos": [
+        "Novaseq X Plus-PE150"
+      ],
+      "machine_types": [
+        "Nova X-25B",
+        "NovaSeq X Plus"
+      ],
+      "seq_strategy_keywords_any": [
+        "10+24"
+      ],
+      "seq_modes": [
+        "Lane seq"
+      ],
+      "project_types": [],
+      "soft_target_gb": 1000.0,
+      "min_target_gb": 1000.0,
+      "max_target_gb": 1000.0,
+      "tolerance_gb": 5.0,
+      "lane_count": 8,
+      "loading_method": "25B",
+      "sequencing_mode": "Lane seq",
+      "fc_min_data_gb": 1150.0,
+      "additional_balance_ratio": 0.05
+    },
+    {
+      "rule_code": "uk_1599_10_plus_24_lane_seq",
+      "priority": 200,
+      "process_codes": [
+        1599
+      ],
+      "test_nos": [
+        "Novaseq X Plus-PE150"
+      ],
+      "machine_types": [
+        "Nova X-25B",
+        "NovaSeq X Plus"
+      ],
+      "seq_strategy_keywords_any": [
+        "10+24"
+      ],
+      "seq_modes": [
+        "Lane seq"
+      ],
+      "project_types": [],
+      "soft_target_gb": 1000.0,
+      "min_target_gb": 1000.0,
+      "max_target_gb": 1000.0,
+      "tolerance_gb": 5.0,
+      "lane_count": 8,
+      "loading_method": "25B",
+      "sequencing_mode": "Lane seq",
+      "fc_min_data_gb": 1150.0,
+      "additional_balance_ratio": 0.05
+    },
+    {
+      "rule_code": "de_1676_10_plus_24_lane_seq",
+      "priority": 200,
+      "process_codes": [
+        1676
+      ],
+      "test_nos": [
+        "Novaseq X Plus-PE150"
+      ],
+      "machine_types": [
+        "Nova X-25B",
+        "NovaSeq X Plus"
+      ],
+      "seq_strategy_keywords_any": [
+        "10+24"
+      ],
+      "seq_modes": [
+        "Lane seq"
+      ],
       "project_types": [],
       "soft_target_gb": 1000.0,
       "min_target_gb": 1000.0,
@@ -169,12 +1670,281 @@
     {
       "rule_code": "tj_1595_standard_pe150_25b",
       "priority": 100,
-      "process_codes": [1595],
-      "test_nos": ["Novaseq X Plus-PE150"],
-      "machine_types": ["Nova X-25B", "NovaSeq X Plus"],
-      "seq_strategy_keywords_any": ["PE150"],
-      "seq_strategy_keywords_exclude": ["10+24"],
-      "seq_modes": ["3.6T-NEW"],
+      "process_codes": [
+        1595
+      ],
+      "test_nos": [
+        "Novaseq X Plus-PE150"
+      ],
+      "machine_types": [
+        "Nova X-25B",
+        "NovaSeq X Plus"
+      ],
+      "seq_strategy_keywords_any": [
+        "PE150"
+      ],
+      "seq_strategy_keywords_exclude": [
+        "10+24"
+      ],
+      "seq_modes": [
+        "3.6T-NEW"
+      ],
+      "project_types": [],
+      "soft_target_gb": 1050.0,
+      "min_target_gb": 1000.0,
+      "max_target_gb": 1100.0,
+      "tolerance_gb": 5.0,
+      "lane_count": 8,
+      "loading_method": "25B",
+      "sequencing_mode": "3.6T-NEW",
+      "fc_min_data_gb": 1150.0
+    },
+    {
+      "rule_code": "bj_1749_standard_pe150_25b",
+      "priority": 100,
+      "process_codes": [
+        1749
+      ],
+      "test_nos": [
+        "Novaseq X Plus-PE150"
+      ],
+      "machine_types": [
+        "Nova X-25B",
+        "NovaSeq X Plus"
+      ],
+      "seq_strategy_keywords_any": [
+        "PE150"
+      ],
+      "seq_strategy_keywords_exclude": [
+        "10+24"
+      ],
+      "seq_modes": [
+        "3.6T-NEW"
+      ],
+      "project_types": [],
+      "soft_target_gb": 1050.0,
+      "min_target_gb": 1000.0,
+      "max_target_gb": 1100.0,
+      "tolerance_gb": 5.0,
+      "lane_count": 8,
+      "loading_method": "25B",
+      "sequencing_mode": "3.6T-NEW",
+      "fc_min_data_gb": 1150.0
+    },
+    {
+      "rule_code": "sh_1601_standard_pe150_25b",
+      "priority": 100,
+      "process_codes": [
+        1601
+      ],
+      "test_nos": [
+        "Novaseq X Plus-PE150"
+      ],
+      "machine_types": [
+        "Nova X-25B",
+        "NovaSeq X Plus"
+      ],
+      "seq_strategy_keywords_any": [
+        "PE150"
+      ],
+      "seq_strategy_keywords_exclude": [
+        "10+24"
+      ],
+      "seq_modes": [
+        "3.6T-NEW"
+      ],
+      "project_types": [],
+      "soft_target_gb": 1050.0,
+      "min_target_gb": 1000.0,
+      "max_target_gb": 1100.0,
+      "tolerance_gb": 5.0,
+      "lane_count": 8,
+      "loading_method": "25B",
+      "sequencing_mode": "3.6T-NEW",
+      "fc_min_data_gb": 1150.0
+    },
+    {
+      "rule_code": "sg_1738_standard_pe150_25b",
+      "priority": 100,
+      "process_codes": [
+        1738
+      ],
+      "test_nos": [
+        "Novaseq X Plus-PE150"
+      ],
+      "machine_types": [
+        "Nova X-25B",
+        "NovaSeq X Plus"
+      ],
+      "seq_strategy_keywords_any": [
+        "PE150"
+      ],
+      "seq_strategy_keywords_exclude": [
+        "10+24"
+      ],
+      "seq_modes": [
+        "3.6T-NEW"
+      ],
+      "project_types": [],
+      "soft_target_gb": 1050.0,
+      "min_target_gb": 1000.0,
+      "max_target_gb": 1100.0,
+      "tolerance_gb": 5.0,
+      "lane_count": 8,
+      "loading_method": "25B",
+      "sequencing_mode": "3.6T-NEW",
+      "fc_min_data_gb": 1150.0
+    },
+    {
+      "rule_code": "jp_1699_standard_pe150_25b",
+      "priority": 100,
+      "process_codes": [
+        1699
+      ],
+      "test_nos": [
+        "Novaseq X Plus-PE150"
+      ],
+      "machine_types": [
+        "Nova X-25B",
+        "NovaSeq X Plus"
+      ],
+      "seq_strategy_keywords_any": [
+        "PE150"
+      ],
+      "seq_strategy_keywords_exclude": [
+        "10+24"
+      ],
+      "seq_modes": [
+        "3.6T-NEW"
+      ],
+      "project_types": [],
+      "soft_target_gb": 1050.0,
+      "min_target_gb": 1000.0,
+      "max_target_gb": 1100.0,
+      "tolerance_gb": 5.0,
+      "lane_count": 8,
+      "loading_method": "25B",
+      "sequencing_mode": "3.6T-NEW",
+      "fc_min_data_gb": 1150.0
+    },
+    {
+      "rule_code": "us_service_1598_standard_pe150_25b",
+      "priority": 100,
+      "process_codes": [
+        1598
+      ],
+      "test_nos": [
+        "Novaseq X Plus-PE150"
+      ],
+      "machine_types": [
+        "Nova X-25B",
+        "NovaSeq X Plus"
+      ],
+      "seq_strategy_keywords_any": [
+        "PE150"
+      ],
+      "seq_strategy_keywords_exclude": [
+        "10+24"
+      ],
+      "seq_modes": [
+        "3.6T-NEW"
+      ],
+      "project_types": [],
+      "soft_target_gb": 1050.0,
+      "min_target_gb": 1000.0,
+      "max_target_gb": 1100.0,
+      "tolerance_gb": 5.0,
+      "lane_count": 8,
+      "loading_method": "25B",
+      "sequencing_mode": "3.6T-NEW",
+      "fc_min_data_gb": 1150.0
+    },
+    {
+      "rule_code": "us_oregon_1653_standard_pe150_25b",
+      "priority": 100,
+      "process_codes": [
+        1653
+      ],
+      "test_nos": [
+        "Novaseq X Plus-PE150"
+      ],
+      "machine_types": [
+        "Nova X-25B",
+        "NovaSeq X Plus"
+      ],
+      "seq_strategy_keywords_any": [
+        "PE150"
+      ],
+      "seq_strategy_keywords_exclude": [
+        "10+24"
+      ],
+      "seq_modes": [
+        "3.6T-NEW"
+      ],
+      "project_types": [],
+      "soft_target_gb": 1050.0,
+      "min_target_gb": 1000.0,
+      "max_target_gb": 1100.0,
+      "tolerance_gb": 5.0,
+      "lane_count": 8,
+      "loading_method": "25B",
+      "sequencing_mode": "3.6T-NEW",
+      "fc_min_data_gb": 1150.0
+    },
+    {
+      "rule_code": "uk_1599_standard_pe150_25b",
+      "priority": 100,
+      "process_codes": [
+        1599
+      ],
+      "test_nos": [
+        "Novaseq X Plus-PE150"
+      ],
+      "machine_types": [
+        "Nova X-25B",
+        "NovaSeq X Plus"
+      ],
+      "seq_strategy_keywords_any": [
+        "PE150"
+      ],
+      "seq_strategy_keywords_exclude": [
+        "10+24"
+      ],
+      "seq_modes": [
+        "3.6T-NEW"
+      ],
+      "project_types": [],
+      "soft_target_gb": 1050.0,
+      "min_target_gb": 1000.0,
+      "max_target_gb": 1100.0,
+      "tolerance_gb": 5.0,
+      "lane_count": 8,
+      "loading_method": "25B",
+      "sequencing_mode": "3.6T-NEW",
+      "fc_min_data_gb": 1150.0
+    },
+    {
+      "rule_code": "de_1676_standard_pe150_25b",
+      "priority": 100,
+      "process_codes": [
+        1676
+      ],
+      "test_nos": [
+        "Novaseq X Plus-PE150"
+      ],
+      "machine_types": [
+        "Nova X-25B",
+        "NovaSeq X Plus"
+      ],
+      "seq_strategy_keywords_any": [
+        "PE150"
+      ],
+      "seq_strategy_keywords_exclude": [
+        "10+24"
+      ],
+      "seq_modes": [
+        "3.6T-NEW"
+      ],
       "project_types": [],
       "soft_target_gb": 1050.0,
       "min_target_gb": 1000.0,
@@ -190,29 +1960,57 @@
     {
       "rule_code": "tj_1595_special_combo_groups_not_mixed",
       "priority": 300,
-      "process_codes": [1595],
-      "test_nos": ["Novaseq X Plus-PE150"],
-      "machine_types": ["Nova X-25B", "NovaSeq X Plus"],
-      "seq_modes": ["3.6T-NEW", "1.1"],
-      "project_types": ["其他"],
+      "process_codes": [
+        1595
+      ],
+      "test_nos": [
+        "Novaseq X Plus-PE150"
+      ],
+      "machine_types": [
+        "Nova X-25B",
+        "NovaSeq X Plus"
+      ],
+      "seq_modes": [
+        "3.6T-NEW",
+        "1.1"
+      ],
+      "project_types": [
+        "其他"
+      ],
       "constraint_type": "mutually_exclusive_sample_type_groups",
-      "group_codes": ["special_combo_group_a", "special_combo_group_b"],
+      "group_codes": [
+        "special_combo_group_a",
+        "special_combo_group_b"
+      ],
       "message": "组合1与组合2文库类型不可混排"
     },
     {
       "rule_code": "tj_1595_mode_1_1_forbid_rules",
       "priority": 200,
-      "process_codes": [1595],
-      "test_nos": ["Novaseq X Plus-PE150"],
-      "machine_types": ["Nova X-25B", "NovaSeq X Plus"],
-      "seq_modes": ["1.1"],
-      "project_types": ["其他"],
+      "process_codes": [
+        1595
+      ],
+      "test_nos": [
+        "Novaseq X Plus-PE150"
+      ],
+      "machine_types": [
+        "Nova X-25B",
+        "NovaSeq X Plus"
+      ],
+      "seq_modes": [
+        "1.1"
+      ],
+      "project_types": [
+        "其他"
+      ],
       "constraint_type": "forbid_mode_when_any_condition_matches",
       "message": "命中1.1模式禁止条件，不允许按1.1模式排机",
       "conditions": [
         {
           "condition_type": "lane_project_type_not_in",
-          "project_types": ["其他"]
+          "project_types": [
+            "其他"
+          ]
         },
         {
           "condition_type": "has_package_lane_or_fc"
@@ -230,10 +2028,20 @@
       "reason": "special_10x_combo_group_a_2_5",
       "rule_type": "sample_type_subset",
       "priority": 300,
-      "process_codes": [1595],
-      "test_nos": ["Novaseq X Plus-PE150"],
-      "machine_types": ["Nova X-25B", "NovaSeq X Plus"],
-      "seq_modes": ["3.6T-NEW", "Lane seq"],
+      "process_codes": [
+        1595
+      ],
+      "test_nos": [
+        "Novaseq X Plus-PE150"
+      ],
+      "machine_types": [
+        "Nova X-25B",
+        "NovaSeq X Plus"
+      ],
+      "seq_modes": [
+        "3.6T-NEW",
+        "Lane seq"
+      ],
       "sample_type_group_code": "special_combo_group_a",
       "concentration": 2.5
     },
@@ -242,10 +2050,20 @@
       "reason": "special_10x_combo_group_b_2_5",
       "rule_type": "sample_type_subset",
       "priority": 290,
-      "process_codes": [1595],
-      "test_nos": ["Novaseq X Plus-PE150"],
-      "machine_types": ["Nova X-25B", "NovaSeq X Plus"],
-      "seq_modes": ["3.6T-NEW", "Lane seq"],
+      "process_codes": [
+        1595
+      ],
+      "test_nos": [
+        "Novaseq X Plus-PE150"
+      ],
+      "machine_types": [
+        "Nova X-25B",
+        "NovaSeq X Plus"
+      ],
+      "seq_modes": [
+        "3.6T-NEW",
+        "Lane seq"
+      ],
       "sample_type_group_code": "special_combo_group_b",
       "concentration": 2.5
     },
@@ -254,10 +2072,20 @@
       "reason": "clinical_data_over_100g_2_3",
       "rule_type": "clinical_data_threshold",
       "priority": 200,
-      "process_codes": [1595],
-      "test_nos": ["Novaseq X Plus-PE150"],
-      "machine_types": ["Nova X-25B", "NovaSeq X Plus"],
-      "seq_modes": ["3.6T-NEW", "Lane seq"],
+      "process_codes": [
+        1595
+      ],
+      "test_nos": [
+        "Novaseq X Plus-PE150"
+      ],
+      "machine_types": [
+        "Nova X-25B",
+        "NovaSeq X Plus"
+      ],
+      "seq_modes": [
+        "3.6T-NEW",
+        "Lane seq"
+      ],
       "data_threshold_gb": 100.0,
       "concentration": 2.3
     },
@@ -266,10 +2094,19 @@
       "reason": "10_plus_24_atac_2_0",
       "rule_type": "seq_strategy_and_sample_type",
       "priority": 100,
-      "process_codes": [1595],
-      "test_nos": ["Novaseq X Plus-PE150"],
-      "machine_types": ["Nova X-25B", "NovaSeq X Plus"],
-      "seq_modes": ["Lane seq"],
+      "process_codes": [
+        1595
+      ],
+      "test_nos": [
+        "Novaseq X Plus-PE150"
+      ],
+      "machine_types": [
+        "Nova X-25B",
+        "NovaSeq X Plus"
+      ],
+      "seq_modes": [
+        "Lane seq"
+      ],
       "seq_strategy_keyword": "10+24",
       "sample_type_group_code": "atac_10_24_targets",
       "concentration": 2.0

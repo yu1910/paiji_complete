@@ -59,6 +59,34 @@ from arrange_library.core.preprocessing.rule_constrained_strategy_planner import
 from arrange_library.core.validation.rule_checker import RuleChecker
 
 
+_SCHEDULING_CAP_RULE_SUFFIXES: Tuple[str, ...] = (
+    "_standard_pe150_25b",
+    "_standard_pe150_25b_other",
+)
+
+
+def _is_standard_pe150_25b_capacity_rule(rule_code: Any) -> bool:
+    return str(rule_code or "").strip().endswith(_SCHEDULING_CAP_RULE_SUFFIXES)
+
+
+def _is_mode_1_1_capacity_rule(rule_code: Any) -> bool:
+    return "_mode_1_1" in str(rule_code or "").strip()
+
+
+def _sequencing_mode_from_capacity_rule_code(rule_code: Any) -> str:
+    code = str(rule_code or "").strip()
+    if not code:
+        return ""
+    for profile in get_scheduling_config()._rule_matrix_config.get("lane_rule_profiles", []):
+        if str(profile.get("rule_code") or "").strip() == code:
+            return str(profile.get("sequencing_mode") or "").strip()
+    if _is_mode_1_1_capacity_rule(code):
+        return "1.1"
+    if _is_standard_pe150_25b_capacity_rule(code):
+        return "3.6T-NEW"
+    return ""
+
+
 @dataclass
 class GreedyLaneConfig:
     """贪心排机配置（遵循红线规则）
@@ -484,7 +512,7 @@ class GreedyLaneScheduler:
     def _apply_scheduling_capacity_cap(selection: Any) -> Any:
         """仅在排机阶段收紧标准25B规则上限，不影响LaneValidator。"""
         rule_code = str(getattr(selection, "rule_code", "") or "")
-        if rule_code in {"tj_1595_standard_pe150_25b", "tj_1595_standard_pe150_25b_other"}:
+        if _is_standard_pe150_25b_capacity_rule(rule_code):
             selection = replace(
                 selection,
                 max_target_gb=min(float(selection.max_target_gb), 1100.0),
@@ -858,7 +886,18 @@ class GreedyLaneScheduler:
 
         total_imbalance_data = sum(lib.get_data_amount_gb() for lib in libs)
         base_metadata = {"is_dedicated_imbalance_lane": True}
-        candidate_modes = ("1.1", "3.6T-NEW")
+        has_explicit_36t_context = any(
+            str(
+                getattr(lib, "_current_seq_mode_raw", None)
+                or getattr(lib, "selected_seq_mode", None)
+                or getattr(lib, "current_seq_mode", None)
+                or getattr(lib, "lcxms", None)
+                or ""
+            ).strip()
+            == "3.6T-NEW"
+            for lib in libs
+        )
+        candidate_modes = ("3.6T-NEW",) if has_explicit_36t_context else ("1.1", "3.6T-NEW")
         selected_profile: Optional[Dict[str, Any]] = None
         selected_score: Optional[Tuple[int, float]] = None
 
@@ -869,6 +908,8 @@ class GreedyLaneScheduler:
                 "lcxms": seq_mode,
                 "selected_seq_mode": seq_mode,
             }
+            if seq_mode == "3.6T-NEW":
+                mode_metadata["mode"] = "mode_36t"
             selection = self._resolve_lane_capacity_rule(
                 libraries=libs,
                 machine_type=machine_type,
@@ -938,8 +979,8 @@ class GreedyLaneScheduler:
             "max_imbalance_gb": float(selected_profile["max_imbalance_gb"]),
             "selected_seq_mode": str(selected_profile["seq_mode"]),
             "capacity_rule_code": str(getattr(selection, "rule_code", "") or ""),
-            "capacity_effective_min_gb": float(getattr(selection, "effective_min_gb", 0.0) or 0.0),
-            "capacity_effective_max_gb": float(getattr(selection, "effective_max_gb", 0.0) or 0.0),
+            "capacity_effective_min_gb": float(selected_profile["min_total_gb"]),
+            "capacity_effective_max_gb": float(selected_profile["max_total_gb"]),
             "loading_method": str(getattr(selection, "loading_method", "") or ""),
         }
 
@@ -6614,12 +6655,13 @@ class GreedyLaneScheduler:
         # 只透传会影响校验行为、且不会因种子文库变化而过期的元数据。
         capacity_rule_code = str(lane_metadata.get("capacity_rule_code") or "").strip()
         mode_locked_by_capacity_rule = False
-        if capacity_rule_code == "tj_1595_standard_pe150_25b":
-            metadata["selected_seq_mode"] = "3.6T-NEW"
-            metadata["seq_mode"] = "3.6T-NEW"
-            metadata["lcxms"] = "3.6T-NEW"
+        if _is_standard_pe150_25b_capacity_rule(capacity_rule_code):
+            rule_seq_mode = _sequencing_mode_from_capacity_rule_code(capacity_rule_code) or "3.6T-NEW"
+            metadata["selected_seq_mode"] = rule_seq_mode
+            metadata["seq_mode"] = rule_seq_mode
+            metadata["lcxms"] = rule_seq_mode
             mode_locked_by_capacity_rule = True
-        elif capacity_rule_code.startswith("tj_1595_mode_1_1"):
+        elif _is_mode_1_1_capacity_rule(capacity_rule_code):
             metadata["selected_seq_mode"] = "1.1"
             metadata["seq_mode"] = "1.1"
             metadata["lcxms"] = "1.1"
