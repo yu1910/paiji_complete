@@ -11391,6 +11391,161 @@ def _prepare_libraries_for_3_6t_scheduling(
         setattr(lib, "_normal_1_1_attempted_before_36t", True)
 
 
+def _repair_invalid_mode_1_1_lanes_with_mode_pool(
+    lanes: List[LaneAssignment],
+    repair_pool: List[EnhancedLibraryInfo],
+    validator: Any,
+    stage_label: str,
+) -> Tuple[List[LaneAssignment], List[EnhancedLibraryInfo], Dict[str, int]]:
+    """在1.1阶段内用当轮1.1未分配池补救不达标Lane。"""
+    if not lanes:
+        return [], list(repair_pool or []), {
+            "valid_lanes": 0,
+            "failed_lanes": 0,
+            "repaired_lanes": 0,
+            "repair_added_libraries": 0,
+        }
+
+    available_pool = list(repair_pool or [])
+    _prepare_libraries_for_mode_1_1_scheduling(available_pool)
+    valid_lanes: List[LaneAssignment] = []
+    failed_lanes: List[LaneAssignment] = []
+    repaired_lanes = 0
+    repair_added_libraries = 0
+
+    for lane in list(lanes or []):
+        result = _validate_lane_state(validator, lane, list(getattr(lane, "libraries", []) or []))
+        if result.is_valid:
+            valid_lanes.append(lane)
+            continue
+
+        repaired_lane = None
+        repaired_selected: List[EnhancedLibraryInfo] = []
+        repair_action = ""
+        if available_pool:
+            machine_type = lane.machine_type or MachineType.NOVA_X_25B
+            lane_metadata = dict(getattr(lane, "metadata", {}) or {})
+            lane_metadata["selected_seq_mode"] = "1.1"
+            lane_metadata["seq_mode"] = "1.1"
+            lane_metadata["lcxms"] = "1.1"
+            lane_metadata["current_seq_mode"] = "1.1"
+            repaired_lane, repaired_selected, repair_action = _build_repaired_candidate_lane(
+                libraries=list(getattr(lane, "libraries", []) or []),
+                pool=available_pool,
+                validator=validator,
+                machine_type=machine_type,
+                lane_id=str(getattr(lane, "lane_id", "") or ""),
+                lane_metadata=lane_metadata,
+                stage_label=f"{stage_label}_repair",
+                max_fill_candidates=160,
+            )
+
+        if repaired_lane is not None and repaired_selected:
+            original_ids = {id(lib) for lib in list(getattr(lane, "libraries", []) or [])}
+            added_ids = {id(lib) for lib in repaired_selected if id(lib) not in original_ids}
+            available_pool = [lib for lib in available_pool if id(lib) not in added_ids]
+            for lib in repaired_selected:
+                lib._current_seq_mode_raw = "1.1"
+                lib.selected_seq_mode = "1.1"
+                lib.current_seq_mode = "1.1"
+                lib.seq_mode = "1.1"
+                lib.lcxms = "1.1"
+            if not isinstance(repaired_lane.metadata, dict):
+                repaired_lane.metadata = {}
+            repaired_lane.metadata.setdefault("selected_seq_mode", "1.1")
+            repaired_lane.metadata.setdefault("seq_mode", "1.1")
+            repaired_lane.metadata.setdefault("lcxms", "1.1")
+            valid_lanes.append(repaired_lane)
+            repaired_lanes += 1
+            repair_added_libraries += len(added_ids)
+            logger.info(
+                "{}: Lane {} 终态预过滤前补库修复成功，action={}，新增文库={}，总量={:.1f}G",
+                stage_label,
+                getattr(lane, "lane_id", ""),
+                repair_action,
+                len(added_ids),
+                float(getattr(repaired_lane, "total_data_gb", 0.0) or 0.0),
+            )
+            continue
+
+        lane_libs = list(getattr(lane, "libraries", []) or [])
+        if lane_libs:
+            lane_id_text = str(getattr(lane, "lane_id", "") or "")
+            lane_serial = 1
+            lane_serial_match = re.search(r"_(\d+)$", lane_id_text)
+            if lane_serial_match:
+                try:
+                    lane_serial = int(lane_serial_match.group(1))
+                except (TypeError, ValueError):
+                    lane_serial = 1
+            rebuild_pool = list(available_pool or []) + lane_libs
+            rebuild_metadata = dict(getattr(lane, "metadata", {}) or {})
+            rebuild_metadata["selected_seq_mode"] = "1.1"
+            rebuild_metadata["seq_mode"] = "1.1"
+            rebuild_metadata["lcxms"] = "1.1"
+            rebuild_metadata["current_seq_mode"] = "1.1"
+            rebuilt_lane, rebuilt_used = _try_build_global_mode_1_1_lane_from_pool(
+                pool=rebuild_pool,
+                validator=validator,
+                machine_type=lane.machine_type or MachineType.NOVA_X_25B,
+                lane_serial=lane_serial,
+                lane_id_prefix="GL",
+                exhaustive=True,
+                lane_metadata_overrides=rebuild_metadata,
+                near_min_variant_attempts_without_lane=7,
+                near_min_seed_attempts_per_variant=120,
+                near_min_time_budget_seconds=2.0,
+                enable_large_pool_trim=False,
+            )
+            if rebuilt_lane is not None and rebuilt_used:
+                used_ids = {id(lib) for lib in rebuilt_used}
+                available_pool = [lib for lib in rebuild_pool if id(lib) not in used_ids]
+                for lib in rebuilt_used:
+                    lib._current_seq_mode_raw = "1.1"
+                    lib.selected_seq_mode = "1.1"
+                    lib.current_seq_mode = "1.1"
+                    lib.seq_mode = "1.1"
+                    lib.lcxms = "1.1"
+                if not isinstance(rebuilt_lane.metadata, dict):
+                    rebuilt_lane.metadata = {}
+                rebuilt_lane.metadata["selected_seq_mode"] = "1.1"
+                rebuilt_lane.metadata["seq_mode"] = "1.1"
+                rebuilt_lane.metadata["lcxms"] = "1.1"
+                valid_lanes.append(rebuilt_lane)
+                repaired_lanes += 1
+                repair_added_libraries += max(0, len(rebuilt_used) - len(lane_libs))
+                logger.info(
+                    "{}: Lane {} 终态预过滤前退回1.1候选池重组成功，使用文库={}，总量={:.1f}G",
+                    stage_label,
+                    lane_id_text,
+                    len(rebuilt_used),
+                    float(getattr(rebuilt_lane, "total_data_gb", 0.0) or 0.0),
+                )
+                continue
+
+        failed_lanes.append(lane)
+        logger.warning(
+            "Lane {} 1.1阶段补库后仍不达标: {}",
+            getattr(lane, "lane_id", ""),
+            [err.message for err in result.errors],
+        )
+
+    if failed_lanes:
+        failed_libraries = [
+            lib
+            for lane in failed_lanes
+            for lib in list(getattr(lane, "libraries", []) or [])
+        ]
+        available_pool.extend(failed_libraries)
+
+    return valid_lanes, list(available_pool or []), {
+        "valid_lanes": len(valid_lanes),
+        "failed_lanes": len(failed_lanes),
+        "repaired_lanes": repaired_lanes,
+        "repair_added_libraries": repair_added_libraries,
+    }
+
+
 def _recycle_invalid_mode_1_1_lanes_to_36t(
     lanes: List[LaneAssignment],
     normal_pool: List[EnhancedLibraryInfo],
@@ -17522,6 +17677,24 @@ def arrange_library(
                     validator=stage_validator,
                     stage_label="1.1首轮",
                 )
+                (
+                    _1_1_solution.lane_assignments,
+                    _1_1_solution.unassigned_libraries,
+                    _1_1_repair_stats,
+                ) = _repair_invalid_mode_1_1_lanes_with_mode_pool(
+                    lanes=list(_1_1_solution.lane_assignments or []),
+                    repair_pool=list(_1_1_solution.unassigned_libraries or []),
+                    validator=stage_validator,
+                    stage_label="1.1首轮",
+                )
+                if _1_1_repair_stats["repaired_lanes"] > 0 or _1_1_repair_stats["failed_lanes"] > 0:
+                    logger.info(
+                        "1.1首轮Lane终态预修复完成: 修复Lane={}，补入文库={}，仍失败Lane={}，剩余候选={}",
+                        _1_1_repair_stats["repaired_lanes"],
+                        _1_1_repair_stats["repair_added_libraries"],
+                        _1_1_repair_stats["failed_lanes"],
+                        len(_1_1_solution.unassigned_libraries or []),
+                    )
                 mode_1_1_lanes.extend(list(_1_1_solution.lane_assignments))
                 fallback_libs = list(_1_1_solution.unassigned_libraries or [])
                 split_rule_fallback_blocked_libs = [
@@ -17583,6 +17756,27 @@ def arrange_library(
                             validator=stage_validator,
                             stage_label="1.1二次补排",
                         )
+                        (
+                            _1_1_second_solution.lane_assignments,
+                            _1_1_second_solution.unassigned_libraries,
+                            _1_1_second_repair_stats,
+                        ) = _repair_invalid_mode_1_1_lanes_with_mode_pool(
+                            lanes=list(_1_1_second_solution.lane_assignments or []),
+                            repair_pool=list(_1_1_second_solution.unassigned_libraries or []),
+                            validator=stage_validator,
+                            stage_label="1.1二次补排",
+                        )
+                        if (
+                            _1_1_second_repair_stats["repaired_lanes"] > 0
+                            or _1_1_second_repair_stats["failed_lanes"] > 0
+                        ):
+                            logger.info(
+                                "1.1二次补排Lane终态预修复完成: 修复Lane={}，补入文库={}，仍失败Lane={}，剩余候选={}",
+                                _1_1_second_repair_stats["repaired_lanes"],
+                                _1_1_second_repair_stats["repair_added_libraries"],
+                                _1_1_second_repair_stats["failed_lanes"],
+                                len(_1_1_second_solution.unassigned_libraries or []),
+                            )
                         mode_1_1_lanes.extend(list(_1_1_second_solution.lane_assignments))
                         fallback_libs = list(_1_1_second_solution.unassigned_libraries or [])
                         logger.info(
