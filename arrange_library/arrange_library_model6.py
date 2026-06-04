@@ -59,13 +59,20 @@ if package_parent_dir not in sys.path:
 
 from loguru import logger
 
-_ARRANGE_LOG_LEVEL = os.getenv("ARRANGE_LIBRARY_LOG_LEVEL", "INFO").upper()
-logger.remove()
-logger.add(
-    sys.stderr,
-    format="{time:YYYY-MM-DD HH:mm:ss.SSS} | {level:<8} | {name}:{function}:{line} - {message}",
-    level=_ARRANGE_LOG_LEVEL,
-)
+_ARRANGE_LOG_LEVEL = os.getenv("ARRANGE_LIBRARY_LOG_LEVEL", "WARNING").upper()
+
+
+def _configure_arrange_logger(*, colorize: bool = False) -> None:
+    logger.remove()
+    logger.add(
+        sys.stderr,
+        format="{time:YYYY-MM-DD HH:mm:ss.SSS} | {level:<8} | {name}:{function}:{line} - {message}",
+        level=_ARRANGE_LOG_LEVEL,
+        colorize=colorize,
+    )
+
+
+_configure_arrange_logger()
 
 from arrange_library.models.library_info import EnhancedLibraryInfo, MachineType
 from arrange_library.core.config.scheduling_config import get_scheduling_config
@@ -836,7 +843,7 @@ def _validate_lane_with_latest_index(
     try:
         latest_conflicts = _validate_index_conflicts_latest(libraries)
     except Exception as exc:
-        logger.exception(f"Lane {lane_id} 最新Index校验失败，沿用原校验结果: {exc}")
+        logger.warning("Lane {} 最新Index校验失败，沿用原校验结果: {}", lane_id, exc)
         return result
 
     non_index_errors = [
@@ -852,7 +859,7 @@ def _validate_lane_with_latest_index(
                 libraries
             )
         except Exception as exc:
-            logger.exception(f"Lane {lane_id} wkspecialsplits规则校验失败，沿用原校验结果: {exc}")
+            logger.warning("Lane {} wkspecialsplits规则校验失败，沿用原校验结果: {}", lane_id, exc)
             special_split_valid = True
             special_split_tokens = set()
             special_split_reason = "special_split_check_failed"
@@ -867,7 +874,7 @@ def _validate_lane_with_latest_index(
                 lane_metadata=metadata,
             )
         except Exception as exc:
-            logger.exception(f"Lane {lane_id} 57组合规则校验失败，沿用原校验结果: {exc}")
+            logger.warning("Lane {} 57组合规则校验失败，沿用原校验结果: {}", lane_id, exc)
             imbalance_mix_valid = True
             imbalance_mix_reason = ""
     if not special_split_valid:
@@ -18051,36 +18058,21 @@ def parse_args() -> argparse.Namespace:
 def main() -> None:
     """主入口：命令行包装 arrange_library 函数"""
     args = parse_args()
-    try:
-        arrange_library(
-            data_file=args.data_file,
-            mode=args.mode,
-            output_detail_dir=args.output_detail_dir,
-            output_file=args.output_file,
-        )
-    except Exception as exc:
-        logger.error(f"测试过程发生错误: {exc}")
-        import traceback
-        traceback.print_exc()
-        raise
+    arrange_library(
+        data_file=args.data_file,
+        mode=args.mode,
+        output_detail_dir=args.output_detail_dir,
+        output_file=args.output_file,
+    )
 
 
 if __name__ == "__main__":
-    # 配置日志
-    logger.remove()
-    logger.add(
-        sys.stderr,
-        format="<green>{time:YYYY-MM-DD HH:mm:ss}</green> | <level>{level: <8}</level> | <level>{message}</level>",
-        level="INFO",
-        colorize=True
-    )
-    
+    _configure_arrange_logger(colorize=True)
+
     try:
         main()
     except KeyboardInterrupt:
         logger.warning("用户中断")
     except Exception as e:
         logger.error(f"测试过程发生错误: {e}")
-        import traceback
-        traceback.print_exc()
         sys.exit(1)
