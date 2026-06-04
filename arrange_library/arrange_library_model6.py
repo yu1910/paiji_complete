@@ -59,7 +59,7 @@ if package_parent_dir not in sys.path:
 
 from loguru import logger
 
-_ARRANGE_LOG_LEVEL = os.getenv("ARRANGE_LIBRARY_LOG_LEVEL", "WARNING").upper()
+_ARRANGE_LOG_LEVEL = os.getenv("ARRANGE_LIBRARY_LOG_LEVEL", "INFO").upper()
 
 
 def _configure_arrange_logger(*, colorize: bool = False) -> None:
