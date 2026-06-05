@@ -1187,6 +1187,7 @@ def _consume_g53_g54_imbalance_as_mode_lanes(
     pool: List[EnhancedLibraryInfo],
     validator: Any,
     max_lanes: int = 8,
+    max_add_test_gb_per_lane: float = 150.0,
     mode_name: str = "1.1",
     machine_type: MachineType = MachineType.NOVA_X_25B,
     lane_id_prefix: str = "DLG",
@@ -1197,6 +1198,10 @@ def _consume_g53_g54_imbalance_as_mode_lanes(
     lanes: List[LaneAssignment] = []
     used_total = 0
     serial = 1
+    enforce_add_test_cap = (
+        _normalize_mode_1_1_alias(mode_name) == "1.1"
+        and float(max_add_test_gb_per_lane or 0.0) > 0.0
+    )
 
     def group_key(lib: EnhancedLibraryInfo) -> Optional[str]:
         if not _is_imbalance_library_candidate(lib):
@@ -1263,6 +1268,12 @@ def _consume_g53_g54_imbalance_as_mode_lanes(
             return None, "empty"
         if _resolve_g53_g54_combination_group(selected) != combination_group:
             return None, "group_mismatch"
+        if (
+            enforce_add_test_cap
+            and _mode_1_1_add_test_limited_data_gb(selected)
+            > float(max_add_test_gb_per_lane or 0.0) + 1e-6
+        ):
+            return None, "add_test_mixed_over_150"
         compatible, reason = _check_g53_g54_dedicated_mix_compatibility(selected, combination_group)
         if not compatible:
             logger.info("{}候选混排规则不兼容: group={}, reason={}", stage_label, combination_group, reason)
@@ -1358,6 +1369,12 @@ def _consume_g53_g54_imbalance_as_mode_lanes(
                         )
                         if subset_total > subset_max_allowed + 1e-6:
                             continue
+                        if (
+                            enforce_add_test_cap
+                            and _mode_1_1_add_test_limited_data_gb(subset_list)
+                            > float(max_add_test_gb_per_lane or 0.0) + 1e-6
+                        ):
+                            continue
                         if _resolve_g53_g54_combination_group(subset_list) not in {None, combination_group}:
                             continue
                         if _count_lane_index_pairs(subset_list) < AI_LANE_MIN_INDEX_PAIRS:
@@ -1422,6 +1439,12 @@ def _consume_g53_g54_imbalance_as_mode_lanes(
                     lane_metadata=lane_metadata,
                 )
                 if selected_data + lib_data > trial_max_allowed + 1e-6:
+                    continue
+                if (
+                    enforce_add_test_cap
+                    and _mode_1_1_add_test_limited_data_gb(trial)
+                    > float(max_add_test_gb_per_lane or 0.0) + 1e-6
+                ):
                     continue
                 if _resolve_g53_g54_combination_group(trial) not in {None, combination_group}:
                     continue
@@ -1496,6 +1519,7 @@ def _consume_g53_g54_imbalance_as_mode_1_1_lanes(
     pool: List[EnhancedLibraryInfo],
     validator: Any,
     max_lanes: int = 8,
+    max_add_test_gb_per_lane: float = 150.0,
     stage_label: str = "G53/G54组合碱基不均1.1专Lane",
 ) -> Tuple[List[LaneAssignment], List[EnhancedLibraryInfo], Dict[str, int]]:
     """普通1.1前，先把G53/G54组合碱基不均池合成1.1专Lane。"""
@@ -1503,6 +1527,7 @@ def _consume_g53_g54_imbalance_as_mode_1_1_lanes(
         pool=pool,
         validator=validator,
         max_lanes=max_lanes,
+        max_add_test_gb_per_lane=max_add_test_gb_per_lane,
         mode_name="1.1",
         machine_type=MachineType.NOVA_X_25B,
         lane_id_prefix="DLG",
@@ -1799,13 +1824,16 @@ def _enforce_mode_1_1_add_test_cap_per_lane(
     solution: Any,
     *,
     max_add_test_gb_per_lane: float,
+    validator: Any = None,
 ) -> Dict[str, float]:
-    """限制1.1单条Lane内加测/混合文库总量，超出部分回退到未分配池。"""
+    """限制1.1单条Lane内加测/混合文库总量，超出部分剔除后用非加测/混合文库补位。"""
     lanes = list(getattr(solution, "lane_assignments", []) or [])
     if not lanes or max_add_test_gb_per_lane <= 0:
         return {
             "adjusted_lanes": 0,
             "overflow_libraries": 0,
+            "replacement_libraries": 0,
+            "repaired_lanes": 0,
             "kept_add_test_gb": 0.0,
             "removed_add_test_gb": 0.0,
         }
@@ -1813,8 +1841,114 @@ def _enforce_mode_1_1_add_test_cap_per_lane(
     unassigned = list(getattr(solution, "unassigned_libraries", []) or [])
     adjusted_lanes = 0
     overflow_libraries = 0
+    replacement_libraries = 0
+    repaired_lanes = 0
     kept_add_test_gb = 0.0
     removed_add_test_gb = 0.0
+
+    def _is_refill_candidate(
+        lane: LaneAssignment,
+        current_libraries: List[EnhancedLibraryInfo],
+        candidate: EnhancedLibraryInfo,
+    ) -> bool:
+        return _is_mode_1_1_non_add_test_refill_candidate(
+            candidate,
+            current_libraries=current_libraries,
+            lane_metadata=getattr(lane, "metadata", {}) or {},
+            lane_id=_safe_str(getattr(lane, "lane_id", None), default=""),
+            require_dedicated_imbalance_refill=_is_explicit_dedicated_imbalance_lane(lane),
+        )
+
+    def _can_accept_refill_candidate(
+        lane: LaneAssignment,
+        current_libraries: List[EnhancedLibraryInfo],
+        candidate: EnhancedLibraryInfo,
+    ) -> bool:
+        if not _is_refill_candidate(lane, current_libraries, candidate):
+            return False
+        trial_libraries = current_libraries + [candidate]
+        _, max_allowed = _resolve_lane_capacity_limits(
+            libraries=trial_libraries,
+            machine_type=lane.machine_type.value if lane.machine_type else "Nova X-25B",
+            lane_id=lane.lane_id,
+            lane_metadata=getattr(lane, "metadata", {}) or {},
+        )
+        if _total_lane_data(trial_libraries) > max_allowed + 1e-6:
+            return False
+        if _mode_1_1_add_test_limited_data_gb(trial_libraries) > max_add_test_gb_per_lane + 1e-6:
+            return False
+        if _validate_index_conflicts_latest(trial_libraries):
+            return False
+        if validator is not None:
+            trial_result = _validate_lane_state(validator, lane, trial_libraries)
+            if not getattr(trial_result, "is_valid", False) and not _is_terminal_repair_progress_only_failure(trial_result):
+                return False
+        return True
+
+    def _refill_after_cap(
+        lane: LaneAssignment,
+        current_libraries: List[EnhancedLibraryInfo],
+    ) -> List[EnhancedLibraryInfo]:
+        if not current_libraries:
+            return []
+        selected = list(current_libraries)
+        used_replacements: List[EnhancedLibraryInfo] = []
+        while True:
+            min_allowed, _ = _resolve_lane_capacity_limits(
+                libraries=selected,
+                machine_type=lane.machine_type.value if lane.machine_type else "Nova X-25B",
+                lane_id=lane.lane_id,
+                lane_metadata=getattr(lane, "metadata", {}) or {},
+            )
+            current_total = _total_lane_data(selected)
+            current_result = (
+                _validate_lane_state(validator, lane, selected)
+                if validator is not None
+                else None
+            )
+            if current_total >= min_allowed - 1e-6 and (
+                current_result is None or getattr(current_result, "is_valid", False)
+            ):
+                break
+            gap = max(0.0, min_allowed - current_total)
+            selected_ids = {id(lib) for lib in selected}
+            replacement_candidates = sorted(
+                [
+                    lib for lib in unassigned
+                    if id(lib) not in selected_ids
+                    and id(lib) not in {id(item) for item in used_replacements}
+                    and _is_refill_candidate(lane, selected, lib)
+                ],
+                key=lambda item: (
+                    _mode_1_1_small_split_imbalance_priority_rank(
+                        item,
+                        mode_name=_get_lane_selected_mode(lane),
+                    ),
+                    abs(float(getattr(item, "contract_data_raw", 0.0) or 0.0) - gap),
+                    -_count_library_index_pairs(item),
+                    -float(getattr(item, "contract_data_raw", 0.0) or 0.0),
+                    _safe_str(getattr(item, "origrec", ""), default=""),
+                ),
+            )
+            chosen: Optional[EnhancedLibraryInfo] = None
+            for candidate in replacement_candidates[:120]:
+                if _can_accept_refill_candidate(lane, selected, candidate):
+                    chosen = candidate
+                    break
+            if chosen is None:
+                break
+            selected.append(chosen)
+            used_replacements.append(chosen)
+            _remove_library_by_identity_in_place(unassigned, chosen)
+        if used_replacements:
+            logger.info(
+                "1.1首轮Lane加测/混合封顶补位: lane={}, 补入{}个/{:.1f}G非加测/混合文库，补位后{:.1f}G",
+                getattr(lane, "lane_id", ""),
+                len(used_replacements),
+                _total_lane_data(used_replacements),
+                _total_lane_data(selected),
+            )
+        return selected
 
     for lane in lanes:
         lane_libraries = list(getattr(lane, "libraries", []) or [])
@@ -1879,16 +2013,27 @@ def _enforce_mode_1_1_add_test_cap_per_lane(
 
         adjusted_lanes += 1
         overflow_libraries += len(overflow_for_lane)
-        lane.libraries = kept_libraries
-        lane.total_data_gb = _total_lane_data(kept_libraries)
+        refilled_libraries = _refill_after_cap(lane, kept_libraries)
+        if len(refilled_libraries) > len(kept_libraries):
+            replacement_libraries += len(refilled_libraries) - len(kept_libraries)
+        final_result = (
+            _validate_lane_state(validator, lane, refilled_libraries)
+            if validator is not None and refilled_libraries
+            else None
+        )
+        if final_result is not None and getattr(final_result, "is_valid", False):
+            repaired_lanes += 1
+        lane.libraries = refilled_libraries
+        lane.total_data_gb = _total_lane_data(refilled_libraries)
         lane.calculate_metrics()
         unassigned.extend(overflow_for_lane)
         logger.info(
-            "1.1首轮Lane加测/混合封顶生效: lane={}, 保留{:.1f}G, 回退{}个/{:.1f}G到未分配池 (单Lane上限{:.1f}G)",
+            "1.1首轮Lane加测/混合封顶生效: lane={}, 保留{:.1f}G, 回退{}个/{:.1f}G到未分配池，补位后Lane={:.1f}G (单Lane上限{:.1f}G)",
             getattr(lane, "lane_id", ""),
             selected_gb,
             len(overflow_for_lane),
             _total_lane_data(overflow_for_lane),
+            _total_lane_data(refilled_libraries),
             max_add_test_gb_per_lane,
         )
 
@@ -1907,6 +2052,8 @@ def _enforce_mode_1_1_add_test_cap_per_lane(
     return {
         "adjusted_lanes": adjusted_lanes,
         "overflow_libraries": overflow_libraries,
+        "replacement_libraries": replacement_libraries,
+        "repaired_lanes": repaired_lanes,
         "kept_add_test_gb": kept_add_test_gb,
         "removed_add_test_gb": removed_add_test_gb,
     }
@@ -1923,6 +2070,7 @@ def _enforce_mode_1_1_add_test_cap_and_cleanup(
     cap_stats = _enforce_mode_1_1_add_test_cap_per_lane(
         solution,
         max_add_test_gb_per_lane=max_add_test_gb_per_lane,
+        validator=validator,
     )
     if cap_stats["adjusted_lanes"] > 0:
         logger.info(
@@ -1962,6 +2110,8 @@ def _apply_mode_1_1_add_test_cap_to_prebuilt_lanes(
         return list(lanes or []), list(remaining_libraries or []), {
             "adjusted_lanes": 0,
             "overflow_libraries": 0,
+            "replacement_libraries": 0,
+            "repaired_lanes": 0,
             "kept_add_test_gb": 0.0,
             "removed_add_test_gb": 0.0,
         }
@@ -1972,6 +2122,7 @@ def _apply_mode_1_1_add_test_cap_to_prebuilt_lanes(
     cap_stats = _enforce_mode_1_1_add_test_cap_per_lane(
         cap_solution,
         max_add_test_gb_per_lane=max_add_test_gb_per_lane,
+        validator=LaneValidator(strict_mode=True),
     )
     if cap_stats["adjusted_lanes"] > 0:
         logger.info(
@@ -3718,9 +3869,12 @@ def _build_repaired_candidate_lane(
         action: str,
         metadata_override: Optional[Dict[str, Any]] = None,
         max_candidates: int = 80,
+        join_filter=None,
     ) -> Tuple[Optional[LaneAssignment], List[EnhancedLibraryInfo], str]:
         working = list(base_items)
         for candidate in _candidate_pool_for(working, selector)[:max_candidates]:
+            if join_filter is not None and not join_filter(candidate, working, metadata_override or metadata):
+                continue
             trial = working + [candidate]
             _, max_allowed = _resolve_lane_capacity_limits(
                 libraries=trial,
@@ -4041,6 +4195,12 @@ def _build_repaired_candidate_lane(
                 [lib for lib in working if not _is_mode_1_1_add_test_limited_library(lib)],
                 lambda lib: not _is_mode_1_1_add_test_limited_library(lib),
                 action="filled_after_add_test_trim",
+                join_filter=lambda lib, current, meta: _is_mode_1_1_non_add_test_refill_candidate(
+                    lib,
+                    current_libraries=current,
+                    lane_metadata=meta,
+                    lane_id=lane_id,
+                ),
             )
             if lane is not None:
                 return lane, repaired, action
@@ -4860,6 +5020,8 @@ def _build_global_round_robin_lane(
                 if total + data > max_allowed + 1e-6:
                     continue
                 trial_libs = selected + [lib]
+                if _violates_mode_1_1_add_test_cap(trial_libs, lane_metadata=effective_metadata):
+                    continue
                 candidate_light_valid, _ = _quick_check_lane_candidate(
                     libraries=trial_libs,
                     machine_type=machine_type,
@@ -9319,6 +9481,58 @@ def _is_allowed_mode_1_1_candidate_library(lib: EnhancedLibraryInfo) -> bool:
     return True
 
 
+def _is_mode_1_1_non_add_test_refill_candidate(
+    candidate: EnhancedLibraryInfo,
+    *,
+    current_libraries: List[EnhancedLibraryInfo],
+    lane_metadata: Optional[Dict[str, Any]] = None,
+    lane_id: str = "",
+    require_dedicated_imbalance_refill: Optional[bool] = None,
+) -> bool:
+    """1.1加测/混合封顶后补位候选；专Lane只能补非加测/混合不均文库。"""
+    if _is_ai_balance_library(candidate):
+        return False
+    if _is_mode_1_1_add_test_limited_library(candidate):
+        return False
+    if not _is_allowed_mode_1_1_candidate_library(candidate):
+        return False
+    if _shares_split_family_with_selected(current_libraries, candidate):
+        return False
+
+    metadata = dict(lane_metadata or {})
+    is_dedicated = (
+        bool(require_dedicated_imbalance_refill)
+        if require_dedicated_imbalance_refill is not None
+        else _is_dedicated_imbalance_lane_context(
+            list(current_libraries or []),
+            lane_id=lane_id,
+            lane_metadata=metadata,
+        )
+    )
+    if not is_dedicated:
+        return True
+
+    if not _is_imbalance_library_candidate(candidate):
+        return False
+    trial_libraries = list(current_libraries or []) + [candidate]
+    combination_group = _safe_str(metadata.get("g53_g54_combination_group"), default="")
+    if combination_group:
+        trial_group = _resolve_g53_g54_combination_group(trial_libraries)
+        if trial_group != combination_group:
+            return False
+        compatible, _ = _check_g53_g54_dedicated_mix_compatibility(
+            trial_libraries,
+            combination_group,
+        )
+        return compatible
+
+    compatible, _ = _BASE_IMBALANCE_HANDLER.check_mix_compatibility(
+        trial_libraries,
+        enforce_total_limit=False,
+    )
+    return compatible
+
+
 def _is_split_rule_original_allowed_to_split_in_36t(lib: EnhancedLibraryInfo) -> bool:
     """原始文库只有不适合1.1，或1.1多轮失败后打标，才允许进入3.6T拆分。"""
     if _is_ai_balance_library(lib):
@@ -10383,8 +10597,17 @@ def _resolve_lane_output_rule_fields(
     loading_method = str(getattr(selection, "loading_method", "") or "").strip()
     sequencing_mode = str(getattr(selection, "sequencing_mode", "") or "").strip()
     rule_code = str(getattr(selection, "rule_code", "") or "").strip()
+    is_mode_1_1_round2_historical_lane = _is_mode_1_1_second_round_metadata(lane_metadata)
 
-    if not _is_package_lane_assignment(lane_context):
+    if is_mode_1_1_round2_historical_lane:
+        sequencing_mode = "1.1"
+        if not rule_code:
+            rule_code = "tj_1595_mode_1_1_round2_historical_fixed"
+
+    if (
+        not _is_package_lane_assignment(lane_context)
+        and not is_mode_1_1_round2_historical_lane
+    ):
         total_data_gb = _total_lane_data(list(libraries or []))
 
         def _selection_is_contract_match(candidate_selection: Any) -> bool:
@@ -17633,6 +17856,7 @@ def arrange_library(
             pool=normal_libs,
             validator=stage_validator,
             max_lanes=8,
+            max_add_test_gb_per_lane=first_round_add_test_max_gb_per_lane,
             stage_label="步骤1.3 G53/G54组合碱基不均1.1专Lane",
         )
         g53_g54_imbalance_lanes, normal_libs, _ = _apply_mode_1_1_add_test_cap_to_prebuilt_lanes(
@@ -17770,13 +17994,16 @@ def arrange_library(
                 first_round_add_test_cap_stats = _enforce_mode_1_1_add_test_cap_per_lane(
                     _1_1_solution,
                     max_add_test_gb_per_lane=first_round_add_test_max_gb_per_lane,
+                    validator=stage_validator,
                 )
                 if first_round_add_test_cap_stats["adjusted_lanes"] > 0:
                     logger.info(
-                        "1.1首轮单Lane加测/混合封顶完成: 调整Lane={}, 回退文库={}个/{:.1f}G",
+                        "1.1首轮单Lane加测/混合封顶完成: 调整Lane={}, 回退文库={}个/{:.1f}G，补位文库={}个，修复达标Lane={}",
                         int(first_round_add_test_cap_stats["adjusted_lanes"]),
                         int(first_round_add_test_cap_stats["overflow_libraries"]),
                         first_round_add_test_cap_stats["removed_add_test_gb"],
+                        int(first_round_add_test_cap_stats.get("replacement_libraries", 0)),
+                        int(first_round_add_test_cap_stats.get("repaired_lanes", 0)),
                     )
                 (
                     _1_1_solution.lane_assignments,
@@ -17849,13 +18076,16 @@ def arrange_library(
                         second_round_add_test_cap_stats = _enforce_mode_1_1_add_test_cap_per_lane(
                             _1_1_second_solution,
                             max_add_test_gb_per_lane=first_round_add_test_max_gb_per_lane,
+                            validator=stage_validator,
                         )
                         if second_round_add_test_cap_stats["adjusted_lanes"] > 0:
                             logger.info(
-                                "1.1首轮二次补排单Lane加测/混合封顶完成: 调整Lane={}, 回退文库={}个/{:.1f}G",
+                                "1.1首轮二次补排单Lane加测/混合封顶完成: 调整Lane={}, 回退文库={}个/{:.1f}G，补位文库={}个，修复达标Lane={}",
                                 int(second_round_add_test_cap_stats["adjusted_lanes"]),
                                 int(second_round_add_test_cap_stats["overflow_libraries"]),
                                 second_round_add_test_cap_stats["removed_add_test_gb"],
+                                int(second_round_add_test_cap_stats.get("replacement_libraries", 0)),
+                                int(second_round_add_test_cap_stats.get("repaired_lanes", 0)),
                             )
                         (
                             _1_1_second_solution.lane_assignments,
