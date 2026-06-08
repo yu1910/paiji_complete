@@ -1198,8 +1198,9 @@ def _consume_g53_g54_imbalance_as_mode_lanes(
     lanes: List[LaneAssignment] = []
     used_total = 0
     serial = 1
+    is_mode_1_1 = _normalize_mode_1_1_alias(mode_name) == "1.1"
     enforce_add_test_cap = (
-        _normalize_mode_1_1_alias(mode_name) == "1.1"
+        is_mode_1_1
         and float(max_add_test_gb_per_lane or 0.0) > 0.0
     )
 
@@ -1208,9 +1209,9 @@ def _consume_g53_g54_imbalance_as_mode_lanes(
             return None
         if _is_split_library(lib):
             return None
-        if _is_split_rule_original_blocked_from_1_1(lib):
+        if is_mode_1_1 and _is_split_rule_original_blocked_from_1_1(lib):
             return None
-        if _is_forbidden_in_mode_1_1_by_secondary_36t_policy(lib):
+        if is_mode_1_1 and _is_forbidden_in_mode_1_1_by_secondary_36t_policy(lib):
             return None
         lib_type = _BASE_IMBALANCE_HANDLER._get_library_type(lib)
         normalized = _BASE_IMBALANCE_HANDLER._normalize_type_name(lib_type)
@@ -1412,22 +1413,7 @@ def _consume_g53_g54_imbalance_as_mode_lanes(
                     best_group = combination_group
                     best_pool_count = len(candidates)
                     best_pool_data = pool_data
-                    lanes.append(best_lane)
-                    used_ids = {id(lib) for lib in best_used}
-                    used_total += len(used_ids)
-                    remaining = [lib for lib in remaining if id(lib) not in used_ids]
-                    logger.info(
-                        "{}成Lane成功: lane={}, group={}, 候选{}个/{:.1f}G, 使用{}个/{:.1f}G",
-                        stage_label,
-                        best_lane.lane_id,
-                        best_group,
-                        best_pool_count,
-                        best_pool_data,
-                        len(best_used),
-                        _total_lane_data(best_used),
-                    )
-                    serial += 1
-                    continue
+                    break
 
             for lib in candidates:
                 lib_data = float(getattr(lib, "contract_data_raw", 0.0) or 0.0)
@@ -13887,10 +13873,17 @@ def _resolve_g55_base_group_id(lib: EnhancedLibraryInfo) -> str:
     if _is_ai_balance_library(lib) or not _is_imbalance_library_candidate(lib):
         return ""
     group_id = _safe_str(_BASE_IMBALANCE_HANDLER.identify_imbalance_type(lib), default="")
-    if not group_id or group_id == "G_UNKNOWN" or group_id in {"G56", "G57"}:
-        return ""
-    lib_type = _BASE_IMBALANCE_HANDLER._get_library_type(lib)
-    if lib_type not in _BASE_IMBALANCE_HANDLER.group55_candidate_types:
+    if not group_id or group_id == "G_UNKNOWN":
+        lib_type = _BASE_IMBALANCE_HANDLER._get_library_type(lib)
+        normalized = _BASE_IMBALANCE_HANDLER._normalize_type_name(lib_type)
+        if normalized in _BASE_IMBALANCE_HANDLER.group53_types_normalized:
+            return "G53"
+        if normalized in _BASE_IMBALANCE_HANDLER.group54_types_normalized:
+            return "G54"
+        if normalized:
+            return f"G_UNKNOWN:{normalized}"
+        return "G_UNKNOWN"
+    if group_id in {"G56", "G57"}:
         return ""
     return group_id
 
@@ -13910,8 +13903,28 @@ def _g55_type_bucket(lib: EnhancedLibraryInfo) -> str:
     return ""
 
 
+def _check_g55_cross_group_compatibility(selected: List[EnhancedLibraryInfo]) -> Tuple[bool, str]:
+    """G55兜底混排只做G55自身硬约束；未知不均类型仍可作为G55候选。"""
+    group_ids = {_resolve_g55_base_group_id(lib) for lib in selected}
+    group_ids.discard("")
+    if not group_ids:
+        return False, "no_g55_basic_group"
+    if "G53" in group_ids and "G54" in group_ids:
+        return False, "g53_g54_mix_forbidden"
+    buckets = {_g55_type_bucket(lib) for lib in selected}
+    if "G58" in buckets and "G54" in buckets:
+        return False, "g58_g54_mix_forbidden"
+    return True, "Compatible"
+
+
 def _g55_real_data_gb(libraries: Sequence[EnhancedLibraryInfo]) -> float:
     return sum(float(getattr(lib, "contract_data_raw", 0.0) or 0.0) for lib in libraries)
+
+
+def _is_g55_candidate_for_mode(lib: EnhancedLibraryInfo, mode_name: str) -> bool:
+    if mode_name in {"1", "1.0", "1.1"}:
+        return _is_g55_mode_1_1_candidate(lib)
+    return _is_g55_mode_3_6_candidate(lib)
 
 
 def _check_g55_selection_basic_constraints(
@@ -13922,11 +13935,12 @@ def _check_g55_selection_basic_constraints(
     max_add_test_gb_per_lane: float,
     require_min_capacity: bool,
     require_index_pairs: bool,
+    mode_name: str = "1.1",
 ) -> Tuple[bool, str]:
     if not selected:
         return False, "empty"
-    if any(not _is_g55_mode_1_1_candidate(lib) for lib in selected):
-        return False, "non_g55_1_1_candidate"
+    if any(not _is_g55_candidate_for_mode(lib, mode_name) for lib in selected):
+        return False, "non_g55_candidate"
     total_gb = _g55_real_data_gb(selected)
     if total_gb <= 0:
         return False, "zero_total"
@@ -13955,9 +13969,12 @@ def _check_g55_selection_basic_constraints(
     )
     if customer_gb / total_gb > 0.50 + 1e-6:
         return False, "customer_ratio_over_50"
-    if _mode_1_1_add_test_limited_data_gb(selected) > float(max_add_test_gb_per_lane or 0.0) + 1e-6:
+    if (
+        mode_name in {"1", "1.0", "1.1"}
+        and _mode_1_1_add_test_limited_data_gb(selected) > float(max_add_test_gb_per_lane or 0.0) + 1e-6
+    ):
         return False, "add_test_mixed_over_150"
-    compatible, reason = _BASE_IMBALANCE_HANDLER.check_mix_compatibility(selected, enforce_total_limit=False)
+    compatible, reason = _check_g55_cross_group_compatibility(selected)
     if not compatible:
         return False, reason or "g55_mix_incompatible"
     if require_index_pairs and _count_lane_index_pairs(selected) < AI_LANE_MIN_INDEX_PAIRS:
@@ -13976,6 +13993,7 @@ def _repair_g55_selection_index_conflicts(
     max_allowed: float,
     soft_target: float,
     max_add_test_gb_per_lane: float,
+    mode_name: str = "1.1",
 ) -> Optional[List[EnhancedLibraryInfo]]:
     """G55专Lane按index冲突做定向剔除和补充，最终仍交给完整验证函数确认。"""
     working = list(selected or [])
@@ -14017,6 +14035,7 @@ def _repair_g55_selection_index_conflicts(
                 max_add_test_gb_per_lane=max_add_test_gb_per_lane,
                 require_min_capacity=False,
                 require_index_pairs=False,
+                mode_name=mode_name,
             )
             if ok:
                 working = trial
@@ -14032,7 +14051,7 @@ def _repair_g55_selection_index_conflicts(
     selected_idx_cache = [_parse_library_index_pairs_latest(lib) for lib in working]
     fill_candidates = [
         lib for lib in repair_pool
-        if id(lib) not in selected_ids and _is_g55_mode_1_1_candidate(lib)
+        if id(lib) not in selected_ids and _is_g55_candidate_for_mode(lib, mode_name)
     ]
     fill_candidates.sort(
         key=lambda lib: (
@@ -14063,6 +14082,7 @@ def _repair_g55_selection_index_conflicts(
             max_add_test_gb_per_lane=max_add_test_gb_per_lane,
             require_min_capacity=False,
             require_index_pairs=False,
+            mode_name=mode_name,
         )
         if not ok:
             continue
@@ -14077,6 +14097,7 @@ def _repair_g55_selection_index_conflicts(
         max_add_test_gb_per_lane=max_add_test_gb_per_lane,
         require_min_capacity=True,
         require_index_pairs=True,
+        mode_name=mode_name,
     )
     if not ok or _validate_index_conflicts_latest(working):
         return None
@@ -14091,6 +14112,7 @@ def _repair_g55_selection_special_splits(
     max_allowed: float,
     soft_target: float,
     max_add_test_gb_per_lane: float,
+    mode_name: str = "1.1",
 ) -> Optional[List[EnhancedLibraryInfo]]:
     ss_valid, _, ss_reason = _validate_lane_special_split_rule(selected)
     if ss_valid or ss_reason != "group_a_and_group_b_mixed":
@@ -14111,7 +14133,7 @@ def _repair_g55_selection_special_splits(
     fill_candidates = [
         lib for lib in repair_pool
         if id(lib) not in selected_ids
-        and _is_g55_mode_1_1_candidate(lib)
+        and _is_g55_candidate_for_mode(lib, mode_name)
         and _classify_library_special_split_mode(lib) not in removed_modes
     ]
     fill_candidates.sort(
@@ -14139,6 +14161,7 @@ def _repair_g55_selection_special_splits(
             max_add_test_gb_per_lane=max_add_test_gb_per_lane,
             require_min_capacity=False,
             require_index_pairs=False,
+            mode_name=mode_name,
         )
         ss_trial_valid, _, _ = _validate_lane_special_split_rule(trial)
         if not ok or not ss_trial_valid:
@@ -14154,6 +14177,7 @@ def _repair_g55_selection_special_splits(
         max_add_test_gb_per_lane=max_add_test_gb_per_lane,
         require_min_capacity=True,
         require_index_pairs=True,
+        mode_name=mode_name,
     )
     ss_final_valid, _, _ = _validate_lane_special_split_rule(working)
     if not ok or not ss_final_valid or _validate_index_conflicts_latest(working):
@@ -14229,9 +14253,12 @@ def _validate_g55_mode_1_1_selection(
     customer_gb = sum(float(getattr(lib, "contract_data_raw", 0.0) or 0.0) for lib in selected if _is_customer_library_candidate(lib))
     if customer_gb / total_gb > 0.50 + 1e-6:
         return None, "customer_ratio_over_50"
-    if _mode_1_1_add_test_limited_data_gb(selected) > float(max_add_test_gb_per_lane or 0.0) + 1e-6:
+    if (
+        mode_name in {"1", "1.0", "1.1"}
+        and _mode_1_1_add_test_limited_data_gb(selected) > float(max_add_test_gb_per_lane or 0.0) + 1e-6
+    ):
         return None, "add_test_mixed_over_150"
-    compatible, reason = _BASE_IMBALANCE_HANDLER.check_mix_compatibility(selected, enforce_total_limit=False)
+    compatible, reason = _check_g55_cross_group_compatibility(selected)
     if not compatible:
         return None, reason or "g55_mix_incompatible"
     ss_valid, _, ss_reason = _validate_lane_special_split_rule(selected)
@@ -14341,11 +14368,7 @@ def _consume_g55_imbalance_as_mode_lanes(
         candidates = sorted(
             [
                 lib for lib in remaining
-                if (
-                    _is_g55_mode_1_1_candidate(lib)
-                    if mode_name in {"1", "1.0", "1.1"}
-                    else _is_g55_mode_3_6_candidate(lib)
-                )
+                if _is_g55_candidate_for_mode(lib, mode_name)
             ],
             key=candidate_sort_key,
         )
@@ -14386,9 +14409,143 @@ def _consume_g55_imbalance_as_mode_lanes(
         best_used: List[EnhancedLibraryInfo] = []
         validation_attempts = 0
         max_full_validation_candidates = 48
+
+        def _g55_lib_data(lib: EnhancedLibraryInfo) -> float:
+            return float(getattr(lib, "contract_data_raw", 0.0) or 0.0)
+
+        def _g55_validation_signature(selected: List[EnhancedLibraryInfo]) -> Tuple[str, ...]:
+            return tuple(sorted(_get_library_identity_key(lib) for lib in selected))
+
+        def _g55_ratio(selected: List[EnhancedLibraryInfo], predicate) -> float:
+            total = _g55_real_data_gb(selected)
+            if total <= 0:
+                return 0.0
+            return sum(_g55_lib_data(lib) for lib in selected if predicate(lib)) / total
+
+        def _enqueue_g55_validation_candidate(
+            queue: List[List[EnhancedLibraryInfo]],
+            seen: Set[Tuple[str, ...]],
+            selected: List[EnhancedLibraryInfo],
+        ) -> None:
+            if not selected:
+                return
+            total = _g55_real_data_gb(selected)
+            if total < min_allowed - 1e-6 or total > max_allowed + 1e-6:
+                return
+            group_ids = {_resolve_g55_base_group_id(item) for item in selected}
+            group_ids.discard("")
+            if len(group_ids) < 2:
+                failure_counter["g55_single_basic_group_after_trim"] = failure_counter.get("g55_single_basic_group_after_trim", 0) + 1
+                return
+            compatible, reason = _check_g55_cross_group_compatibility(selected)
+            if not compatible:
+                key = f"g55_{reason or 'mix_incompatible'}"
+                failure_counter[key] = failure_counter.get(key, 0) + 1
+                return
+            if (
+                mode_name in {"1", "1.0", "1.1"}
+                and _mode_1_1_add_test_limited_data_gb(selected) > float(max_add_test_gb_per_lane or 0.0) + 1e-6
+            ):
+                failure_counter["g55_add_test_mixed_over_150"] = failure_counter.get("g55_add_test_mixed_over_150", 0) + 1
+                return
+            if _g55_ratio(selected, _is_g55_high_phix_library) > 0.30 + 1e-6:
+                failure_counter["g55_high_phix_ratio_over_30"] = failure_counter.get("g55_high_phix_ratio_over_30", 0) + 1
+                return
+            if _g55_ratio(selected, _is_customer_library_candidate) > 0.50 + 1e-6:
+                failure_counter["g55_customer_ratio_over_50"] = failure_counter.get("g55_customer_ratio_over_50", 0) + 1
+                return
+            signature = _g55_validation_signature(selected)
+            if signature in seen:
+                return
+            seen.add(signature)
+            queue.append(list(selected))
+
+        def _trim_g55_seed_to_capacity(seed: List[EnhancedLibraryInfo], removal_key) -> List[EnhancedLibraryInfo]:
+            working = list(seed or [])
+            while working and _g55_real_data_gb(working) > max_allowed + 1e-6:
+                removed = False
+                for item in sorted(working, key=removal_key):
+                    trial = [lib for lib in working if lib is not item]
+                    if _g55_real_data_gb(trial) >= min_allowed - 1e-6:
+                        working = trial
+                        removed = True
+                        break
+                if not removed:
+                    break
+            return working
+
+        def _trim_g55_seed_ratio(
+            seed: List[EnhancedLibraryInfo],
+            predicate,
+            limit: float,
+        ) -> List[EnhancedLibraryInfo]:
+            working = list(seed or [])
+            while working and _g55_ratio(working, predicate) > limit + 1e-6:
+                removable = [lib for lib in working if predicate(lib)]
+                if not removable:
+                    break
+                removed = False
+                for item in sorted(
+                    removable,
+                    key=lambda lib: (
+                        -_g55_lib_data(lib),
+                        _safe_str(getattr(lib, "origrec", ""), default=""),
+                    ),
+                ):
+                    trial = [lib for lib in working if lib is not item]
+                    if _g55_real_data_gb(trial) >= min_allowed - 1e-6:
+                        working = trial
+                        removed = True
+                        break
+                if not removed:
+                    break
+            return working
+
+        def _build_trimmed_g55_seed_candidates(seed: List[EnhancedLibraryInfo]) -> List[List[EnhancedLibraryInfo]]:
+            removal_orders = [
+                lambda lib: (
+                    _g55_lib_data(lib),
+                    _safe_str(getattr(lib, "origrec", ""), default=""),
+                ),
+                lambda lib: (
+                    0 if _is_g55_high_phix_library(lib) else 1,
+                    -_g55_lib_data(lib),
+                    _safe_str(getattr(lib, "origrec", ""), default=""),
+                ),
+                lambda lib: (
+                    0 if _is_customer_library_candidate(lib) else 1,
+                    -_g55_lib_data(lib),
+                    _safe_str(getattr(lib, "origrec", ""), default=""),
+                ),
+                lambda lib: (
+                    -_g55_lib_data(lib),
+                    _safe_str(getattr(lib, "origrec", ""), default=""),
+                ),
+            ]
+            variants: List[List[EnhancedLibraryInfo]] = []
+            for removal_key in removal_orders:
+                capacity_trimmed = _trim_g55_seed_to_capacity(seed, removal_key)
+                if not capacity_trimmed:
+                    continue
+                high_trimmed = _trim_g55_seed_ratio(capacity_trimmed, _is_g55_high_phix_library, 0.30)
+                customer_trimmed = _trim_g55_seed_ratio(capacity_trimmed, _is_customer_library_candidate, 0.50)
+                variants.extend(
+                    [
+                        capacity_trimmed,
+                        high_trimmed,
+                        customer_trimmed,
+                        _trim_g55_seed_ratio(high_trimmed, _is_customer_library_candidate, 0.50),
+                        _trim_g55_seed_ratio(customer_trimmed, _is_g55_high_phix_library, 0.30),
+                    ]
+                )
+            return variants
+
         for sub_pool in pools:
             states: List[List[EnhancedLibraryInfo]] = [[]]
             validation_queue: List[List[EnhancedLibraryInfo]] = []
+            validation_seen: Set[Tuple[str, ...]] = set()
+            for trimmed_seed in _build_trimmed_g55_seed_candidates(sub_pool[:180]):
+                _enqueue_g55_validation_candidate(validation_queue, validation_seen, trimmed_seed)
             for lib in sub_pool[:180]:
                 next_states = list(states)
                 for selected in states:
@@ -14401,7 +14558,10 @@ def _consume_g55_imbalance_as_mode_lanes(
                     buckets = {_g55_type_bucket(item) for item in trial}
                     if "G58" in buckets and "G54" in buckets:
                         continue
-                    if _mode_1_1_add_test_limited_data_gb(trial) > float(max_add_test_gb_per_lane or 0.0) + 1e-6:
+                    if (
+                        mode_name in {"1", "1.0", "1.1"}
+                        and _mode_1_1_add_test_limited_data_gb(trial) > float(max_add_test_gb_per_lane or 0.0) + 1e-6
+                    ):
                         continue
                     if trial_total > 0:
                         if sum(float(getattr(item, "contract_data_raw", 0.0) or 0.0) for item in trial if _is_g55_high_phix_library(item)) / trial_total > 0.30 + 1e-6:
@@ -14410,7 +14570,7 @@ def _consume_g55_imbalance_as_mode_lanes(
                             continue
                     next_states.append(trial)
                     if min_allowed - 1e-6 <= trial_total <= max_allowed + 1e-6 and len(group_ids) >= 2:
-                        validation_queue.append(trial)
+                        _enqueue_g55_validation_candidate(validation_queue, validation_seen, trial)
                 next_states.sort(
                     key=lambda selected: (
                         0 if min_allowed <= _g55_real_data_gb(selected) <= max_allowed else 1,
@@ -14470,6 +14630,7 @@ def _consume_g55_imbalance_as_mode_lanes(
                         max_allowed=max_allowed,
                         soft_target=soft_target,
                         max_add_test_gb_per_lane=max_add_test_gb_per_lane,
+                        mode_name=mode_name,
                     )
                     if repaired_selected:
                         validation_attempts += 1
@@ -14505,6 +14666,7 @@ def _consume_g55_imbalance_as_mode_lanes(
                         max_allowed=max_allowed,
                         soft_target=soft_target,
                         max_add_test_gb_per_lane=max_add_test_gb_per_lane,
+                        mode_name=mode_name,
                     )
                     if repaired_selected:
                         validation_attempts += 1
@@ -14611,6 +14773,92 @@ def _consume_g55_imbalance_as_mode_3_6_lanes(
         lane_id_prefix="DG55",
         stage_label=stage_label,
     )
+
+
+def _preextract_36t_imbalance_lanes_in_priority_order(
+    libraries: List[EnhancedLibraryInfo],
+    *,
+    validator: Any,
+    existing_lanes: Sequence[LaneAssignment],
+    max_lanes: int = 16,
+) -> Tuple[List[LaneAssignment], List[EnhancedLibraryInfo], Dict[str, int]]:
+    """3.6T普通排机前按 单组专Lane -> G53/G54 -> G55 梯度预抽取碱基不均Lane。"""
+    remaining = list(libraries or [])
+    generated: List[LaneAssignment] = []
+    stats: Dict[str, int] = {
+        "single_group_lanes": 0,
+        "g53_g54_lanes": 0,
+        "g55_lanes": 0,
+        "used_libraries": 0,
+    }
+
+    single_lanes, remaining = _extract_global_dedicated_imbalance_lanes(
+        remaining,
+        mode_name="3.6T-NEW",
+        dispatch_stage="pre_36t_single_group_dedicated_imbalance",
+    )
+    if single_lanes:
+        generated.extend(single_lanes)
+        stats["single_group_lanes"] = len(single_lanes)
+
+    remaining_imbalance = [
+        lib for lib in remaining
+        if _is_imbalance_library_candidate(lib) and not _is_split_library(lib)
+    ]
+    if remaining_imbalance and len(generated) < max_lanes:
+        machine_type = MachineType.NOVA_X_25B
+        for item in remaining_imbalance:
+            resolved = _resolve_machine_type_enum_simple(
+                _safe_str(getattr(item, "eq_type", None), default="")
+            )
+            if _is_machine_supported_for_arrangement(resolved):
+                machine_type = resolved
+                break
+        g53_g54_lanes, _, _ = _consume_g53_g54_imbalance_as_mode_3_6_lanes(
+            pool=remaining_imbalance,
+            validator=validator,
+            machine_type=machine_type,
+            max_lanes=max(0, max_lanes - len(generated)),
+            stage_label="步骤2前置3.6 G53/G54组合碱基不均专Lane",
+        )
+        if g53_g54_lanes:
+            generated.extend(g53_g54_lanes)
+            stats["g53_g54_lanes"] = len(g53_g54_lanes)
+            remaining = _remove_libraries_used_by_lanes(remaining, g53_g54_lanes)
+
+    remaining_g55 = [
+        lib for lib in remaining
+        if _is_g55_mode_3_6_candidate(lib)
+    ]
+    if remaining_g55 and len(generated) < max_lanes:
+        machine_type = MachineType.NOVA_X_25B
+        for item in remaining_g55:
+            resolved = _resolve_machine_type_enum_simple(
+                _safe_str(getattr(item, "eq_type", None), default="")
+            )
+            if _is_machine_supported_for_arrangement(resolved):
+                machine_type = resolved
+                break
+        g55_lanes, _, _ = _consume_g55_imbalance_as_mode_3_6_lanes(
+            pool=remaining_g55,
+            validator=validator,
+            all_lanes=list(existing_lanes or []) + list(generated),
+            machine_type=machine_type,
+            max_lanes=max(0, max_lanes - len(generated)),
+            stage_label="步骤2前置3.6 G55跨基础组碱基不均专Lane",
+        )
+        if g55_lanes:
+            generated.extend(g55_lanes)
+            stats["g55_lanes"] = len(g55_lanes)
+            remaining = _remove_libraries_used_by_lanes(remaining, g55_lanes)
+
+    stats["used_libraries"] = sum(
+        1
+        for lane in generated
+        for lib in list(getattr(lane, "libraries", []) or [])
+        if not _is_ai_balance_library(lib)
+    )
+    return generated, remaining, stats
 
 
 def _is_terminal_g53_g54_fill_candidate(lib: EnhancedLibraryInfo) -> bool:
@@ -17852,6 +18100,19 @@ def arrange_library(
         logger.info("\n" + "=" * 80)
         logger.info("步骤1.3: 1.1前碱基不均衡专Lane预抽取")
         logger.info("=" * 80)
+        single_group_imbalance_lanes, normal_libs = _extract_global_dedicated_imbalance_lanes(
+            normal_libs,
+            mode_name="1.1",
+            dispatch_stage="pre_1_1_single_group_dedicated_imbalance",
+        )
+        single_group_imbalance_lanes, normal_libs, _ = _apply_mode_1_1_add_test_cap_to_prebuilt_lanes(
+            single_group_imbalance_lanes,
+            normal_libs,
+            max_add_test_gb_per_lane=first_round_add_test_max_gb_per_lane,
+            stage_label="步骤1.3 单组碱基不均1.1专Lane",
+        )
+        dedicated_imbalance_lanes.extend(single_group_imbalance_lanes)
+
         g53_g54_imbalance_lanes, normal_libs, _ = _consume_g53_g54_imbalance_as_mode_1_1_lanes(
             pool=normal_libs,
             validator=stage_validator,
@@ -17866,20 +18127,33 @@ def arrange_library(
             stage_label="步骤1.3 G53/G54组合碱基不均1.1专Lane",
         )
         dedicated_imbalance_lanes.extend(g53_g54_imbalance_lanes)
-        single_group_imbalance_lanes, normal_libs = _extract_global_dedicated_imbalance_lanes(
-            normal_libs,
-            mode_name="1.1",
-            dispatch_stage="pre_1_1_dedicated_imbalance",
+
+        g55_imbalance_lanes, normal_libs, g55_imbalance_stats = _consume_g55_imbalance_as_mode_1_1_lanes(
+            pool=normal_libs,
+            validator=stage_validator,
+            all_lanes=(
+                list(package_lanes)
+                + list(lane_seq_10_plus_24_lanes)
+                + list(dedicated_imbalance_lanes)
+            ),
+            max_lanes=8,
+            max_add_test_gb_per_lane=first_round_add_test_max_gb_per_lane,
+            stage_label="步骤1.3 G55跨基础组碱基不均1.1专Lane",
         )
-        dedicated_imbalance_lanes.extend(single_group_imbalance_lanes)
-        dedicated_imbalance_lanes, normal_libs, _ = _apply_mode_1_1_add_test_cap_to_prebuilt_lanes(
-            dedicated_imbalance_lanes,
+        g55_imbalance_lanes, normal_libs, _ = _apply_mode_1_1_add_test_cap_to_prebuilt_lanes(
+            g55_imbalance_lanes,
             normal_libs,
             max_add_test_gb_per_lane=first_round_add_test_max_gb_per_lane,
-            stage_label="步骤1.3 1.1前碱基不均衡专Lane",
+            stage_label="步骤1.3 G55跨基础组碱基不均1.1专Lane",
         )
+        dedicated_imbalance_lanes.extend(g55_imbalance_lanes)
+
         logger.info(
-            "1.1前碱基不均衡专Lane预抽取完成: 生成Lane={}, 剩余进入1.1普通尝试文库={}",
+            "1.1前碱基不均衡专Lane预抽取完成: 单组={}, G53/G54={}, G55={}, G55消耗文库={}, 总生成Lane={}, 剩余进入1.1普通尝试文库={}",
+            len(single_group_imbalance_lanes),
+            len(g53_g54_imbalance_lanes),
+            len(g55_imbalance_lanes),
+            int(g55_imbalance_stats.get("used_libraries", 0)),
             len(dedicated_imbalance_lanes),
             len(normal_libs),
         )
@@ -18341,6 +18615,35 @@ def arrange_library(
                 len(normal_libs),
             )
 
+    pre_36t_imbalance_lanes: List[LaneAssignment] = []
+    if normal_libs:
+        pre_existing_lanes = (
+            list(package_lanes)
+            + list(lane_seq_10_plus_24_lanes)
+            + list(dedicated_imbalance_lanes)
+            + list(customer_mode_1_1_lanes)
+            + list(proactive_split_lanes)
+            + list(mode_1_1_lanes)
+            + list(trailing_dedicated_imbalance_lanes)
+        )
+        pre_36t_imbalance_lanes, normal_libs, pre_36t_imbalance_stats = (
+            _preextract_36t_imbalance_lanes_in_priority_order(
+                normal_libs,
+                validator=stage_validator,
+                existing_lanes=pre_existing_lanes,
+                max_lanes=16,
+            )
+        )
+        if pre_36t_imbalance_lanes:
+            logger.info(
+                "步骤2前置3.6碱基不均专Lane梯度抽取完成: 单组={}, G53/G54={}, G55={}, 使用文库={}, 剩余普通排机文库={}",
+                int(pre_36t_imbalance_stats.get("single_group_lanes", 0)),
+                int(pre_36t_imbalance_stats.get("g53_g54_lanes", 0)),
+                int(pre_36t_imbalance_stats.get("g55_lanes", 0)),
+                int(pre_36t_imbalance_stats.get("used_libraries", 0)),
+                len(normal_libs),
+            )
+
     has_prebuilt_lanes = any(
         (
             package_lanes,
@@ -18350,6 +18653,7 @@ def arrange_library(
             proactive_split_lanes,
             mode_1_1_lanes,
             trailing_dedicated_imbalance_lanes,
+            pre_36t_imbalance_lanes,
         )
     )
     if normal_libs or has_prebuilt_lanes:
@@ -18389,6 +18693,7 @@ def arrange_library(
                 + list(proactive_split_lanes)
                 + list(mode_1_1_lanes)
                 + list(trailing_dedicated_imbalance_lanes)
+                + list(pre_36t_imbalance_lanes)
             )
             stats, solution = test_with_model(
                 deepcopy(normal_libs),
