@@ -428,18 +428,6 @@ class BaseImbalanceHandler:
             if group_id:
                 setattr(lib, "_imbalance_group_id_cache", group_id)
                 return group_id
-
-            # G53/G54 are combination groups and are intentionally not part of
-            # type_to_group_map.  If a flagged imbalance type only exists in
-            # those combination sets, keep it schedulable as that combination
-            # group instead of falling through to G_UNKNOWN.
-            normalized_type = self._normalize_type_name(lib_type)
-            if normalized_type in self.group53_types_normalized:
-                setattr(lib, "_imbalance_group_id_cache", "G53")
-                return "G53"
-            if normalized_type in self.group54_types_normalized:
-                setattr(lib, "_imbalance_group_id_cache", "G54")
-                return "G54"
         
         # 3. 如果jjbj字段标记为"是"，但没有匹配到具体分组，返回通用标记
         if jjbj is not None and str(jjbj).strip() == '是':

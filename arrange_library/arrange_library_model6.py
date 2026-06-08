@@ -2125,6 +2125,50 @@ def _apply_mode_1_1_add_test_cap_to_prebuilt_lanes(
     )
 
 
+def _keep_only_mode_1_1_prebuilt_lanes(
+    lanes: List[LaneAssignment],
+    remaining_libraries: List[EnhancedLibraryInfo],
+    *,
+    stage_label: str,
+) -> Tuple[List[LaneAssignment], List[EnhancedLibraryInfo], Dict[str, float]]:
+    """1.1阶段预抽取只保留真正1.1 Lane，降级成3.6T的文库回到1.1候选池。"""
+    kept_lanes: List[LaneAssignment] = []
+    returned_libraries = list(remaining_libraries or [])
+    recycled_libraries = 0
+    recycled_gb = 0.0
+    recycled_lanes = 0
+
+    for lane in list(lanes or []):
+        if _get_lane_selected_mode(lane) == "1.1":
+            kept_lanes.append(lane)
+            continue
+        recycled_lanes += 1
+        for lib in list(getattr(lane, "libraries", []) or []):
+            if _is_ai_balance_library(lib):
+                continue
+            lib._current_seq_mode_raw = "1.1"
+            lib.selected_seq_mode = "1.1"
+            lib.current_seq_mode = "1.1"
+            lib.lcxms = "1.1"
+            returned_libraries.append(lib)
+            recycled_libraries += 1
+            recycled_gb += float(getattr(lib, "contract_data_raw", 0.0) or 0.0)
+
+    if recycled_lanes:
+        logger.info(
+            "{}: 回收{}条非1.1预抽取Lane，返还{}个文库/{:.1f}G继续参与1.1 G53/G54/G55",
+            stage_label,
+            recycled_lanes,
+            recycled_libraries,
+            recycled_gb,
+        )
+    return kept_lanes, returned_libraries, {
+        "recycled_lanes": recycled_lanes,
+        "recycled_libraries": recycled_libraries,
+        "recycled_gb": recycled_gb,
+    }
+
+
 def _consume_mode_1_1_priority_from_unassigned(
     solution: Any,
     *,
@@ -7052,7 +7096,7 @@ def _pick_10_plus_24_lane_seq_subset(
     max_contract_data: float,
     target_contract_data: float,
 ) -> Tuple[List[EnhancedLibraryInfo], List[EnhancedLibraryInfo]]:
-    """为10+24 Lane seq选择一组落入容量窗口的文库。"""
+    """为10+24 Lane seq选择一组落入容量窗口且Index不冲突的文库。"""
     if not remaining:
         return [], []
 
@@ -7067,31 +7111,65 @@ def _pick_10_plus_24_lane_seq_subset(
         max(1, int(round(float(getattr(lib, "contract_data_raw", 0.0) or 0.0) * scale)))
         for lib in remaining
     ]
-    states: Dict[int, Tuple[int, int]] = {0: (-1, -1)}
+
+    conflict_masks: List[int] = [0 for _ in remaining]
+    for left_index in range(len(remaining)):
+        for right_index in range(left_index + 1, len(remaining)):
+            if _validate_index_conflicts_latest([remaining[left_index], remaining[right_index]]):
+                conflict_masks[left_index] |= 1 << right_index
+                conflict_masks[right_index] |= 1 << left_index
+
+    # A single best mask per capacity sum is not enough: two subsets with the
+    # same sum can conflict with different downstream libraries. Keep bounded
+    # conflict-free states and score them near the target window.
+    states: List[Tuple[int, int, int]] = [(0, 0, 0)]
+    state_limit = 200000
 
     for idx, value in enumerate(values):
         if value <= 0:
             continue
-        for current_sum in sorted(states.keys(), reverse=True):
+        new_states = list(states)
+        for current_sum, current_mask, current_count in states:
             new_sum = current_sum + value
-            if new_sum > max_units or new_sum in states:
+            if new_sum > max_units:
                 continue
-            states[new_sum] = (current_sum, idx)
+            if conflict_masks[idx] & current_mask:
+                continue
+            new_states.append((new_sum, current_mask | (1 << idx), current_count + 1))
+        if len(new_states) > state_limit:
+            new_states.sort(
+                key=lambda state: (
+                    0 if min_units <= state[0] <= max_units else 1,
+                    abs(state[0] - target_units),
+                    -state[0],
+                    -state[2],
+                )
+            )
+            new_states = new_states[:state_limit]
+        states = new_states
 
-    candidate_sums = [item for item in states.keys() if min_units <= item <= max_units]
-    if not candidate_sums:
+    candidate_states = [
+        state
+        for state in states
+        if min_units <= state[0] <= max_units
+    ]
+    if not candidate_states:
         return [], list(remaining)
 
-    candidate_sums.sort(key=lambda item: (abs(item - target_units), -item))
-    selected_sum = candidate_sums[0]
+    candidate_states.sort(key=lambda state: (abs(state[0] - target_units), -state[0], -state[2]))
     selected_indices: Set[int] = set()
-    cursor = selected_sum
-    while cursor > 0:
-        previous_sum, idx = states[cursor]
-        if idx < 0:
-            break
-        selected_indices.add(idx)
-        cursor = previous_sum
+    for _, selected_mask, _ in candidate_states:
+        candidate_indices = {idx for idx in range(len(remaining)) if selected_mask & (1 << idx)}
+        candidate_libraries = [remaining[idx] for idx in sorted(candidate_indices)]
+        if _count_lane_index_pairs(candidate_libraries) < AI_LANE_MIN_INDEX_PAIRS:
+            continue
+        if _validate_index_conflicts_latest(candidate_libraries):
+            continue
+        selected_indices = candidate_indices
+        break
+
+    if not selected_indices:
+        return [], list(remaining)
 
     selected = [lib for idx, lib in enumerate(remaining) if idx in selected_indices]
     next_remaining = [lib for idx, lib in enumerate(remaining) if idx not in selected_indices]
@@ -13888,6 +13966,16 @@ def _resolve_g55_base_group_id(lib: EnhancedLibraryInfo) -> str:
     return group_id
 
 
+def _resolve_g55_base_group_id_1_1_legacy(lib: EnhancedLibraryInfo) -> str:
+    """1.1 G55候选口径：排除未知/G56/G57，其余不再按group55类型表前置截断。"""
+    if _is_ai_balance_library(lib) or not _is_imbalance_library_candidate(lib):
+        return ""
+    group_id = _safe_str(_BASE_IMBALANCE_HANDLER.identify_imbalance_type(lib), default="")
+    if not group_id or group_id == "G_UNKNOWN" or group_id in {"G56", "G57"}:
+        return ""
+    return group_id
+
+
 def _is_g55_high_phix_library(lib: EnhancedLibraryInfo) -> bool:
     return _BASE_IMBALANCE_HANDLER._get_library_type(lib) in _BASE_IMBALANCE_HANDLER.group55_high_phix_types
 
@@ -14185,9 +14273,207 @@ def _repair_g55_selection_special_splits(
     return working
 
 
+def _fill_g55_repaired_selection(
+    working: List[EnhancedLibraryInfo],
+    *,
+    repair_pool: List[EnhancedLibraryInfo],
+    min_allowed: float,
+    max_allowed: float,
+    soft_target: float,
+    max_add_test_gb_per_lane: float,
+    mode_name: str = "1.1",
+) -> Optional[List[EnhancedLibraryInfo]]:
+    """修复后从同一G55候选池补库，最终仍需满足完整基础约束。"""
+    if not working:
+        return None
+
+    selected_ids = {id(lib) for lib in working}
+    selected_idx_cache = [_parse_library_index_pairs_latest(lib) for lib in working]
+    fill_candidates = [
+        lib for lib in repair_pool
+        if id(lib) not in selected_ids and _is_g55_candidate_for_mode(lib, mode_name)
+    ]
+    fill_candidates.sort(
+        key=lambda lib: (
+            _mode_1_1_small_split_imbalance_priority_rank(lib, mode_name=mode_name),
+            abs((_g55_real_data_gb(working) + float(getattr(lib, "contract_data_raw", 0.0) or 0.0)) - soft_target),
+            _is_g55_high_phix_library(lib),
+            _is_customer_library_candidate(lib),
+            -float(getattr(lib, "contract_data_raw", 0.0) or 0.0),
+            -_count_library_index_pairs(lib),
+            _get_library_identity_key(lib),
+        )
+    )
+    for lib in fill_candidates[:160]:
+        if _g55_real_data_gb(working) >= min_allowed - 1e-6:
+            break
+        lib_data = float(getattr(lib, "contract_data_raw", 0.0) or 0.0)
+        if _g55_real_data_gb(working) + lib_data > max_allowed + 1e-6:
+            continue
+        has_conflict, lib_index_pairs = _new_lib_has_latest_index_conflict_with_cache(selected_idx_cache, lib)
+        if has_conflict:
+            continue
+        trial = working + [lib]
+        ok, _ = _check_g55_selection_basic_constraints(
+            trial,
+            min_allowed=min_allowed,
+            max_allowed=max_allowed,
+            max_add_test_gb_per_lane=max_add_test_gb_per_lane,
+            require_min_capacity=False,
+            require_index_pairs=False,
+            mode_name=mode_name,
+        )
+        if not ok:
+            continue
+        working = trial
+        selected_ids.add(id(lib))
+        selected_idx_cache.append(lib_index_pairs)
+
+    ok, _ = _check_g55_selection_basic_constraints(
+        working,
+        min_allowed=min_allowed,
+        max_allowed=max_allowed,
+        max_add_test_gb_per_lane=max_add_test_gb_per_lane,
+        require_min_capacity=True,
+        require_index_pairs=True,
+        mode_name=mode_name,
+    )
+    if not ok or _validate_index_conflicts_latest(working):
+        return None
+    return working
+
+
+def _repair_g55_selection_mix_limits(
+    selected: List[EnhancedLibraryInfo],
+    *,
+    repair_pool: List[EnhancedLibraryInfo],
+    min_allowed: float,
+    max_allowed: float,
+    soft_target: float,
+    max_add_test_gb_per_lane: float,
+    mode_name: str = "1.1",
+) -> Optional[List[EnhancedLibraryInfo]]:
+    """G55专Lane修复可剔除的1.1限制：G58/G54互斥、加测/混合150G封顶。"""
+    if not selected:
+        return None
+
+    def _cap_trim_variants(seed: List[EnhancedLibraryInfo]) -> List[List[EnhancedLibraryInfo]]:
+        if _mode_1_1_add_test_limited_data_gb(seed) <= float(max_add_test_gb_per_lane or 0.0) + 1e-6:
+            return [list(seed)]
+        limited = [lib for lib in seed if _is_mode_1_1_add_test_limited_library(lib)]
+        variants: List[List[EnhancedLibraryInfo]] = []
+        removal_orders = [
+            sorted(
+                limited,
+                key=lambda lib: (
+                    -float(getattr(lib, "contract_data_raw", 0.0) or 0.0),
+                    _get_library_identity_key(lib),
+                ),
+            ),
+            sorted(
+                limited,
+                key=lambda lib: (
+                    float(getattr(lib, "contract_data_raw", 0.0) or 0.0),
+                    _get_library_identity_key(lib),
+                ),
+            ),
+        ]
+        for removal_order in removal_orders:
+            working = list(seed)
+            for lib in removal_order:
+                if _mode_1_1_add_test_limited_data_gb(working) <= float(max_add_test_gb_per_lane or 0.0) + 1e-6:
+                    break
+                working = [item for item in working if item is not lib]
+            if working:
+                variants.append(working)
+        return variants
+
+    def _ratio_trim_variants(seed: List[EnhancedLibraryInfo], predicate, limit: float) -> List[List[EnhancedLibraryInfo]]:
+        total = _g55_real_data_gb(seed)
+        if total <= 0:
+            return []
+        ratio_gb = sum(float(getattr(lib, "contract_data_raw", 0.0) or 0.0) for lib in seed if predicate(lib))
+        if ratio_gb / total <= limit + 1e-6:
+            return [list(seed)]
+        limited = [lib for lib in seed if predicate(lib)]
+        variants: List[List[EnhancedLibraryInfo]] = []
+        removal_orders = [
+            sorted(
+                limited,
+                key=lambda lib: (
+                    -float(getattr(lib, "contract_data_raw", 0.0) or 0.0),
+                    _get_library_identity_key(lib),
+                ),
+            ),
+            sorted(
+                limited,
+                key=lambda lib: (
+                    float(getattr(lib, "contract_data_raw", 0.0) or 0.0),
+                    _get_library_identity_key(lib),
+                ),
+            ),
+        ]
+        for removal_order in removal_orders:
+            working = list(seed)
+            for lib in removal_order:
+                total = _g55_real_data_gb(working)
+                if total <= 0:
+                    break
+                ratio_gb = sum(float(getattr(item, "contract_data_raw", 0.0) or 0.0) for item in working if predicate(item))
+                if ratio_gb / total <= limit + 1e-6:
+                    break
+                working = [item for item in working if item is not lib]
+            if working:
+                variants.append(working)
+        return variants
+
+    buckets = {_g55_type_bucket(lib) for lib in selected}
+    base_variants: List[List[EnhancedLibraryInfo]] = []
+    if "G58" in buckets and "G54" in buckets:
+        for bucket_to_remove in ("G54", "G58"):
+            variant = [lib for lib in selected if _g55_type_bucket(lib) != bucket_to_remove]
+            if variant:
+                base_variants.append(variant)
+    else:
+        base_variants.append(list(selected))
+
+    seen: Set[Tuple[str, ...]] = set()
+    final_variants: List[List[EnhancedLibraryInfo]] = []
+    for variant in base_variants:
+        for cap_variant in _cap_trim_variants(variant):
+            for high_variant in _ratio_trim_variants(cap_variant, _is_g55_high_phix_library, 0.30):
+                for customer_variant in _ratio_trim_variants(high_variant, _is_customer_library_candidate, 0.50):
+                    signature = tuple(sorted(_get_library_identity_key(lib) for lib in customer_variant))
+                    if signature in seen:
+                        continue
+                    seen.add(signature)
+                    final_variants.append(customer_variant)
+
+    final_variants.sort(
+        key=lambda variant: (
+            abs(_g55_real_data_gb(variant) - soft_target),
+            -_g55_real_data_gb(variant),
+            -_count_lane_index_pairs(variant),
+        )
+    )
+    for variant in final_variants:
+        repaired = _fill_g55_repaired_selection(
+            list(variant),
+            repair_pool=repair_pool,
+            min_allowed=min_allowed,
+            max_allowed=max_allowed,
+            soft_target=soft_target,
+            max_add_test_gb_per_lane=max_add_test_gb_per_lane,
+            mode_name=mode_name,
+        )
+        if repaired:
+            return repaired
+    return None
+
+
 def _is_g55_mode_1_1_candidate(lib: EnhancedLibraryInfo) -> bool:
     """G55未拆分1.1候选；不允许拆分片段、包lane、10+24专lane。"""
-    if not _resolve_g55_base_group_id(lib):
+    if not _resolve_g55_base_group_id_1_1_legacy(lib):
         return False
     if _is_split_library(lib):
         return False
@@ -14438,21 +14724,9 @@ def _consume_g55_imbalance_as_mode_lanes(
                 failure_counter["g55_single_basic_group_after_trim"] = failure_counter.get("g55_single_basic_group_after_trim", 0) + 1
                 return
             compatible, reason = _check_g55_cross_group_compatibility(selected)
-            if not compatible:
+            if not compatible and reason not in {"g58_g54_mix_forbidden"}:
                 key = f"g55_{reason or 'mix_incompatible'}"
                 failure_counter[key] = failure_counter.get(key, 0) + 1
-                return
-            if (
-                mode_name in {"1", "1.0", "1.1"}
-                and _mode_1_1_add_test_limited_data_gb(selected) > float(max_add_test_gb_per_lane or 0.0) + 1e-6
-            ):
-                failure_counter["g55_add_test_mixed_over_150"] = failure_counter.get("g55_add_test_mixed_over_150", 0) + 1
-                return
-            if _g55_ratio(selected, _is_g55_high_phix_library) > 0.30 + 1e-6:
-                failure_counter["g55_high_phix_ratio_over_30"] = failure_counter.get("g55_high_phix_ratio_over_30", 0) + 1
-                return
-            if _g55_ratio(selected, _is_customer_library_candidate) > 0.50 + 1e-6:
-                failure_counter["g55_customer_ratio_over_50"] = failure_counter.get("g55_customer_ratio_over_50", 0) + 1
                 return
             signature = _g55_validation_signature(selected)
             if signature in seen:
@@ -14556,21 +14830,40 @@ def _consume_g55_imbalance_as_mode_lanes(
                     group_ids = {_resolve_g55_base_group_id(item) for item in trial}
                     group_ids.discard("")
                     buckets = {_g55_type_bucket(item) for item in trial}
-                    if "G58" in buckets and "G54" in buckets:
-                        continue
-                    if (
-                        mode_name in {"1", "1.0", "1.1"}
-                        and _mode_1_1_add_test_limited_data_gb(trial) > float(max_add_test_gb_per_lane or 0.0) + 1e-6
-                    ):
-                        continue
-                    if trial_total > 0:
-                        if sum(float(getattr(item, "contract_data_raw", 0.0) or 0.0) for item in trial if _is_g55_high_phix_library(item)) / trial_total > 0.30 + 1e-6:
-                            continue
-                        if sum(float(getattr(item, "contract_data_raw", 0.0) or 0.0) for item in trial if _is_customer_library_candidate(item)) / trial_total > 0.50 + 1e-6:
-                            continue
-                    next_states.append(trial)
                     if min_allowed - 1e-6 <= trial_total <= max_allowed + 1e-6 and len(group_ids) >= 2:
                         _enqueue_g55_validation_candidate(validation_queue, validation_seen, trial)
+                    high_phix_ratio = (
+                        sum(
+                            float(getattr(item, "contract_data_raw", 0.0) or 0.0)
+                            for item in trial
+                            if _is_g55_high_phix_library(item)
+                        )
+                        / trial_total
+                        if trial_total > 0
+                        else 0.0
+                    )
+                    customer_ratio = (
+                        sum(
+                            float(getattr(item, "contract_data_raw", 0.0) or 0.0)
+                            for item in trial
+                            if _is_customer_library_candidate(item)
+                        )
+                        / trial_total
+                        if trial_total > 0
+                        else 0.0
+                    )
+                    has_repairable_limit = (
+                        ("G58" in buckets and "G54" in buckets)
+                        or (
+                            mode_name in {"1", "1.0", "1.1"}
+                            and _mode_1_1_add_test_limited_data_gb(trial) > float(max_add_test_gb_per_lane or 0.0) + 1e-6
+                        )
+                        or high_phix_ratio > 0.30 + 1e-6
+                        or customer_ratio > 0.50 + 1e-6
+                    )
+                    if has_repairable_limit:
+                        continue
+                    next_states.append(trial)
                 next_states.sort(
                     key=lambda selected: (
                         0 if min_allowed <= _g55_real_data_gb(selected) <= max_allowed else 1,
@@ -14658,6 +14951,42 @@ def _consume_g55_imbalance_as_mode_lanes(
                             best_used = [lib for lib in repaired_selected]
                             break
                         failure_counter[f"index_repair_{repaired_reason}"] = failure_counter.get(f"index_repair_{repaired_reason}", 0) + 1
+                if reason in {"add_test_mixed_over_150", "g58_g54_mix_forbidden", "high_phix_ratio_over_30", "customer_ratio_over_50"}:
+                    repaired_selected = _repair_g55_selection_mix_limits(
+                        selected,
+                        repair_pool=sub_pool,
+                        min_allowed=min_allowed,
+                        max_allowed=max_allowed,
+                        soft_target=soft_target,
+                        max_add_test_gb_per_lane=max_add_test_gb_per_lane,
+                        mode_name=mode_name,
+                    )
+                    if repaired_selected:
+                        validation_attempts += 1
+                        repaired_lane, repaired_reason = _validate_g55_mode_1_1_selection(
+                            repaired_selected,
+                            validator=validator,
+                            all_lanes=all_lanes + lanes,
+                            unassigned_pool=remaining,
+                            max_add_test_gb_per_lane=max_add_test_gb_per_lane,
+                            stage_label=stage_label,
+                            mode_name=mode_name,
+                            machine_type=machine_type,
+                            lane_id_prefix=lane_id_prefix,
+                        )
+                        if repaired_lane is not None:
+                            logger.info(
+                                "{} 混合/加测限制定向修复成功: 原始{}个/{:.1f}G, 修复后{}个/{:.1f}G",
+                                stage_label,
+                                len(selected),
+                                _g55_real_data_gb(selected),
+                                len(repaired_selected),
+                                _g55_real_data_gb(repaired_selected),
+                            )
+                            best_lane = repaired_lane
+                            best_used = [lib for lib in repaired_selected]
+                            break
+                        failure_counter[f"mix_limit_repair_{repaired_reason}"] = failure_counter.get(f"mix_limit_repair_{repaired_reason}", 0) + 1
                 if reason == "special_split_group_a_and_group_b_mixed":
                     repaired_selected = _repair_g55_selection_special_splits(
                         selected,
@@ -18103,7 +18432,12 @@ def arrange_library(
         single_group_imbalance_lanes, normal_libs = _extract_global_dedicated_imbalance_lanes(
             normal_libs,
             mode_name="1.1",
-            dispatch_stage="pre_1_1_single_group_dedicated_imbalance",
+            dispatch_stage="pre_1_1_dedicated_imbalance",
+        )
+        single_group_imbalance_lanes, normal_libs, _ = _keep_only_mode_1_1_prebuilt_lanes(
+            single_group_imbalance_lanes,
+            normal_libs,
+            stage_label="步骤1.3 单组碱基不均1.1专Lane",
         )
         single_group_imbalance_lanes, normal_libs, _ = _apply_mode_1_1_add_test_cap_to_prebuilt_lanes(
             single_group_imbalance_lanes,
@@ -18112,7 +18446,6 @@ def arrange_library(
             stage_label="步骤1.3 单组碱基不均1.1专Lane",
         )
         dedicated_imbalance_lanes.extend(single_group_imbalance_lanes)
-
         g53_g54_imbalance_lanes, normal_libs, _ = _consume_g53_g54_imbalance_as_mode_1_1_lanes(
             pool=normal_libs,
             validator=stage_validator,
@@ -18127,7 +18460,6 @@ def arrange_library(
             stage_label="步骤1.3 G53/G54组合碱基不均1.1专Lane",
         )
         dedicated_imbalance_lanes.extend(g53_g54_imbalance_lanes)
-
         g55_imbalance_lanes, normal_libs, g55_imbalance_stats = _consume_g55_imbalance_as_mode_1_1_lanes(
             pool=normal_libs,
             validator=stage_validator,
@@ -18483,6 +18815,11 @@ def arrange_library(
             normal_libs,
             mode_name="1.1",
             dispatch_stage="trailing_mode_1_1_dedicated_imbalance",
+        )
+        trailing_dedicated_imbalance_lanes, normal_libs, _ = _keep_only_mode_1_1_prebuilt_lanes(
+            trailing_dedicated_imbalance_lanes,
+            normal_libs,
+            stage_label="步骤1.6 尾货1.1碱基不均衡专Lane",
         )
         trailing_dedicated_imbalance_lanes, normal_libs, _ = _apply_mode_1_1_add_test_cap_to_prebuilt_lanes(
             trailing_dedicated_imbalance_lanes,
