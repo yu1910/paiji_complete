@@ -1156,6 +1156,7 @@
       "lane_count": 8,
       "loading_method": "25B",
       "sequencing_mode": "3.6T-NEW",
+      "output_sequencing_mode": "3.6T-NEW",
       "fc_min_data_gb": 1150.0
     },
     {
@@ -1194,6 +1195,7 @@
       "lane_count": 8,
       "loading_method": "25B",
       "sequencing_mode": "3.6T-NEW",
+      "output_sequencing_mode": "3.6T",
       "fc_min_data_gb": 1150.0
     },
     {
@@ -1232,6 +1234,7 @@
       "lane_count": 8,
       "loading_method": "25B",
       "sequencing_mode": "3.6T-NEW",
+      "output_sequencing_mode": "3.6T-NEW",
       "fc_min_data_gb": 1150.0
     },
     {
@@ -1270,6 +1273,7 @@
       "lane_count": 8,
       "loading_method": "25B",
       "sequencing_mode": "3.6T-NEW",
+      "output_sequencing_mode": "3.6T",
       "fc_min_data_gb": 1150.0
     },
     {
@@ -1308,6 +1312,7 @@
       "lane_count": 8,
       "loading_method": "25B",
       "sequencing_mode": "3.6T-NEW",
+      "output_sequencing_mode": "3.6T",
       "fc_min_data_gb": 1150.0
     },
     {
@@ -1346,6 +1351,7 @@
       "lane_count": 8,
       "loading_method": "25B",
       "sequencing_mode": "3.6T-NEW",
+      "output_sequencing_mode": "3.6T",
       "fc_min_data_gb": 1150.0
     },
     {
@@ -1384,6 +1390,7 @@
       "lane_count": 8,
       "loading_method": "25B",
       "sequencing_mode": "3.6T-NEW",
+      "output_sequencing_mode": "3.6T",
       "fc_min_data_gb": 1150.0
     },
     {
@@ -1422,6 +1429,7 @@
       "lane_count": 8,
       "loading_method": "25B",
       "sequencing_mode": "3.6T-NEW",
+      "output_sequencing_mode": "3.6T",
       "fc_min_data_gb": 1150.0
     },
     {
@@ -1460,6 +1468,7 @@
       "lane_count": 8,
       "loading_method": "25B",
       "sequencing_mode": "3.6T-NEW",
+      "output_sequencing_mode": "3.6T",
       "fc_min_data_gb": 1150.0
     },
     {
@@ -1762,6 +1771,7 @@
       "lane_count": 8,
       "loading_method": "25B",
       "sequencing_mode": "3.6T-NEW",
+      "output_sequencing_mode": "3.6T-NEW",
       "fc_min_data_gb": 1150.0
     },
     {
@@ -1794,6 +1804,7 @@
       "lane_count": 8,
       "loading_method": "25B",
       "sequencing_mode": "3.6T-NEW",
+      "output_sequencing_mode": "3.6T",
       "fc_min_data_gb": 1150.0
     },
     {
@@ -1826,6 +1837,7 @@
       "lane_count": 8,
       "loading_method": "25B",
       "sequencing_mode": "3.6T-NEW",
+      "output_sequencing_mode": "3.6T-NEW",
       "fc_min_data_gb": 1150.0
     },
     {
@@ -1858,6 +1870,7 @@
       "lane_count": 8,
       "loading_method": "25B",
       "sequencing_mode": "3.6T-NEW",
+      "output_sequencing_mode": "3.6T",
       "fc_min_data_gb": 1150.0
     },
     {
@@ -1890,6 +1903,7 @@
       "lane_count": 8,
       "loading_method": "25B",
       "sequencing_mode": "3.6T-NEW",
+      "output_sequencing_mode": "3.6T",
       "fc_min_data_gb": 1150.0
     },
     {
@@ -1922,6 +1936,7 @@
       "lane_count": 8,
       "loading_method": "25B",
       "sequencing_mode": "3.6T-NEW",
+      "output_sequencing_mode": "3.6T",
       "fc_min_data_gb": 1150.0
     },
     {
@@ -1954,6 +1969,7 @@
       "lane_count": 8,
       "loading_method": "25B",
       "sequencing_mode": "3.6T-NEW",
+      "output_sequencing_mode": "3.6T",
       "fc_min_data_gb": 1150.0
     },
     {
@@ -1986,6 +2002,7 @@
       "lane_count": 8,
       "loading_method": "25B",
       "sequencing_mode": "3.6T-NEW",
+      "output_sequencing_mode": "3.6T",
       "fc_min_data_gb": 1150.0
     },
     {
@@ -2018,6 +2035,7 @@
       "lane_count": 8,
       "loading_method": "25B",
       "sequencing_mode": "3.6T-NEW",
+      "output_sequencing_mode": "3.6T",
       "fc_min_data_gb": 1150.0
     }
   ],

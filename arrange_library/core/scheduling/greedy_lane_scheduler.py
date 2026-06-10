@@ -33,6 +33,7 @@ import random
 import time
 import math
 import heapq
+from datetime import datetime
 from typing import Any, List, Dict, Optional, Tuple, Set
 from dataclasses import dataclass, field, replace
 from loguru import logger
@@ -852,6 +853,7 @@ class GreedyLaneScheduler:
         candidate_sums = [s for s in states.keys() if min_units <= s <= max_units and s > 0]
         candidate_sums.sort(key=lambda s: (abs(s - target_units), -s))
 
+        best_candidate: Optional[Tuple[Tuple[float, float, int, int], List[EnhancedLibraryInfo], List[EnhancedLibraryInfo]]] = None
         for selected_sum in candidate_sums:
             selected_indices: Set[int] = set()
             cursor = selected_sum
@@ -865,7 +867,27 @@ class GreedyLaneScheduler:
             picked = [lib for idx, lib in enumerate(remaining) if idx in selected_indices]
             next_remaining = [lib for idx, lib in enumerate(remaining) if idx not in selected_indices]
             if self._is_valid_dedicated_imbalance_candidate(picked):
-                return picked, next_remaining
+                picked_delivery_values = [
+                    self._get_delivery_priority_sort_value(lib)
+                    for lib in picked
+                ]
+                finite_delivery_values = [
+                    value for value in picked_delivery_values if math.isfinite(value)
+                ]
+                delivery_key = min(finite_delivery_values) if finite_delivery_values else float("inf")
+                score = (
+                    abs(selected_sum - target_units),
+                    delivery_key,
+                    -selected_sum,
+                    -len(picked),
+                )
+                if best_candidate is None or score < best_candidate[0]:
+                    best_candidate = (score, picked, next_remaining)
+                    if score[0] == 0 and score[1] != float("inf"):
+                        break
+
+        if best_candidate is not None:
+            return best_candidate[1], best_candidate[2]
 
         return self._pick_dedicated_imbalance_subset_greedy(remaining, min_data, max_data)
 
@@ -1210,10 +1232,10 @@ class GreedyLaneScheduler:
                     f"剩余池总量{failed_total_data:.1f}GB不足最小成Lane门槛{failed_min_lane_data:.1f}GB，跳过后续随机重试"
                 )
             
-            # 第二轮：打乱输入池做探索，构Lane前再按当前通用排序稳定顺序。
+            # 第二轮：保留交付时间优先级，仅轮转起点做探索。
             if failed and len(failed) >= 10 and failed_pool_viable:
-                random.shuffle(failed)
-                logger.info(f"第二轮排机: {len(failed)} 个未分配文库（随机顺序）")
+                failed = self._rotate_delivery_priority_order(failed, 1)
+                logger.info(f"第二轮排机: {len(failed)} 个未分配文库（wkdeliverydate优先，轮转起点）")
                 lanes2, failed2 = self._schedule_machine_group(failed, machine_type)
                 all_lanes.extend(lanes2)
                 failed = failed2
@@ -1242,12 +1264,12 @@ class GreedyLaneScheduler:
                         f"第三轮后剩余池总量{failed_total_data:.1f}GB不足最小成Lane门槛{failed_min_lane_data:.1f}GB，停止继续随机重试"
                     )
             
-            # 多轮尝试：继续用不同随机顺序排机
+            # 多轮尝试：继续轮转起点，保持wkdeliverydate优先级不被随机覆盖。
             consecutive_failures = 0
             stagnant_retry_rounds = 0
             for round_num in range(4, 50):  # 最多尝试到第50轮，增加尝试次数
                 if failed and len(failed) >= 10 and failed_pool_viable:
-                    random.shuffle(failed)
+                    failed = self._rotate_delivery_priority_order(failed, round_num - 1)
                     logger.debug(f"第{round_num}轮排机: {len(failed)} 个未分配文库")
                     lanes_n, failed_n = self._schedule_machine_group(failed, machine_type)
                     next_failed_signature = self._build_retry_pool_signature(failed_n)
@@ -2170,15 +2192,15 @@ class GreedyLaneScheduler:
     
     def _sort_libraries(self, libraries: List[EnhancedLibraryInfo]) -> List[EnhancedLibraryInfo]:
         """
-        普通排序：按优先级分层后，再按数据量降序。
+        普通排序：先按wkdeliverydate交付时间，再保留模式/规则友好度和数据量排序。
         """
         return sorted(
             libraries,
             key=lambda lib: (
+                self._get_delivery_priority_sort_value(lib),
                 self._get_mode_1_1_seed_rank(lib),
                 self._get_mode_1_1_seed_group(lib),
                 self._get_scattered_mix_priority_rank(lib),
-                self._get_scattered_mix_delete_date_sort_value(lib),
                 -lib.get_data_amount_gb(),
             ),
         )
@@ -2284,33 +2306,88 @@ class GreedyLaneScheduler:
 
         return True
 
-    def _parse_scattered_mix_delete_date(self, lib: EnhancedLibraryInfo) -> Optional[float]:
-        """解析散样混排的delete_date天数字段，数值越小表示越临近越优先。"""
-        raw_value = getattr(lib, "_delete_date_raw", None)
+    def _parse_delivery_priority_time(self, lib: EnhancedLibraryInfo) -> Optional[float]:
+        """解析wkdeliverydate交付时间；时间越早/越临近，排序值越小。"""
+        cache_key = (
+            getattr(lib, "_wkdeliverydate_raw", None),
+            getattr(lib, "wkdeliverydate", None),
+            getattr(lib, "delivery_date", None),
+        )
+        cached = getattr(lib, "_delivery_priority_time_cache", None)
+        if cached is not None and cached[0] == cache_key:
+            return cached[1]
+
+        raw_value = getattr(lib, "_wkdeliverydate_raw", None)
         if raw_value in (None, ""):
-            raw_value = getattr(lib, "deduction_time", None)
+            raw_value = getattr(lib, "wkdeliverydate", None)
         if raw_value in (None, ""):
+            raw_value = getattr(lib, "delivery_date", None)
+        if raw_value in (None, ""):
+            setattr(lib, "_delivery_priority_time_cache", (cache_key, None))
             return None
 
-        try:
-            return float(raw_value)
-        except (TypeError, ValueError):
-            return None
+        parsed: Optional[float] = None
+        if isinstance(raw_value, datetime):
+            parsed = raw_value.timestamp()
+        else:
+            raw_text = str(raw_value).strip()
+            if raw_text:
+                normalized = raw_text.replace("T", " ").split(".")[0]
+                for date_format in (
+                    "%Y-%m-%d %H:%M:%S",
+                    "%Y-%m-%d %H:%M",
+                    "%Y-%m-%d",
+                    "%Y/%m/%d %H:%M:%S",
+                    "%Y/%m/%d %H:%M",
+                    "%Y/%m/%d",
+                    "%Y%m%d",
+                    "%m/%d/%Y %H:%M:%S",
+                    "%m/%d/%Y",
+                    "%m-%d-%Y",
+                ):
+                    try:
+                        parsed = datetime.strptime(normalized, date_format).timestamp()
+                        break
+                    except (TypeError, ValueError):
+                        continue
 
-    def _get_scattered_mix_delete_date_sort_value(self, lib: EnhancedLibraryInfo) -> float:
-        """其他文库按delete_date排序，越临近越优先；缺失值排最后。"""
-        if self._get_scattered_mix_priority_rank(lib) < 2:
-            return 0.0
-        parsed = self._parse_scattered_mix_delete_date(lib)
+        setattr(lib, "_delivery_priority_time_cache", (cache_key, parsed))
+        return parsed
+
+    def _get_delivery_priority_sort_value(self, lib: EnhancedLibraryInfo) -> float:
+        """按wkdeliverydate排序；缺失值排最后。"""
+        parsed = self._parse_delivery_priority_time(lib)
         if parsed is None:
             return float("inf")
         return parsed
+
+    def _get_delivery_priority_remove_sort_value(self, lib: EnhancedLibraryInfo) -> float:
+        """修复/替换时优先让更晚交付的文库让位；缺失时间按最晚处理。"""
+        value = self._get_delivery_priority_sort_value(lib)
+        if not math.isfinite(value):
+            return float("-inf")
+        return -value
+
+    def _get_scattered_mix_delete_date_sort_value(self, lib: EnhancedLibraryInfo) -> float:
+        """兼容旧调用名：实际使用wkdeliverydate作为非包Lane尝试优先级。"""
+        return self._get_delivery_priority_sort_value(lib)
+
+    def _rotate_delivery_priority_order(
+        self,
+        libraries: List[EnhancedLibraryInfo],
+        offset: int,
+    ) -> List[EnhancedLibraryInfo]:
+        ordered = self._sort_libraries(list(libraries or []))
+        if not ordered:
+            return ordered
+        shift = int(offset or 0) % len(ordered)
+        return ordered[shift:] + ordered[:shift]
 
     def _sort_remaining_for_scattered_mix_lane(
         self,
         libraries: List[EnhancedLibraryInfo],
     ) -> List[EnhancedLibraryInfo]:
-        """散样混排成Lane顺序：优先聚拢高优先级同类文库。"""
+        """散样混排成Lane顺序：wkdeliverydate第一优先，其次保留模式/规则友好度。"""
         if not libraries:
             return libraries
 
@@ -2319,10 +2396,10 @@ class GreedyLaneScheduler:
         return sorted(
             libraries,
             key=lambda lib: (
+                self._get_delivery_priority_sort_value(lib),
                 self._get_mode_1_1_seed_rank(lib),
                 self._get_mode_1_1_seed_group(lib),
                 self._get_scattered_mix_priority_rank(lib),
-                self._get_scattered_mix_delete_date_sort_value(lib),
                 board_order.get(id(lib), len(board_order)),
                 -lib.get_data_amount_gb(),
             ),
@@ -2347,6 +2424,7 @@ class GreedyLaneScheduler:
         return sorted(
             libraries,
             key=lambda lib: (
+                self._get_delivery_priority_sort_value(lib),
                 0
                 if (
                     seed_mode_rank < 99
@@ -2358,7 +2436,6 @@ class GreedyLaneScheduler:
                 self._get_mode_1_1_seed_group(lib),
                 0 if self._get_scattered_mix_priority_rank(lib) == seed_rank else 1,
                 self._get_scattered_mix_priority_rank(lib),
-                self._get_scattered_mix_delete_date_sort_value(lib),
                 base_order.get(id(lib), len(base_order)),
                 -lib.get_data_amount_gb(),
             ),
@@ -2952,7 +3029,7 @@ class GreedyLaneScheduler:
 
             minority_is_production = production_data < manual_customer_data
 
-            # 1) 从未分配池补一个少数侧文库（优先大数据量）
+            # 1) 从未分配池补一个少数侧文库（优先临近交付，其次大数据量）
             minority_candidates = [
                 lib for lib in unassigned_pool
                 if (
@@ -2961,7 +3038,12 @@ class GreedyLaneScheduler:
                     else self._is_manual_or_customer_side_library_by_wkjkhj(lib)
                 )
             ]
-            minority_candidates.sort(key=lambda x: x.get_data_amount_gb(), reverse=True)
+            minority_candidates.sort(
+                key=lambda x: (
+                    self._get_delivery_priority_sort_value(x),
+                    -x.get_data_amount_gb(),
+                )
+            )
 
             if minority_candidates:
                 picked = minority_candidates[0]
@@ -2969,7 +3051,7 @@ class GreedyLaneScheduler:
                     unassigned_pool.remove(picked)
                 working_lane_libs.append(picked)
 
-            # 2) 若仍<5%，剔除一个多数侧文库（优先大数据量）
+            # 2) 若仍<5%，剔除一个多数侧文库（优先让更晚交付文库让位）
             if self._get_mix_minority_ratio(working_lane_libs) + 1e-12 < 0.05:
                 majority_libs = [
                     lib for lib in working_lane_libs
@@ -2979,7 +3061,12 @@ class GreedyLaneScheduler:
                         else self._is_production_side_library_by_wkjkhj(lib)
                     )
                 ]
-                majority_libs.sort(key=lambda x: x.get_data_amount_gb(), reverse=True)
+                majority_libs.sort(
+                    key=lambda x: (
+                        self._get_delivery_priority_remove_sort_value(x),
+                        -x.get_data_amount_gb(),
+                    )
+                )
                 if majority_libs:
                     removed = majority_libs[0]
                     if removed is candidate_lib:
