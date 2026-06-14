@@ -1,0 +1,254 @@
+2026-06-14 21:42:27.589 | INFO     | arrange_library.core.constraints.index_validator_verified:__init__:77 - Index校验器初始化完成（真实数据验证版本）
+2026-06-14 21:42:27.615 | INFO     | arrange_library.core.config.scheduling_config:_load_rule_matrix_config:806 - 统一排机规则配置已加载: profiles=55, constraints=2, loading_rules=4, lab_mappings=9
+2026-06-14 21:42:27.615 | INFO     | arrange_library.core.config.scheduling_config:_load_mode_1_1_rules:1777 - 1.1模式规则配置加载完成: /data/work/yuyongpeng/liblane_v2_deepseek/paiji_complete2/paiji_complete/arrange_library/config/mode_1_1_rules.json
+2026-06-14 21:42:27.701 | INFO     | arrange_library.core.config.scheduling_config:__init__:434 - 排机配置管理器初始化完成
+2026-06-14 21:42:28.190 | INFO     | arrange_library.core.constraints.index_validator_verified:__init__:77 - Index校验器初始化完成（真实数据验证版本）
+2026-06-14 21:42:28.197 | INFO     | __main__:arrange_library:19019 - ================================================================================
+2026-06-14 21:42:28.197 | INFO     | __main__:arrange_library:19020 - arrange_library: 端到端排机流程 - 排机与 Pooling 预测
+2026-06-14 21:42:28.197 | INFO     | __main__:arrange_library:19021 - ================================================================================
+2026-06-14 21:42:28.197 | INFO     | __main__:arrange_library:19022 - 调用时间: 2026-06-14 21:42:28
+2026-06-14 21:42:28.197 | INFO     | __main__:arrange_library:19023 - 随机种子: 42 (固定，确保可复现)
+2026-06-14 21:42:28.197 | INFO     | __main__:arrange_library:19024 - 运行模式: arrange
+2026-06-14 21:42:28.197 | INFO     | __main__:arrange_library:19030 - 
+使用数据文件: arrange_library/61_sta.csv
+2026-06-14 21:42:28.304 | INFO     | __main__:load_standardized_csv:18228 - 从标准化CSV文件加载数据: arrange_library/61_sta.csv
+2026-06-14 21:42:28.322 | INFO     | __main__:load_standardized_csv:18230 - 读取 1572 行数据
+2026-06-14 21:42:28.548 | INFO     | __main__:load_standardized_csv:18325 - 成功创建 1572 个文库对象
+2026-06-14 21:42:28.548 | INFO     | __main__:arrange_library:19063 - 成功转换 1572 个测试文库
+2026-06-14 21:42:28.551 | INFO     | __main__:arrange_library:19092 - AI可排文库筛选完成: 可排=1572，不可排=0，机型排除=0
+2026-06-14 21:42:28.551 | INFO     | __main__:arrange_library:19115 - 
+================================================================================
+2026-06-14 21:42:28.551 | INFO     | __main__:arrange_library:19116 - 步骤0.9: 提前处理1.1第二轮历史固定组合文库
+2026-06-14 21:42:28.551 | INFO     | __main__:arrange_library:19117 - ================================================================================
+2026-06-14 21:42:28.553 | INFO     | arrange_library.core.scheduling.mode_1_1_round2:identify_round2_candidates:129 - 1.1第二轮候选识别: 无符合条件的候选文库
+2026-06-14 21:42:28.553 | INFO     | __main__:arrange_library:19135 - 1.1第二轮历史Lane前置直出: 无候选文库
+2026-06-14 21:42:28.553 | INFO     | __main__:arrange_library:19140 - 
+================================================================================
+2026-06-14 21:42:28.553 | INFO     | __main__:arrange_library:19141 - 步骤1: 处理包Lane文库（wkbaleno字段有值的文库）
+2026-06-14 21:42:28.553 | INFO     | __main__:arrange_library:19142 - ================================================================================
+2026-06-14 21:42:28.554 | INFO     | __main__:arrange_library:19160 - 包Lane文库数: 0
+2026-06-14 21:42:28.554 | INFO     | __main__:arrange_library:19161 - 普通文库数: 1572
+2026-06-14 21:42:28.576 | INFO     | __main__:arrange_library:19222 - 
+================================================================================
+2026-06-14 21:42:28.576 | INFO     | __main__:arrange_library:19223 - 步骤1.2: 处理10+24 Lane seq文库
+2026-06-14 21:42:28.576 | INFO     | __main__:arrange_library:19224 - ================================================================================
+2026-06-14 21:42:28.576 | WARNING  | __main__:_build_10_plus_24_lane_seq_lanes:7754 - 10+24 Lane seq剩余2个文库未成Lane
+2026-06-14 21:42:28.577 | INFO     | __main__:arrange_library:19234 - 10+24 Lane seq处理完成: 输入文库=2, 生成Lane=0, 未分配=2
+2026-06-14 21:42:28.577 | INFO     | arrange_library.core.constraints.index_validator_verified:__init__:77 - Index校验器初始化完成（真实数据验证版本）
+2026-06-14 21:42:28.577 | INFO     | arrange_library.core.constraints.lane_validator:__init__:165 - 成Lane校验程序初始化完成 (严格模式: True, 碱基不均衡上限: 35%, 特殊文库关键词: 9个)
+2026-06-14 21:42:28.577 | INFO     | __main__:arrange_library:19248 - 
+================================================================================
+2026-06-14 21:42:28.577 | INFO     | __main__:arrange_library:19249 - 步骤1.3: 1.1前碱基不均衡专Lane预抽取
+2026-06-14 21:42:28.577 | INFO     | __main__:arrange_library:19250 - ================================================================================
+2026-06-14 21:42:28.579 | INFO     | arrange_library.core.constraints.index_validator_verified:__init__:77 - Index校验器初始化完成（真实数据验证版本）
+2026-06-14 21:42:28.579 | INFO     | arrange_library.core.constraints.lane_validator:__init__:165 - 成Lane校验程序初始化完成 (严格模式: True, 碱基不均衡上限: 35%, 特殊文库关键词: 9个)
+2026-06-14 21:42:28.580 | WARNING  | arrange_library.core.ai.pooling_coefficient_optimizer:_load_config:40 - Pooling配置表不存在: /data/work/yuyongpeng/liblane_v2_deepseek/data/wktype_pooling_config.xlsx，将使用默认策略
+2026-06-14 21:42:28.580 | INFO     | arrange_library.core.ai.pooling_coefficient_optimizer:_load_efficiency_corrections:185 - 产出效率修正表不存在: /data/work/yuyongpeng/liblane_v2_deepseek/data/production_efficiency_correction.csv，跳过后校准
+2026-06-14 21:42:28.581 | WARNING  | arrange_library.core.ai.loutput_predictor_wrapper:_load_model:150 - 模型文件不存在: models/loutput_pre_lane_v5/lightgbm_model.pkl
+2026-06-14 21:42:28.581 | WARNING  | arrange_library.core.ai.pooling_coefficient_optimizer:__init__:164 - loutput预测器不可用，将使用规则降级策略
+2026-06-14 21:42:28.581 | INFO     | arrange_library.core.scheduling.greedy_lane_scheduler:__init__:267 - 逐Lane贪心排机器初始化完成 - 基础容量: 985.0GB, 利用率区间: [100%, 100%], 配置模式: 按机型自动
+2026-06-14 21:42:28.581 | INFO     | arrange_library.core.scheduling.greedy_lane_scheduler:__init__:270 - 启用检查: Index=True, 碱基不均衡=True, 规则检查器=False
+2026-06-14 21:42:28.582 | INFO     | arrange_library.core.scheduling.greedy_lane_scheduler:_get_dedicated_lane_profile:985 - 专用Lane分组G36剩余合同量10.7G无法满足1.1或3.6T-NEW有效容量下限
+2026-06-14 21:42:28.582 | INFO     | arrange_library.core.scheduling.greedy_lane_scheduler:_get_dedicated_lane_profile:985 - 专用Lane分组G26剩余合同量67.3G无法满足1.1或3.6T-NEW有效容量下限
+2026-06-14 21:42:28.583 | INFO     | arrange_library.core.scheduling.greedy_lane_scheduler:_get_dedicated_lane_profile:985 - 专用Lane分组G25剩余合同量6.0G无法满足1.1或3.6T-NEW有效容量下限
+2026-06-14 21:42:28.583 | INFO     | arrange_library.core.scheduling.greedy_lane_scheduler:_get_dedicated_lane_profile:985 - 专用Lane分组G50剩余合同量10.0G无法满足1.1或3.6T-NEW有效容量下限
+2026-06-14 21:42:28.583 | INFO     | arrange_library.core.scheduling.greedy_lane_scheduler:_get_dedicated_lane_profile:985 - 专用Lane分组G33剩余合同量111.0G无法满足1.1或3.6T-NEW有效容量下限
+2026-06-14 21:42:28.584 | INFO     | arrange_library.core.scheduling.greedy_lane_scheduler:_get_dedicated_lane_profile:985 - 专用Lane分组G29剩余合同量219.6G无法满足1.1或3.6T-NEW有效容量下限
+2026-06-14 21:42:28.585 | INFO     | arrange_library.core.scheduling.greedy_lane_scheduler:_get_dedicated_lane_profile:985 - 专用Lane分组G27剩余合同量729.0G无法满足1.1或3.6T-NEW有效容量下限
+2026-06-14 21:42:28.585 | INFO     | arrange_library.core.scheduling.greedy_lane_scheduler:_get_dedicated_lane_profile:985 - 专用Lane分组G39剩余合同量150.0G无法满足1.1或3.6T-NEW有效容量下限
+2026-06-14 21:42:28.593 | INFO     | arrange_library.core.constraints.lane_validator:__init__:165 - 成Lane校验程序初始化完成 (严格模式: False, 碱基不均衡上限: 35%, 特殊文库关键词: 9个)
+2026-06-14 21:42:28.594 | INFO     | arrange_library.core.scheduling.greedy_lane_scheduler:_build_group:2693 - 专用Lane DL_Nova X-25B_001 形成成功 - 分组=G34, 碱基不均衡=1031.8G, 平衡文库=0.0G, 总量(含平衡)=1031.8G, 模式=3.6T-NEW, 容量规则=tj_1595_special_combo_36t
+2026-06-14 21:42:28.594 | INFO     | arrange_library.core.scheduling.greedy_lane_scheduler:_get_dedicated_lane_profile:985 - 专用Lane分组G34剩余合同量800.0G无法满足1.1或3.6T-NEW有效容量下限
+2026-06-14 21:42:28.595 | INFO     | arrange_library.core.scheduling.greedy_lane_scheduler:_get_dedicated_lane_profile:985 - 专用Lane分组G7剩余合同量2.4G无法满足1.1或3.6T-NEW有效容量下限
+2026-06-14 21:42:28.595 | INFO     | arrange_library.core.scheduling.greedy_lane_scheduler:_get_dedicated_lane_profile:985 - 专用Lane分组G58剩余合同量920.0G无法满足1.1或3.6T-NEW有效容量下限
+2026-06-14 21:42:28.596 | INFO     | arrange_library.core.scheduling.greedy_lane_scheduler:_get_dedicated_lane_profile:985 - 专用Lane分组G5剩余合同量400.0G无法满足1.1或3.6T-NEW有效容量下限
+2026-06-14 21:42:28.596 | INFO     | arrange_library.core.scheduling.greedy_lane_scheduler:_get_dedicated_lane_profile:985 - 专用Lane分组G35剩余合同量208.0G无法满足1.1或3.6T-NEW有效容量下限
+2026-06-14 21:42:28.597 | INFO     | arrange_library.core.scheduling.greedy_lane_scheduler:_get_dedicated_lane_profile:985 - 专用Lane分组G4剩余合同量150.0G无法满足1.1或3.6T-NEW有效容量下限
+2026-06-14 21:42:28.597 | INFO     | arrange_library.core.scheduling.greedy_lane_scheduler:_get_dedicated_lane_profile:985 - 专用Lane分组G52剩余合同量10.0G无法满足1.1或3.6T-NEW有效容量下限
+2026-06-14 21:42:28.597 | INFO     | arrange_library.core.scheduling.greedy_lane_scheduler:_get_dedicated_lane_profile:985 - 专用Lane分组G16剩余合同量120.0G无法满足1.1或3.6T-NEW有效容量下限
+2026-06-14 21:42:28.598 | INFO     | arrange_library.core.scheduling.greedy_lane_scheduler:_get_dedicated_lane_profile:985 - 专用Lane分组G18剩余合同量114.0G无法满足1.1或3.6T-NEW有效容量下限
+2026-06-14 21:42:28.598 | INFO     | arrange_library.core.scheduling.greedy_lane_scheduler:_get_dedicated_lane_profile:985 - 专用Lane分组G19剩余合同量1.0G无法满足1.1或3.6T-NEW有效容量下限
+2026-06-14 21:42:28.599 | INFO     | __main__:_extract_global_dedicated_imbalance_lanes:1189 - 全局跨机型碱基不均专Lane预抽取: 承载机型=Nova X-25B, 生成Lane=1, 消耗1031.8G, 剩余不均文库=240个/11570.8G
+2026-06-14 21:42:28.601 | INFO     | __main__:_extract_global_dedicated_imbalance_lanes:1200 - 全局碱基不均专Lane预抽取完成: 生成Lane=1, 后续普通排机池 1570 -> 1555
+2026-06-14 21:42:28.601 | INFO     | __main__:_keep_only_mode_1_1_prebuilt_lanes:2318 - 步骤1.3 单组碱基不均1.1专Lane: 回收1条非1.1预抽取Lane，返还15个文库/1031.8G继续参与1.1 G53/G54/G55
+2026-06-14 21:42:28.679 | INFO     | __main__:_consume_g53_g54_imbalance_as_mode_lanes:1581 - 步骤1.3 G53/G54组合碱基不均1.1专Lane候选定向修复成功: group=G54, action=rebuild_for_10bp_ratio, 使用22个/2099.1G
+2026-06-14 21:42:28.679 | INFO     | __main__:_consume_g53_g54_imbalance_as_mode_lanes:1640 - 步骤1.3 G53/G54组合碱基不均1.1专Lane成Lane成功: lane=DL_Nova X-25B_001, group=G54, 候选76个/7040.7G, 使用22个/2099.1G
+2026-06-14 21:42:28.739 | INFO     | __main__:_consume_g53_g54_imbalance_as_mode_lanes:1581 - 步骤1.3 G53/G54组合碱基不均1.1专Lane候选定向修复成功: group=G54, action=rebuild_for_10bp_ratio, 使用22个/2059.9G
+2026-06-14 21:42:28.740 | INFO     | __main__:_consume_g53_g54_imbalance_as_mode_lanes:1640 - 步骤1.3 G53/G54组合碱基不均1.1专Lane成Lane成功: lane=DL_Nova X-25B_002, group=G54, 候选54个/4941.7G, 使用22个/2059.9G
+2026-06-14 21:42:28.786 | INFO     | __main__:_consume_g53_g54_imbalance_as_mode_lanes:1581 - 步骤1.3 G53/G54组合碱基不均1.1专Lane候选定向修复成功: group=G54, action=rebuild_for_10bp_ratio, 使用24个/2081.8G
+2026-06-14 21:42:28.787 | INFO     | __main__:_consume_g53_g54_imbalance_as_mode_lanes:1640 - 步骤1.3 G53/G54组合碱基不均1.1专Lane成Lane成功: lane=DL_Nova X-25B_003, group=G54, 候选32个/2881.8G, 使用24个/2081.8G
+2026-06-14 21:42:28.895 | INFO     | __main__:_consume_g53_g54_imbalance_as_mode_lanes:1628 - 步骤1.3 G53/G54组合碱基不均1.1专Lane未成Lane: group=G54, 候选8个/800.0G, 贪心选择8个/800.0G, 下限1995.0G, top_failures=[('capacity_out_of_rule_range', 95)]
+2026-06-14 21:42:28.895 | INFO     | arrange_library.core.constraints.lane_validator:__init__:165 - 成Lane校验程序初始化完成 (严格模式: True, 碱基不均衡上限: 35%, 特殊文库关键词: 9个)
+2026-06-14 21:42:36.083 | INFO     | __main__:_materialize_balance_library_for_lane:7412 - Lane G55_TMP 尝试补平衡文库模板: sample_id=phix, test_no=Novaseq X Plus-PE150, index_seq=GGGGGGGGGG;ACCGAGATCT
+2026-06-14 21:42:36.531 | INFO     | __main__:_validate_balance_injection_lane_state:7214 - Lane G55_TMP 候选平衡文库 phix 注入校验失败: ['10bp Index占比13.6%低于40%要求']
+2026-06-14 21:42:36.531 | INFO     | __main__:_materialize_balance_library_for_lane:7412 - Lane G55_TMP 尝试补平衡文库模板: sample_id=FDSW250185295-1r, test_no=Novaseq X Plus-PE150, index_seq=AGCATCGAGT;AGCATCCTCA
+2026-06-14 21:42:36.982 | INFO     | __main__:_validate_balance_injection_lane_state:7214 - Lane G55_TMP 候选平衡文库 FDSW250185295-1r 注入校验失败: ['10bp Index占比13.6%低于40%要求']
+2026-06-14 21:42:36.982 | INFO     | __main__:_materialize_balance_library_for_lane:7412 - Lane G55_TMP 尝试补平衡文库模板: sample_id=FDSW250185296-1r, test_no=Novaseq X Plus-PE150, index_seq=CTCACACTGA;CTCACACATG
+2026-06-14 21:42:37.422 | INFO     | __main__:_validate_balance_injection_lane_state:7214 - Lane G55_TMP 候选平衡文库 FDSW250185296-1r 注入校验失败: ['10bp Index占比13.6%低于40%要求']
+2026-06-14 21:42:37.422 | INFO     | __main__:_materialize_balance_library_for_lane:7412 - Lane G55_TMP 尝试补平衡文库模板: sample_id=FDSW250185298-1r, test_no=Novaseq X Plus-PE150, index_seq=CCGACTAGAT;CCGACTAAGA
+2026-06-14 21:42:37.866 | INFO     | __main__:_validate_balance_injection_lane_state:7214 - Lane G55_TMP 候选平衡文库 FDSW250185298-1r 注入校验失败: ['10bp Index占比13.6%低于40%要求']
+2026-06-14 21:42:37.866 | INFO     | __main__:_materialize_balance_library_for_lane:7412 - Lane G55_TMP 尝试补平衡文库模板: sample_id=FDSW250185306-1r, test_no=Novaseq X Plus-PE150, index_seq=ACAGAGCGAT;GACTACTCAC
+2026-06-14 21:42:38.316 | INFO     | __main__:_validate_balance_injection_lane_state:7214 - Lane G55_TMP 候选平衡文库 FDSW250185306-1r 注入校验失败: ['10bp Index占比13.6%低于40%要求']
+2026-06-14 21:42:38.316 | INFO     | __main__:_materialize_balance_library_for_lane:7412 - Lane G55_TMP 尝试补平衡文库模板: sample_id=FDSW250185309-1r, test_no=Novaseq X Plus-PE150, index_seq=GTCACACACT;CAAGTGCTTC
+2026-06-14 21:42:38.760 | INFO     | __main__:_validate_balance_injection_lane_state:7214 - Lane G55_TMP 候选平衡文库 FDSW250185309-1r 注入校验失败: ['10bp Index占比13.6%低于40%要求']
+2026-06-14 21:42:38.760 | INFO     | __main__:_materialize_balance_library_for_lane:7412 - Lane G55_TMP 尝试补平衡文库模板: sample_id=FDSW250185313-1r, test_no=Novaseq X Plus-PE150, index_seq=ATCGAATGCG;CGATATCTGC
+2026-06-14 21:42:39.209 | INFO     | __main__:_validate_balance_injection_lane_state:7214 - Lane G55_TMP 候选平衡文库 FDSW250185313-1r 注入校验失败: ['10bp Index占比13.6%低于40%要求']
+2026-06-14 21:42:39.210 | INFO     | __main__:_materialize_balance_library_for_lane:7412 - Lane G55_TMP 尝试补平衡文库模板: sample_id=FDSW250185316-1r, test_no=Novaseq X Plus-PE150, index_seq=TCATTGCACC;ATCGAAGCTC
+2026-06-14 21:42:39.663 | INFO     | __main__:_validate_balance_injection_lane_state:7214 - Lane G55_TMP 候选平衡文库 FDSW250185316-1r 注入校验失败: ['10bp Index占比13.6%低于40%要求']
+2026-06-14 21:42:40.852 | WARNING  | __main__:_materialize_balance_library_for_lane:7537 - Lane G55_TMP 平衡文库补充失败: 需补 106.822G，实验室=天津科技服务实验室，工序=Novaseq X Plus-PE150
+2026-06-14 21:42:45.741 | INFO     | __main__:_materialize_balance_library_for_lane:7412 - Lane G55_TMP 尝试补平衡文库模板: sample_id=phix, test_no=Novaseq X Plus-PE150, index_seq=GGGGGGGGGG;ACCGAGATCT
+2026-06-14 21:42:46.186 | INFO     | __main__:_validate_balance_injection_lane_state:7214 - Lane G55_TMP 候选平衡文库 phix 注入校验失败: ['10bp Index占比33.9%低于40%要求']
+2026-06-14 21:42:46.186 | INFO     | __main__:_materialize_balance_library_for_lane:7412 - Lane G55_TMP 尝试补平衡文库模板: sample_id=FDSW250185295-1r, test_no=Novaseq X Plus-PE150, index_seq=AGCATCGAGT;AGCATCCTCA
+2026-06-14 21:42:46.632 | INFO     | __main__:_validate_balance_injection_lane_state:7214 - Lane G55_TMP 候选平衡文库 FDSW250185295-1r 注入校验失败: ['10bp Index占比33.9%低于40%要求']
+2026-06-14 21:42:46.632 | INFO     | __main__:_materialize_balance_library_for_lane:7412 - Lane G55_TMP 尝试补平衡文库模板: sample_id=FDSW250185296-1r, test_no=Novaseq X Plus-PE150, index_seq=CTCACACTGA;CTCACACATG
+2026-06-14 21:42:47.071 | INFO     | __main__:_validate_balance_injection_lane_state:7214 - Lane G55_TMP 候选平衡文库 FDSW250185296-1r 注入校验失败: ['10bp Index占比33.9%低于40%要求']
+2026-06-14 21:42:47.072 | INFO     | __main__:_materialize_balance_library_for_lane:7412 - Lane G55_TMP 尝试补平衡文库模板: sample_id=FDSW250185298-1r, test_no=Novaseq X Plus-PE150, index_seq=CCGACTAGAT;CCGACTAAGA
+2026-06-14 21:42:47.516 | INFO     | __main__:_validate_balance_injection_lane_state:7214 - Lane G55_TMP 候选平衡文库 FDSW250185298-1r 注入校验失败: ['10bp Index占比33.9%低于40%要求']
+2026-06-14 21:42:47.516 | INFO     | __main__:_materialize_balance_library_for_lane:7412 - Lane G55_TMP 尝试补平衡文库模板: sample_id=FDSW250185306-1r, test_no=Novaseq X Plus-PE150, index_seq=ACAGAGCGAT;GACTACTCAC
+2026-06-14 21:42:47.963 | INFO     | __main__:_validate_balance_injection_lane_state:7214 - Lane G55_TMP 候选平衡文库 FDSW250185306-1r 注入校验失败: ['10bp Index占比33.9%低于40%要求']
+2026-06-14 21:42:47.963 | INFO     | __main__:_materialize_balance_library_for_lane:7412 - Lane G55_TMP 尝试补平衡文库模板: sample_id=FDSW250185309-1r, test_no=Novaseq X Plus-PE150, index_seq=GTCACACACT;CAAGTGCTTC
+2026-06-14 21:42:48.404 | INFO     | __main__:_validate_balance_injection_lane_state:7214 - Lane G55_TMP 候选平衡文库 FDSW250185309-1r 注入校验失败: ['10bp Index占比33.9%低于40%要求']
+2026-06-14 21:42:48.404 | INFO     | __main__:_materialize_balance_library_for_lane:7412 - Lane G55_TMP 尝试补平衡文库模板: sample_id=FDSW250185313-1r, test_no=Novaseq X Plus-PE150, index_seq=ATCGAATGCG;CGATATCTGC
+2026-06-14 21:42:48.849 | INFO     | __main__:_validate_balance_injection_lane_state:7214 - Lane G55_TMP 候选平衡文库 FDSW250185313-1r 注入校验失败: ['10bp Index占比33.9%低于40%要求']
+2026-06-14 21:42:48.849 | INFO     | __main__:_materialize_balance_library_for_lane:7412 - Lane G55_TMP 尝试补平衡文库模板: sample_id=FDSW250185316-1r, test_no=Novaseq X Plus-PE150, index_seq=TCATTGCACC;ATCGAAGCTC
+2026-06-14 21:42:49.290 | INFO     | __main__:_validate_balance_injection_lane_state:7214 - Lane G55_TMP 候选平衡文库 FDSW250185316-1r 注入校验失败: ['10bp Index占比33.9%低于40%要求']
+2026-06-14 21:42:50.463 | WARNING  | __main__:_materialize_balance_library_for_lane:7537 - Lane G55_TMP 平衡文库补充失败: 需补 104.980G，实验室=天津科技服务实验室，工序=Novaseq X Plus-PE150
+2026-06-14 21:42:50.469 | INFO     | __main__:_materialize_balance_library_for_lane:7412 - Lane G55_TMP 尝试补平衡文库模板: sample_id=phix, test_no=Novaseq X Plus-PE150, index_seq=GGGGGGGGGG;ACCGAGATCT
+2026-06-14 21:42:50.475 | INFO     | __main__:_validate_balance_injection_lane_state:7214 - Lane G55_TMP 候选平衡文库 phix 注入校验失败: ['10bp Index占比23.6%低于40%要求']
+2026-06-14 21:42:50.475 | INFO     | __main__:_materialize_balance_library_for_lane:7412 - Lane G55_TMP 尝试补平衡文库模板: sample_id=FDSW250185295-1r, test_no=Novaseq X Plus-PE150, index_seq=AGCATCGAGT;AGCATCCTCA
+2026-06-14 21:42:50.481 | INFO     | __main__:_validate_balance_injection_lane_state:7214 - Lane G55_TMP 候选平衡文库 FDSW250185295-1r 注入校验失败: ['10bp Index占比23.6%低于40%要求']
+2026-06-14 21:42:50.481 | INFO     | __main__:_materialize_balance_library_for_lane:7412 - Lane G55_TMP 尝试补平衡文库模板: sample_id=FDSW250185296-1r, test_no=Novaseq X Plus-PE150, index_seq=CTCACACTGA;CTCACACATG
+2026-06-14 21:42:50.486 | INFO     | __main__:_validate_balance_injection_lane_state:7214 - Lane G55_TMP 候选平衡文库 FDSW250185296-1r 注入校验失败: ['10bp Index占比23.6%低于40%要求']
+2026-06-14 21:42:50.486 | INFO     | __main__:_materialize_balance_library_for_lane:7412 - Lane G55_TMP 尝试补平衡文库模板: sample_id=FDSW250185298-1r, test_no=Novaseq X Plus-PE150, index_seq=CCGACTAGAT;CCGACTAAGA
+2026-06-14 21:42:50.491 | INFO     | __main__:_validate_balance_injection_lane_state:7214 - Lane G55_TMP 候选平衡文库 FDSW250185298-1r 注入校验失败: ['10bp Index占比23.6%低于40%要求']
+2026-06-14 21:42:50.491 | INFO     | __main__:_materialize_balance_library_for_lane:7412 - Lane G55_TMP 尝试补平衡文库模板: sample_id=FDSW250185306-1r, test_no=Novaseq X Plus-PE150, index_seq=ACAGAGCGAT;GACTACTCAC
+2026-06-14 21:42:50.497 | INFO     | __main__:_validate_balance_injection_lane_state:7214 - Lane G55_TMP 候选平衡文库 FDSW250185306-1r 注入校验失败: ['10bp Index占比23.6%低于40%要求']
+2026-06-14 21:42:50.497 | INFO     | __main__:_materialize_balance_library_for_lane:7412 - Lane G55_TMP 尝试补平衡文库模板: sample_id=FDSW250185309-1r, test_no=Novaseq X Plus-PE150, index_seq=GTCACACACT;CAAGTGCTTC
+2026-06-14 21:42:50.502 | INFO     | __main__:_validate_balance_injection_lane_state:7214 - Lane G55_TMP 候选平衡文库 FDSW250185309-1r 注入校验失败: ['10bp Index占比23.6%低于40%要求']
+2026-06-14 21:42:50.502 | INFO     | __main__:_materialize_balance_library_for_lane:7412 - Lane G55_TMP 尝试补平衡文库模板: sample_id=FDSW250185313-1r, test_no=Novaseq X Plus-PE150, index_seq=ATCGAATGCG;CGATATCTGC
+2026-06-14 21:42:50.507 | INFO     | __main__:_validate_balance_injection_lane_state:7214 - Lane G55_TMP 候选平衡文库 FDSW250185313-1r 注入校验失败: ['10bp Index占比23.6%低于40%要求']
+2026-06-14 21:42:50.507 | INFO     | __main__:_materialize_balance_library_for_lane:7412 - Lane G55_TMP 尝试补平衡文库模板: sample_id=FDSW250185316-1r, test_no=Novaseq X Plus-PE150, index_seq=TCATTGCACC;ATCGAAGCTC
+2026-06-14 21:42:50.512 | INFO     | __main__:_validate_balance_injection_lane_state:7214 - Lane G55_TMP 候选平衡文库 FDSW250185316-1r 注入校验失败: ['10bp Index占比23.6%低于40%要求']
+2026-06-14 21:42:50.523 | WARNING  | __main__:_materialize_balance_library_for_lane:7537 - Lane G55_TMP 平衡文库补充失败: 需补 105.284G，实验室=天津科技服务实验室，工序=Novaseq X Plus-PE150
+2026-06-14 21:42:50.526 | INFO     | __main__:_materialize_balance_library_for_lane:7412 - Lane G55_TMP 尝试补平衡文库模板: sample_id=phix, test_no=Novaseq X Plus-PE150, index_seq=GGGGGGGGGG;ACCGAGATCT
+2026-06-14 21:42:50.529 | INFO     | __main__:_validate_balance_injection_lane_state:7214 - Lane G55_TMP 候选平衡文库 phix 注入校验失败: ['10bp Index占比21.1%低于40%要求']
+2026-06-14 21:42:50.529 | INFO     | __main__:_materialize_balance_library_for_lane:7412 - Lane G55_TMP 尝试补平衡文库模板: sample_id=FDSW250185295-1r, test_no=Novaseq X Plus-PE150, index_seq=AGCATCGAGT;AGCATCCTCA
+2026-06-14 21:42:50.532 | INFO     | __main__:_validate_balance_injection_lane_state:7214 - Lane G55_TMP 候选平衡文库 FDSW250185295-1r 注入校验失败: ['10bp Index占比21.1%低于40%要求']
+2026-06-14 21:42:50.532 | INFO     | __main__:_materialize_balance_library_for_lane:7412 - Lane G55_TMP 尝试补平衡文库模板: sample_id=FDSW250185296-1r, test_no=Novaseq X Plus-PE150, index_seq=CTCACACTGA;CTCACACATG
+2026-06-14 21:42:50.534 | INFO     | __main__:_validate_balance_injection_lane_state:7214 - Lane G55_TMP 候选平衡文库 FDSW250185296-1r 注入校验失败: ['10bp Index占比21.1%低于40%要求']
+2026-06-14 21:42:50.534 | INFO     | __main__:_materialize_balance_library_for_lane:7412 - Lane G55_TMP 尝试补平衡文库模板: sample_id=FDSW250185298-1r, test_no=Novaseq X Plus-PE150, index_seq=CCGACTAGAT;CCGACTAAGA
+2026-06-14 21:42:50.537 | INFO     | __main__:_validate_balance_injection_lane_state:7214 - Lane G55_TMP 候选平衡文库 FDSW250185298-1r 注入校验失败: ['10bp Index占比21.1%低于40%要求']
+2026-06-14 21:42:50.537 | INFO     | __main__:_materialize_balance_library_for_lane:7412 - Lane G55_TMP 尝试补平衡文库模板: sample_id=FDSW250185306-1r, test_no=Novaseq X Plus-PE150, index_seq=ACAGAGCGAT;GACTACTCAC
+2026-06-14 21:42:50.539 | INFO     | __main__:_validate_balance_injection_lane_state:7214 - Lane G55_TMP 候选平衡文库 FDSW250185306-1r 注入校验失败: ['10bp Index占比21.1%低于40%要求']
+2026-06-14 21:42:50.539 | INFO     | __main__:_materialize_balance_library_for_lane:7412 - Lane G55_TMP 尝试补平衡文库模板: sample_id=FDSW250185309-1r, test_no=Novaseq X Plus-PE150, index_seq=GTCACACACT;CAAGTGCTTC
+2026-06-14 21:42:50.542 | INFO     | __main__:_validate_balance_injection_lane_state:7214 - Lane G55_TMP 候选平衡文库 FDSW250185309-1r 注入校验失败: ['10bp Index占比21.1%低于40%要求']
+2026-06-14 21:42:50.542 | INFO     | __main__:_materialize_balance_library_for_lane:7412 - Lane G55_TMP 尝试补平衡文库模板: sample_id=FDSW250185313-1r, test_no=Novaseq X Plus-PE150, index_seq=ATCGAATGCG;CGATATCTGC
+2026-06-14 21:42:50.544 | INFO     | __main__:_validate_balance_injection_lane_state:7214 - Lane G55_TMP 候选平衡文库 FDSW250185313-1r 注入校验失败: ['10bp Index占比21.1%低于40%要求']
+2026-06-14 21:42:50.544 | INFO     | __main__:_materialize_balance_library_for_lane:7412 - Lane G55_TMP 尝试补平衡文库模板: sample_id=FDSW250185316-1r, test_no=Novaseq X Plus-PE150, index_seq=TCATTGCACC;ATCGAAGCTC
+2026-06-14 21:42:50.547 | INFO     | __main__:_validate_balance_injection_lane_state:7214 - Lane G55_TMP 候选平衡文库 FDSW250185316-1r 注入校验失败: ['10bp Index占比21.1%低于40%要求']
+2026-06-14 21:42:50.551 | WARNING  | __main__:_materialize_balance_library_for_lane:7537 - Lane G55_TMP 平衡文库补充失败: 需补 112.053G，实验室=天津科技服务实验室，工序=Novaseq X Plus-PE150
+2026-06-14 21:42:59.650 | INFO     | __main__:_materialize_balance_library_for_lane:7412 - Lane G55_TMP 尝试补平衡文库模板: sample_id=phix, test_no=Novaseq X Plus-PE150, index_seq=GGGGGGGGGG;ACCGAGATCT
+2026-06-14 21:43:00.240 | INFO     | __main__:_materialize_balance_library_for_lane:7445 - Lane G55_TMP 平衡文库补充成功: sample_id=phix, 数据量=112.612G
+2026-06-14 21:43:00.541 | INFO     | __main__:_consume_g55_imbalance_as_mode_lanes:15644 - 步骤1.3 G55跨基础组碱基不均1.1专Lane index冲突定向修复成功: 原始104个/2058.9G, 修复后89个/2139.6G
+2026-06-14 21:43:00.542 | INFO     | __main__:_consume_g55_imbalance_as_mode_lanes:15750 - 步骤1.3 G55跨基础组碱基不均1.1专Lane成Lane成功: lane=G55_Nova X-25B_001, 基础组=G16,G18,G19,G26,G27,G29,G33,G35,G36,G5,G50,G52,G58,G7, 使用89个/2139.6G
+2026-06-14 21:43:00.549 | INFO     | arrange_library.core.constraints.lane_validator:__init__:165 - 成Lane校验程序初始化完成 (严格模式: True, 碱基不均衡上限: 35%, 特殊文库关键词: 9个)
+2026-06-14 21:43:00.549 | INFO     | __main__:arrange_library:19302 - 1.1前碱基不均衡专Lane预抽取完成: 单组=0, G53/G54=3, G55=1, G55消耗文库=89, 总生成Lane=4, 剩余进入1.1普通尝试文库=1413
+2026-06-14 21:43:00.549 | INFO     | __main__:arrange_library:19315 - 
+================================================================================
+2026-06-14 21:43:00.549 | INFO     | __main__:arrange_library:19316 - 步骤1.4: 1.1前客户文库纯Lane预抽取
+2026-06-14 21:43:00.549 | INFO     | __main__:arrange_library:19317 - ================================================================================
+2026-06-14 21:43:00.552 | INFO     | __main__:_consume_customer_libraries_as_mode_1_1_lanes:9765 - 客户文库1.1优先Lane跳过: FKDL候选47个/487.3G，按加测/混合150.0G封顶后可用47个/487.3G，不足1.1容量
+2026-06-14 21:43:00.552 | INFO     | __main__:arrange_library:19332 - 1.1前客户文库纯Lane预抽取完成: 生成Lane=0, 消耗文库=0, 剩余进入1.1普通尝试文库=1413
+2026-06-14 21:43:00.553 | INFO     | __main__:arrange_library:19343 - 
+================================================================================
+2026-06-14 21:43:00.553 | INFO     | __main__:arrange_library:19344 - 步骤1.5: 1.1首轮排机
+2026-06-14 21:43:00.553 | INFO     | __main__:arrange_library:19345 - ================================================================================
+2026-06-14 21:43:00.609 | INFO     | __main__:arrange_library:19367 - 步骤1.5-1: 1.1首轮使用剩余未成Lane全集，候选1413个文库
+2026-06-14 21:43:00.651 | INFO     | __main__:arrange_library:19396 - 1.1首轮策略: expensive_rescue=True, peak_window_mixed=False, post_fill_optimization=True
+2026-06-14 21:43:00.772 | INFO     | __main__:test_with_model:18428 - 
+================================================================================
+2026-06-14 21:43:00.772 | INFO     | __main__:test_with_model:18429 - 排机流程：纯规则排机
+2026-06-14 21:43:00.772 | INFO     | __main__:test_with_model:18430 - ================================================================================
+2026-06-14 21:43:00.772 | INFO     | arrange_library.core.constraints.index_validator_verified:__init__:77 - Index校验器初始化完成（真实数据验证版本）
+2026-06-14 21:43:00.773 | INFO     | arrange_library.core.constraints.lane_validator:__init__:165 - 成Lane校验程序初始化完成 (严格模式: True, 碱基不均衡上限: 35%, 特殊文库关键词: 9个)
+2026-06-14 21:43:00.774 | WARNING  | arrange_library.core.ai.pooling_coefficient_optimizer:_load_config:40 - Pooling配置表不存在: /data/work/yuyongpeng/liblane_v2_deepseek/data/wktype_pooling_config.xlsx，将使用默认策略
+2026-06-14 21:43:00.775 | INFO     | arrange_library.core.ai.pooling_coefficient_optimizer:_load_efficiency_corrections:185 - 产出效率修正表不存在: /data/work/yuyongpeng/liblane_v2_deepseek/data/production_efficiency_correction.csv，跳过后校准
+2026-06-14 21:43:00.775 | WARNING  | arrange_library.core.ai.loutput_predictor_wrapper:_load_model:150 - 模型文件不存在: models/loutput_pre_lane_v5/lightgbm_model.pkl
+2026-06-14 21:43:00.775 | WARNING  | arrange_library.core.ai.pooling_coefficient_optimizer:__init__:164 - loutput预测器不可用，将使用规则降级策略
+2026-06-14 21:43:00.775 | INFO     | arrange_library.core.scheduling.greedy_lane_scheduler:__init__:267 - 逐Lane贪心排机器初始化完成 - 基础容量: 985.0GB, 利用率区间: [100%, 100%], 配置模式: 按机型自动
+2026-06-14 21:43:00.775 | INFO     | arrange_library.core.scheduling.greedy_lane_scheduler:__init__:270 - 启用检查: Index=True, 碱基不均衡=True, 规则检查器=False
+2026-06-14 21:43:00.775 | INFO     | __main__:test_with_model:18456 - 排机阶段：Pooling优化器已禁用（V6流程不需要）
+2026-06-14 21:43:00.775 | INFO     | arrange_library.core.constraints.lane_validator:__init__:165 - 成Lane校验程序初始化完成 (严格模式: True, 碱基不均衡上限: 35%, 特殊文库关键词: 9个)
+2026-06-14 21:43:00.775 | INFO     | __main__:test_with_model:18460 - 严格校验容量区间改为按统一配置表动态解析
+2026-06-14 21:43:00.783 | INFO     | __main__:test_with_model:18482 - 主流程前置拆分完成: 无需拆分
+2026-06-14 21:43:00.784 | INFO     | __main__:test_with_model:18497 - Peak窗口混排预构Lane已按调用方要求关闭
+2026-06-14 21:43:00.784 | INFO     | arrange_library.core.scheduling.greedy_lane_scheduler:schedule:1086 - 开始逐Lane贪心排机 - 文库数: 1413
+2026-06-14 21:43:00.784 | INFO     | arrange_library.core.scheduling.greedy_lane_scheduler:schedule:1096 - 预拆分完成: 使用外层已拆分文库
+2026-06-14 21:43:00.788 | INFO     | arrange_library.core.scheduling.greedy_lane_scheduler:_run_batch_analysis:471 - ===== 批次全局分析报告 =====
+2026-06-14 21:43:00.788 | INFO     | arrange_library.core.scheduling.greedy_lane_scheduler:_run_batch_analysis:471 - 机器类型: Nova X-25B
+2026-06-14 21:43:00.788 | INFO     | arrange_library.core.scheduling.greedy_lane_scheduler:_run_batch_analysis:471 - 文库总数: 1413
+2026-06-14 21:43:00.788 | INFO     | arrange_library.core.scheduling.greedy_lane_scheduler:_run_batch_analysis:471 - 总数据量: 14656.9 GB
+2026-06-14 21:43:00.788 | INFO     | arrange_library.core.scheduling.greedy_lane_scheduler:_run_batch_analysis:471 - 预估Lane数: 7~7
+2026-06-14 21:43:00.788 | INFO     | arrange_library.core.scheduling.greedy_lane_scheduler:_run_batch_analysis:471 - --- 特征标记 ---
+2026-06-14 21:43:00.788 | INFO     | arrange_library.core.scheduling.greedy_lane_scheduler:_run_batch_analysis:471 -   包Lane文库: 无
+2026-06-14 21:43:00.788 | INFO     | arrange_library.core.scheduling.greedy_lane_scheduler:_run_batch_analysis:471 -   碱基不均衡: 有
+2026-06-14 21:43:00.788 | INFO     | arrange_library.core.scheduling.greedy_lane_scheduler:_run_batch_analysis:471 -   客户文库:   无
+2026-06-14 21:43:00.788 | INFO     | arrange_library.core.scheduling.greedy_lane_scheduler:_run_batch_analysis:471 -   10bp文库:   有
+2026-06-14 21:43:00.788 | INFO     | arrange_library.core.scheduling.greedy_lane_scheduler:_run_batch_analysis:471 -   非10bp文库: 有
+2026-06-14 21:43:00.788 | INFO     | arrange_library.core.scheduling.greedy_lane_scheduler:_run_batch_analysis:471 -   特殊组合:   有
+2026-06-14 21:43:00.788 | INFO     | arrange_library.core.scheduling.greedy_lane_scheduler:_run_batch_analysis:471 - --- 分组画像 ---
+2026-06-14 21:43:00.788 | INFO     | arrange_library.core.scheduling.greedy_lane_scheduler:_run_batch_analysis:471 -   [non_10bp] 非10碱基文库: 104个文库, 1694.1GB, 预估1~1条Lane
+2026-06-14 21:43:00.788 | INFO     | arrange_library.core.scheduling.greedy_lane_scheduler:_run_batch_analysis:471 -   [all] 全部文库: 1413个文库, 14656.9GB, 预估7~7条Lane
+2026-06-14 21:43:00.788 | INFO     | arrange_library.core.scheduling.greedy_lane_scheduler:_run_batch_analysis:471 -   [10bp] 10碱基文库: 1309个文库, 12962.8GB, 预估6~7条Lane
+2026-06-14 21:43:00.788 | INFO     | arrange_library.core.scheduling.greedy_lane_scheduler:_run_batch_analysis:471 -   [imbalance] 碱基不均衡文库: 98个文库, 4222.2GB, 预估2~3条Lane
+2026-06-14 21:43:00.788 | INFO     | arrange_library.core.scheduling.greedy_lane_scheduler:_run_batch_analysis:471 -   [special_combo_a] 10X 5端/VDJ组合: 22个文库, 1393.0GB, 预估1~1条Lane
+2026-06-14 21:43:00.788 | INFO     | arrange_library.core.scheduling.greedy_lane_scheduler:_run_batch_analysis:471 -   [special_combo_b] 10X 3端/Visium组合: 8个文库, 800.0GB, 预估1~1条Lane
+2026-06-14 21:43:00.788 | INFO     | arrange_library.core.scheduling.greedy_lane_scheduler:_run_batch_analysis:471 - --- 专用Lane推荐 ---
+2026-06-14 21:43:00.788 | INFO     | arrange_library.core.scheduling.greedy_lane_scheduler:_run_batch_analysis:471 -   [imbalance] 碱基不均衡文库数据量充足，可包专用Lane避免混排占比限制 - 约2条Lane, 4222.2GB, 置信度: high
+2026-06-14 21:43:00.788 | INFO     | arrange_library.core.scheduling.greedy_lane_scheduler:_run_batch_analysis:471 - --- 混排约束 ---
+2026-06-14 21:43:00.788 | INFO     | arrange_library.core.scheduling.greedy_lane_scheduler:_run_batch_analysis:471 -   [tj_1595_special_combo_groups_not_mixed] special_combo_a vs special_combo_b: 10X 5端/VDJ 与 10X 3端/Visium 文库不可混排，必须分开
+2026-06-14 21:43:00.788 | INFO     | arrange_library.core.scheduling.greedy_lane_scheduler:_run_batch_analysis:471 - --- 尾部风险 ---
+2026-06-14 21:43:00.788 | INFO     | arrange_library.core.scheduling.greedy_lane_scheduler:_run_batch_analysis:471 -   [imbalance] 碱基不均衡文库排完整Lane后剩余32.2GB，不足半Lane(1048GB)，需要大文库骨架携带或混入散样Lane - 32.2GB, 98个, 严重程度: high
+2026-06-14 21:43:00.788 | INFO     | arrange_library.core.scheduling.greedy_lane_scheduler:_run_batch_analysis:471 -   [special_combo_b] 10X 3端/Visium组合排完整Lane后剩余800.0GB，不足半Lane(998GB)，需要大文库骨架携带或混入散样Lane - 800.0GB, 8个, 严重程度: medium
+2026-06-14 21:43:00.788 | INFO     | arrange_library.core.scheduling.greedy_lane_scheduler:_run_batch_analysis:471 - --- 策略建议 ---
+2026-06-14 21:43:00.788 | INFO     | arrange_library.core.scheduling.greedy_lane_scheduler:_run_batch_analysis:471 -   - 碱基不均衡文库数据量充足，优先形成专用Lane
+2026-06-14 21:43:00.789 | INFO     | arrange_library.core.scheduling.greedy_lane_scheduler:_run_batch_analysis:471 -   - 存在1个高风险尾部分组，建议启用骨架预留(大带小)
+2026-06-14 21:43:00.789 | INFO     | arrange_library.core.scheduling.greedy_lane_scheduler:_run_batch_analysis:471 - ===== 报告结束 =====
+2026-06-14 21:43:00.789 | INFO     | arrange_library.core.scheduling.greedy_lane_scheduler:_run_batch_analysis:477 - 保留外部传入的策略执行计划，仅使用批次分析报告
+2026-06-14 21:43:00.790 | INFO     | arrange_library.core.scheduling.greedy_lane_scheduler:schedule:1132 - 处理机器类型 Nova X-25B - 文库数: 1413 - Lane容量: 1050.0GB, 利用率区间: [100%, 100%], 特殊文库上限: 350GB
+2026-06-14 21:43:00.791 | INFO     | arrange_library.core.scheduling.greedy_lane_scheduler:schedule:1160 - 碱基不均衡专用Lane策略: 98个碱基不均衡文库
+2026-06-14 21:43:00.791 | INFO     | arrange_library.core.scheduling.greedy_lane_scheduler:_get_dedicated_lane_profile:985 - 专用Lane分组G26剩余合同量48.0G无法满足1.1或3.6T-NEW有效容量下限
+2026-06-14 21:43:00.792 | INFO     | arrange_library.core.scheduling.greedy_lane_scheduler:_get_dedicated_lane_profile:985 - 专用Lane分组G25剩余合同量6.0G无法满足1.1或3.6T-NEW有效容量下限
+2026-06-14 21:43:00.792 | INFO     | arrange_library.core.scheduling.greedy_lane_scheduler:_get_dedicated_lane_profile:985 - 专用Lane分组G36剩余合同量1.3G无法满足1.1或3.6T-NEW有效容量下限
+2026-06-14 21:43:00.792 | INFO     | arrange_library.core.scheduling.greedy_lane_scheduler:_get_dedicated_lane_profile:985 - 专用Lane分组G33剩余合同量60.0G无法满足1.1或3.6T-NEW有效容量下限
+2026-06-14 21:43:00.793 | INFO     | arrange_library.core.scheduling.greedy_lane_scheduler:_get_dedicated_lane_profile:985 - 专用Lane分组G29剩余合同量152.0G无法满足1.1或3.6T-NEW有效容量下限
+2026-06-14 21:43:00.793 | INFO     | arrange_library.core.scheduling.greedy_lane_scheduler:_get_dedicated_lane_profile:985 - 专用Lane分组G58剩余合同量510.0G无法满足1.1或3.6T-NEW有效容量下限
+2026-06-14 21:43:00.793 | INFO     | arrange_library.core.scheduling.greedy_lane_scheduler:_get_dedicated_lane_profile:985 - 专用Lane分组G34剩余合同量800.0G无法满足1.1或3.6T-NEW有效容量下限
+2026-06-14 21:43:00.793 | INFO     | arrange_library.core.scheduling.greedy_lane_scheduler:_get_dedicated_lane_profile:985 - 专用Lane分组G18剩余合同量12.0G无法满足1.1或3.6T-NEW有效容量下限
+2026-06-14 21:43:00.793 | INFO     | arrange_library.core.scheduling.greedy_lane_scheduler:schedule:1166 - 形成0条专用Lane，剩余98个碱基不均衡文库
+2026-06-14 21:43:03.975 | INFO     | arrange_library.core.scheduling.greedy_lane_scheduler:schedule:1238 - 第二轮排机: 1413 个未分配文库（wkdeliverydate优先，轮转起点）
+2026-06-14 21:43:06.794 | INFO     | arrange_library.core.scheduling.greedy_lane_scheduler:schedule:1254 - 第三轮排机: 1413 个未分配文库（小文库优先）
+2026-06-14 21:43:11.970 | WARNING  | __main__:<module>:20372 - 用户中断
+	Command being timed: "python arrange_library/arrange_library_model6.py --mode arrange --data-file arrange_library/61_sta.csv --output-file 61_sta_arrange_model6_g55_1_1_relaxed_verify5.csv"
+	User time (seconds): 57.98
+	System time (seconds): 0.17
+	Percent of CPU this job got: 129%
+	Elapsed (wall clock) time (h:mm:ss or m:ss): 0:45.07
+	Average shared text size (kbytes): 0
+	Average unshared data size (kbytes): 0
+	Average stack size (kbytes): 0
+	Average total size (kbytes): 0
+	Maximum resident set size (kbytes): 239832
+	Average resident set size (kbytes): 0
+	Major (requiring I/O) page faults: 0
+	Minor (reclaiming a frame) page faults: 122147
+	Voluntary context switches: 149
+	Involuntary context switches: 531
+	Swaps: 0
+	File system inputs: 0
+	File system outputs: 144
+	Socket messages sent: 0
+	Socket messages received: 0
+	Signals delivered: 0
+	Page size (bytes): 4096
+	Exit status: 0

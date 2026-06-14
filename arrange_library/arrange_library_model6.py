@@ -1328,6 +1328,110 @@ def _consume_g53_g54_imbalance_as_mode_lanes(
             return None, "validation_failed"
         return lane, "success"
 
+    def _is_10bp_library(lib: EnhancedLibraryInfo) -> bool:
+        ten_bp_data = getattr(lib, "ten_bp_data", None)
+        if ten_bp_data is not None and ten_bp_data > 0:
+            return True
+        index_seq = getattr(lib, "index_seq", "") or ""
+        return bool(getattr(validator, "_is_10bp_index", lambda _: False)(index_seq))
+
+    def _tenbp_ratio(libraries: List[EnhancedLibraryInfo]) -> float:
+        total = _total_lane_data(libraries)
+        if total <= 0:
+            return 0.0
+        tenbp_total = sum(
+            float(getattr(lib, "contract_data_raw", 0.0) or 0.0)
+            for lib in libraries
+            if _is_10bp_library(lib)
+        )
+        return tenbp_total / total
+
+    def _rebuild_g53_g54_for_10bp_ratio(
+        *,
+        candidates: List[EnhancedLibraryInfo],
+        combination_group: str,
+        lane_metadata: Dict[str, Any],
+        lane_id: str,
+    ) -> Tuple[Optional[LaneAssignment], List[EnhancedLibraryInfo], str]:
+        min_allowed, max_allowed = _resolve_lane_capacity_limits(
+            candidates,
+            machine_type,
+            lane_id="DLG_TMP",
+            lane_metadata=lane_metadata,
+        )
+        target_ratio = 0.40
+
+        def candidate_key(lib: EnhancedLibraryInfo) -> Tuple[Any, ...]:
+            return (
+                0 if _is_10bp_library(lib) else 1,
+                _get_delivery_priority_sort_value(lib),
+                _mode_1_1_small_split_imbalance_priority_rank(lib, mode_name=mode_name),
+                -float(getattr(lib, "contract_data_raw", 0.0) or 0.0),
+                -_count_library_index_pairs(lib),
+                _safe_str(getattr(lib, "origrec", ""), default=""),
+            )
+
+        selected: List[EnhancedLibraryInfo] = []
+        selected_index_pairs: List[Any] = []
+        selected_ids: Set[int] = set()
+        for lib in sorted(candidates, key=candidate_key):
+            trial = selected + [lib]
+            trial_total = _total_lane_data(trial)
+            if trial_total > max_allowed + 1e-6:
+                continue
+            if (
+                enforce_add_test_cap
+                and _mode_1_1_add_test_limited_data_gb(trial)
+                > float(max_add_test_gb_per_lane or 0.0) + 1e-6
+            ):
+                continue
+            if _resolve_g53_g54_combination_group(trial) not in {None, combination_group}:
+                continue
+            has_conflict, lib_index_pairs = _new_lib_has_latest_index_conflict_with_cache(
+                selected_index_pairs,
+                lib,
+            )
+            if has_conflict:
+                continue
+            selected.append(lib)
+            selected_index_pairs.append(lib_index_pairs)
+            selected_ids.add(id(lib))
+            if trial_total >= min_allowed - 1e-6 and _tenbp_ratio(selected) >= target_ratio - 1e-6:
+                lane, reason = validate_selected(selected, combination_group, lane_id)
+                if lane is not None:
+                    return lane, selected, "rebuild_for_10bp_ratio"
+
+        fill_candidates = [
+            lib for lib in candidates
+            if id(lib) not in selected_ids
+        ]
+        for lib in sorted(fill_candidates, key=candidate_key):
+            trial = selected + [lib]
+            trial_total = _total_lane_data(trial)
+            if trial_total > max_allowed + 1e-6:
+                continue
+            if (
+                enforce_add_test_cap
+                and _mode_1_1_add_test_limited_data_gb(trial)
+                > float(max_add_test_gb_per_lane or 0.0) + 1e-6
+            ):
+                continue
+            has_conflict, lib_index_pairs = _new_lib_has_latest_index_conflict_with_cache(
+                selected_index_pairs,
+                lib,
+            )
+            if has_conflict:
+                continue
+            selected.append(lib)
+            selected_index_pairs.append(lib_index_pairs)
+            selected_ids.add(id(lib))
+            if trial_total >= min_allowed - 1e-6 and _tenbp_ratio(selected) >= target_ratio - 1e-6:
+                lane, reason = validate_selected(selected, combination_group, lane_id)
+                if lane is not None:
+                    return lane, selected, "rebuild_for_10bp_ratio"
+
+        return None, [], "repair_failed"
+
     while len(lanes) < max_lanes:
         grouped: Dict[str, List[EnhancedLibraryInfo]] = {"G53": [], "G54": []}
         for lib in remaining:
@@ -1466,6 +1570,37 @@ def _consume_g53_g54_imbalance_as_mode_lanes(
             lane_id = f"{lane_id_prefix}_{machine_type.value}_{serial:03d}"
             lane, reason = validate_selected(selected, combination_group, lane_id)
             if lane is None:
+                if "INDEX_10BP_RATIO" in reason or "10bp Index" in reason:
+                    repaired_lane, repaired_selected, repair_reason = _rebuild_g53_g54_for_10bp_ratio(
+                        candidates=candidates,
+                        combination_group=combination_group,
+                        lane_metadata=lane_metadata,
+                        lane_id=lane_id,
+                    )
+                    if repaired_lane is not None and repaired_selected:
+                        logger.info(
+                            "{}候选定向修复成功: group={}, action={}, 使用{}个/{:.1f}G",
+                            stage_label,
+                            combination_group,
+                            repair_reason,
+                            len(repaired_selected),
+                            _total_lane_data(repaired_selected),
+                        )
+                        lane = repaired_lane
+                        selected = repaired_selected
+                        selected_data = _total_lane_data(repaired_selected)
+                    else:
+                        failure_counter[repair_reason] = failure_counter.get(repair_reason, 0) + 1
+                if lane is not None:
+                    best_lane = lane
+                    best_used = [
+                        lib for lib in list(lane.libraries or [])
+                        if not _is_ai_balance_library(lib)
+                    ]
+                    best_group = combination_group
+                    best_pool_count = len(candidates)
+                    best_pool_data = pool_data
+                    continue
                 failure_counter[reason] = failure_counter.get(reason, 0) + 1
                 min_allowed, _ = _resolve_lane_capacity_limits(
                     selected or candidates,
@@ -1541,7 +1676,7 @@ def _consume_g53_g54_imbalance_as_mode_1_1_lanes(
         max_add_test_gb_per_lane=max_add_test_gb_per_lane,
         mode_name="1.1",
         machine_type=MachineType.NOVA_X_25B,
-        lane_id_prefix="DLG",
+        lane_id_prefix="DL",
         stage_label=stage_label,
     )
 
@@ -15077,7 +15212,7 @@ def _validate_g55_mode_1_1_selection(
     stage_label: str,
     mode_name: str = "1.1",
     machine_type: MachineType = MachineType.NOVA_X_25B,
-    lane_id_prefix: str = "DLG55",
+    lane_id_prefix: str = "G55",
 ) -> Tuple[Optional[LaneAssignment], str]:
     if not selected:
         return None, "empty"
@@ -15133,7 +15268,7 @@ def _validate_g55_mode_1_1_selection(
     selection = _resolve_lane_capacity_selection(
         libraries=selected,
         machine_type=machine_type,
-        lane_id="DLG55_TMP",
+        lane_id="G55_TMP",
         lane_metadata=lane_metadata,
     )
     min_allowed = float(getattr(selection, "effective_min_gb", 0.0) or 0.0)
@@ -15142,8 +15277,8 @@ def _validate_g55_mode_1_1_selection(
         return None, "capacity_out_of_rule_range"
 
     lane = LaneAssignment(
-        lane_id="DLG55_TMP",
-        machine_id="M_DLG55_TMP",
+        lane_id="G55_TMP",
+        machine_id="M_G55_TMP",
         machine_type=machine_type,
         lane_capacity_gb=_lane_capacity_for_machine(machine_type),
     )
@@ -15195,7 +15330,7 @@ def _consume_g55_imbalance_as_mode_lanes(
     max_add_test_gb_per_lane: float = 150.0,
     mode_name: str = "1.1",
     machine_type: MachineType = MachineType.NOVA_X_25B,
-    lane_id_prefix: str = "DLG55",
+    lane_id_prefix: str = "G55",
     stage_label: str = "G55跨基础组碱基不均1.1专Lane",
 ) -> Tuple[List[LaneAssignment], List[EnhancedLibraryInfo], Dict[str, int]]:
     """只研究未拆分原始文库能否按G55形成专Lane；失败不改变后续流程。"""
@@ -15237,7 +15372,7 @@ def _consume_g55_imbalance_as_mode_lanes(
         selection = _resolve_lane_capacity_selection(
             libraries=candidates,
             machine_type=machine_type,
-            lane_id="DLG55_TMP",
+            lane_id="G55_TMP",
             lane_metadata=lane_metadata,
         )
         min_allowed = float(getattr(selection, "effective_min_gb", 0.0) or 0.0)
@@ -15640,7 +15775,7 @@ def _consume_g55_imbalance_as_mode_1_1_lanes(
         max_add_test_gb_per_lane=max_add_test_gb_per_lane,
         mode_name="1.1",
         machine_type=MachineType.NOVA_X_25B,
-        lane_id_prefix="DLG55",
+        lane_id_prefix="G55",
         stage_label=stage_label,
     )
 
