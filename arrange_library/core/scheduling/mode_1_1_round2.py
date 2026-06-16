@@ -4,7 +4,7 @@
 更新时间：2026-05-09 15:14:10
 
 职责：
-- 从待排文库中识别 lastlaneround == "1.1第一轮" 且历史测序模式属于 1/1.0/1.1 的第二轮候选
+- 从待排文库中识别 lastlaneround == "1.1第一轮"、wkaddnumber=1 且历史测序模式属于 1/1.0/1.1 的第二轮候选
 - 按 llastlaneid 分组形成强绑定候选包
 - 第二轮不重新排机，直接按历史 llastlaneid 复用第一轮已成型组合
 """
@@ -63,7 +63,7 @@ class Mode11Round2Handler:
     - lastlaneround == "1.1第一轮" 时，当前这次排机属于第二轮
     - lastlaneround == "1.1第二轮" 时，说明上一轮已结束，当前重新回到第一轮
     - laneround 是当前排机结果字段，由程序根据 lastlaneround 回填，不作为输入识别条件
-    - lcxms/lastcxms 属于 1/1.0/1.1，且 llastlaneid 有值
+    - 历史模式 llastcxms/lastcxms 属于 1/1.0/1.1，且 llastlaneid 有值，且 wkaddnumber=1
       满足以上条件的文库为第二轮候选
     - llastlaneid 相同的候选文库排在同 lane（强约束）
     """
@@ -99,6 +99,7 @@ class Mode11Round2Handler:
                 last_lane_round == self._first_round_label
                 and last_lid
                 and self._is_mode_1_1_family(seq_mode)
+                and self._is_wkaddnumber_one(lib)
             ):
                 if last_lid not in groups_map:
                     groups_map[last_lid] = Round2CandidateGroup(last_lane_id=last_lid)
@@ -184,18 +185,13 @@ class Mode11Round2Handler:
     def _get_seq_mode(self, lib: EnhancedLibraryInfo) -> str:
         """获取第二轮识别所需的参考测序模式。
 
-        第二轮候选识别优先依据历史模式字段（llastcxms/lastcxms），
-        只有历史值缺失时才回退到当前 lcxms。
+        第二轮候选识别只依据历史模式字段（llastcxms/lastcxms）。
         """
         for attr_name in (
             "_last_cxms_raw",
             "last_cxms",
             "lastcxms",
             "llastcxms",
-            "_current_seq_mode_raw",
-            "current_seq_mode",
-            "seq_mode",
-            "lcxms",
         ):
             value = getattr(lib, attr_name, None)
             if value not in (None, ""):
@@ -215,6 +211,16 @@ class Mode11Round2Handler:
         if not tokens:
             return False
         return all(token in {"1", "1.0", "1.1"} for token in tokens)
+
+    def _is_wkaddnumber_one(self, lib: EnhancedLibraryInfo) -> bool:
+        """第二轮只认输入字段 wkaddnumber=1。"""
+        value = getattr(lib, "wkaddnumber", None)
+        if value in (None, ""):
+            return False
+        try:
+            return float(str(value).strip()) == 1.0
+        except (TypeError, ValueError):
+            return False
 
     def _get_last_lane_id(self, lib: EnhancedLibraryInfo) -> str:
         """获取文库的上次 lane ID（即系统推送的 llastlaneid）。"""

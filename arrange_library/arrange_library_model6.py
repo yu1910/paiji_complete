@@ -18280,6 +18280,8 @@ def load_standardized_csv(data_file: str, limit: int | None = None) -> List[Enha
             lib._last_output_raw = _safe_float(row_dict.get("wklastoutput"), default=None)
             lib._last_outrate_raw = _safe_float(row_dict.get("wklastoutrate"), default=None)
             lib._last_phix_raw = _safe_float(row_dict.get("wklastphix"), default=None)
+            if "wkaddnumber" in row_dict:
+                lib.wkaddnumber = row_dict.get("wkaddnumber")
             lib._wkdeliverydate_raw = row_dict.get("wkdeliverydate")
             lib._delete_date_raw = row_dict.get("delete_date", row_dict.get("扣减时间"))
             lib._wkdept_raw = _safe_str(row_dict.get("wkdept"), default="")

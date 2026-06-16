@@ -380,6 +380,9 @@ def load_libraries_from_csv(
             library.last_phix = float(last_phix_value)
             library.wklastphix = float(last_phix_value)
 
+        if "wkaddnumber" in row and not pd.isna(row["wkaddnumber"]):
+            library.wkaddnumber = row["wkaddnumber"]
+
         libraries.append(library)
 
         if limit is not None and len(libraries) >= limit:

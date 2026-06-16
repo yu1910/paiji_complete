@@ -27,8 +27,9 @@ def _make_lib(
     contract_data_raw: float = 50.0,
     last_outrate: float | None = None,
     seq_mode: str = "1.1",
-    last_seq_mode: str = "",
+    last_seq_mode: object = "1.1",
     add_tests_remark: str = "-",
+    wkaddnumber: object = 1,
 ) -> EnhancedLibraryInfo:
     """构造测试用文库对象"""
     lib = EnhancedLibraryInfo(
@@ -58,11 +59,14 @@ def _make_lib(
     lib.lane_round = lane_round if lane_round else None
     lib.last_lane_round = last_lane_round if last_lane_round else None
     lib.last_laneid = last_laneid if last_laneid else None
+    if wkaddnumber is not None:
+        lib.wkaddnumber = wkaddnumber
     lib._current_seq_mode_raw = seq_mode
     if last_seq_mode:
         lib.last_cxms = last_seq_mode
         lib._last_cxms_raw = last_seq_mode
     if last_outrate is not None:
+        lib.wkoutputrate = float(last_outrate)
         lib._last_outrate_raw = float(last_outrate)
     return lib
 
@@ -116,11 +120,50 @@ class TestRound2CandidateIdentification:
             lane_round="",
             last_lane_round="1.1第一轮",
             last_laneid="LANE_A",
-            seq_mode="3.6T-NEW",
+            last_seq_mode="3.6T-NEW",
         )
         handler = Mode11Round2Handler(_SAMPLE_CONFIG)
         result = handler.identify_round2_candidates([lib])
         assert result.total_candidates == 0
+
+    def test_missing_historical_mode_is_non_candidate(self):
+        lib = _make_lib(
+            lane_round="",
+            last_lane_round="1.1第一轮",
+            last_laneid="LANE_A",
+            seq_mode="1.1",
+            last_seq_mode=None,
+        )
+        handler = Mode11Round2Handler(_SAMPLE_CONFIG)
+        result = handler.identify_round2_candidates([lib])
+        assert result.total_candidates == 0
+        assert len(result.non_candidates) == 1
+
+    def test_first_round_lib_without_wkaddnumber_one_is_non_candidate(self):
+        lib = _make_lib(
+            lane_round="",
+            last_lane_round="1.1第一轮",
+            last_laneid="LANE_A",
+            seq_mode="1.1",
+            wkaddnumber=2,
+        )
+        handler = Mode11Round2Handler(_SAMPLE_CONFIG)
+        result = handler.identify_round2_candidates([lib])
+        assert result.total_candidates == 0
+        assert len(result.non_candidates) == 1
+
+    def test_first_round_lib_missing_wkaddnumber_is_non_candidate(self):
+        lib = _make_lib(
+            lane_round="",
+            last_lane_round="1.1第一轮",
+            last_laneid="LANE_A",
+            seq_mode="1.1",
+            wkaddnumber=None,
+        )
+        handler = Mode11Round2Handler(_SAMPLE_CONFIG)
+        result = handler.identify_round2_candidates([lib])
+        assert result.total_candidates == 0
+        assert len(result.non_candidates) == 1
 
     def test_historical_1_1_mode_takes_priority_over_current_36t_mode(self):
         lib = _make_lib(
