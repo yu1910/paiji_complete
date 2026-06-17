@@ -120,17 +120,8 @@ IMBALANCE_GROUP_RATIO = {
     29: 1.0,  # 分组27+28混排
 }
 
-# 特殊文库总量限制（碱基不均衡与均衡混排时）
-SPECIAL_LIBRARY_TOTAL = {
-    ('Nova X-25B', '25B'): 240,
-    ('Nova X-10B', '10B'): 150,
-    ('NovaSeq X Plus', '25B'): 240,
-    ('Novaseq', 'S4 XP'): 400,
-    ('Novaseq', 'S4'): 400,
-    ('Novaseq', 'S2'): 500,
-    ('Novaseq', 'S1'): 400,
-    ('Novaseq-T7', 'S4'): 175,
-}
+# 特殊文库总量限制已移除；保留空表兼容旧引用。
+SPECIAL_LIBRARY_TOTAL = {}
 
 
 class RuleChecker:
@@ -593,30 +584,8 @@ class RuleChecker:
     def check_special_library_total(self, lane_libraries: List[Dict],
                                     machine_type: str,
                                     load_method: str) -> int:
-        """检查碱基不均衡文库总量是否超限
-        
-        Returns:
-            1表示违反，0表示未违反
-        """
-        # 获取限制值
-        key = (machine_type, load_method)
-        total_limit = SPECIAL_LIBRARY_TOTAL.get(key, None)
-        
-        if total_limit is None:
-            return 0  # 无配置不限制
-        
-        # 计算碱基不均衡文库总量
-        imbalance_total = 0.0
-        for lib in lane_libraries:
-            if self.is_imbalance_library(lib):
-                contract_vol = lib.get('合同数据量_文库', 0)
-                if contract_vol and not pd.isna(contract_vol):
-                    try:
-                        imbalance_total += float(contract_vol)
-                    except (ValueError, TypeError):
-                        continue
-        
-        return int(imbalance_total > total_limit)
+        """特殊文库总量限制已移除。"""
+        return 0
     
     # ========== 规则19：文库拆分规则（预处理） ==========
     def check_need_split(self, lib: Dict) -> bool:

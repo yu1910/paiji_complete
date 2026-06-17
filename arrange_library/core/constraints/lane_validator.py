@@ -6,9 +6,8 @@
 变更记录：
 - 2026-03-06: 移除类内LANE_CAPACITY/LANE_MIN_DATA/LANE_MAX_DATA死代码常量，
   容量区间统一由 scheduling_config.get_lane_capacity_range() 驱动（规则矩阵优先，fallback使用975G目标值）
-- 2026-01-30: 调整碱基不均衡和特殊文库限制：
+- 2026-01-30: 调整碱基不均衡限制：
   - BASE_IMBALANCE_RATIO_LIMIT: 35%（从30%调整）
-  - SPECIAL_LIBRARY_CAPACITY: 350G（从240G调整）
 - 2026-01-30: 统一碱基不均衡判断逻辑
   - BASE_IMBALANCE_KEYWORDS: 与 EnhancedLibraryInfo.is_base_imbalance() 保持一致
   - 新增关键词：rrbs, ribo-seq, em-seq, 墨卓, visium, fixed rna, mobidrop
@@ -25,7 +24,7 @@
 - 碱基不均衡占比：碱基不均衡文库占比<=40%
 - 容量校验：Lane总数据量由规则矩阵决定，Nova X-25B标准规则合同容量1000G-1100G，effective_min=995G，effective_max=1105G
 - Peak Size校验：1.1模式跳过；3.6T-NEW等其他模式最大-最小<=150bp 或 150bp窗口覆盖>=75%
-- 特殊文库限制：特殊文库总量<=阈值（不再限制类型数量）
+- 特殊文库总量限制已移除；碱基不均仅受占比与兼容规则约束
 - FC最小数据量校验：Nova X-25B整个FC最小1150G
 """
 
@@ -152,7 +151,6 @@ class LaneValidator:
         self.peak_size_max_diff: int = limits.peak_size_max_diff
         self.peak_size_coverage_ratio: float = limits.peak_size_coverage_ratio
         self.special_library_type_limit: int = limits.special_library_type_limit
-        self.special_library_capacity: Dict[str, float] = limits.special_library_capacity
         self.fc_min_data: Dict[str, float] = limits.fc_min_data
         self.base_imbalance_keywords: List[str] = limits.base_imbalance_keywords
         self.special_library_keywords: List[str] = limits.special_library_keywords
@@ -306,19 +304,7 @@ class LaneValidator:
                 else:
                     warnings.append(peak_size_result)
         
-        # 8. 特殊文库限制校验
-        # [2025-12-25] 对于专用Lane（碱基不均衡专用、非10bp专用、骨架Lane），跳过特殊文库限制
-        is_dedicated_imbalance_lane = metadata.get('is_dedicated_imbalance_lane', False)
-        is_pure_non_10bp_lane_for_special = metadata.get('is_pure_non_10bp_lane', False)
-        is_backbone_lane = metadata.get('is_backbone_lane', False)
-        
-        if not (is_dedicated_imbalance_lane or is_pure_non_10bp_lane_for_special or is_backbone_lane):
-            special_result = self._validate_special_library_limit(libraries, machine_type)
-            if special_result:
-                if special_result.severity == ValidationSeverity.ERROR:
-                    errors.append(special_result)
-                else:
-                    warnings.append(special_result)
+        # 8. 特殊文库总量限制已移除；碱基不均仅受占比规则约束。
         
         # 9. 加测文库占比校验
         add_test_result = self._validate_add_test_ratio(libraries)
@@ -889,47 +875,7 @@ class LaneValidator:
         libraries: List[EnhancedLibraryInfo],
         machine_type: str
     ) -> Optional[ValidationError]:
-        """校验特殊文库限制
-        
-        [2025-12-25 待讨论] 根据人工排机数据分析，添加专用Lane策略：
-        - 如果Lane内全部是碱基不均衡文库（专用Lane），跳过数据量限制
-        - 人工排机实际有5条100%碱基不均衡专用Lane（每条972GB）
-        
-        使用jjbj字段优先判断碱基不均衡，然后使用关键词匹配
-        """
-        special_data = 0.0
-        special_libs = []
-        imbalance_count = 0
-        balanced_count = 0
-        
-        for lib in libraries:
-            lib_data = float(lib.contract_data_raw or 0)
-            
-            # 优先使用jjbj字段判断碱基不均衡
-            jjbj = getattr(lib, 'jjbj', None)
-            is_imbalance = (jjbj is not None and str(jjbj).strip() == '是')
-            
-            if is_imbalance:
-                imbalance_count += 1
-                special_data += lib_data
-                special_libs.append(lib.origrec)
-            else:
-                balanced_count += 1
-        
-        capacity_limit = self.special_library_capacity.get(
-            machine_type,
-            self.special_library_capacity.get('default', 240.0),
-        )
-        if special_data > float(capacity_limit):
-            return ValidationError(
-                rule_type=ValidationRuleType.SPECIAL_LIBRARY_LIMIT,
-                severity=ValidationSeverity.ERROR,
-                message=f"特殊文库总量{special_data:.1f}G超过{float(capacity_limit):.1f}G限制",
-                current_value=special_data,
-                threshold_value=float(capacity_limit),
-                affected_libraries=special_libs,
-            )
-        
+        """特殊文库总量限制已移除。"""
         return None
     
     def _validate_add_test_ratio(self, libraries: List[EnhancedLibraryInfo]) -> Optional[ValidationError]:

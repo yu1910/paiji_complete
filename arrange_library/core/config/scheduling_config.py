@@ -100,23 +100,6 @@ class ValidationLimitsConfig:
     # 特殊文库类型数量上限（1-57规则：组合混排最多5种）
     special_library_type_limit: int = 5
 
-    # 特殊文库总量上限（按机器类型，单位 G）
-    special_library_capacity: Dict[str, float] = field(default_factory=lambda: {
-        'NovaSeq X Plus': 350.0,
-        'Nova X-25B': 350.0,
-        'NovaSeq X Plus-25B': 350.0,
-        'Nova X-10B': 150.0,
-        'NovaSeq X Plus-10B': 150.0,
-        'Novaseq-S2': 500.0,
-        'Novaseq-S1': 400.0,
-        'Novaseq-S4': 400.0,
-        'Novaseq-S4 XP': 400.0,
-        'Novaseq': 400.0,
-        'Novaseq-T7': 175.0,
-        'T7': 175.0,
-        'default': 350.0,
-    })
-
     # FC 最小数据量（整个 Flow Cell，单位 G；0 表示不限制）
     fc_min_data: Dict[str, float] = field(default_factory=lambda: {
         'Nova X-25B': 1150.0,
@@ -1570,6 +1553,9 @@ class SchedulingConfigManager:
         condition_type = str(condition.get('condition_type', '') or '').strip()
         project_type = self._classify_lane_project_type(libraries)
 
+        if condition_type == 'always':
+            return True
+
         if condition_type == 'lane_project_type_not_in':
             allowed_values = {
                 self._normalize_text(item)
@@ -1844,11 +1830,8 @@ class SchedulingConfigManager:
         )
     
     def get_special_library_limit(self, machine_type: str) -> float:
-        """获取特殊文库总量限制"""
-        return self.validation_limits.special_library_capacity.get(
-            machine_type,
-            self.validation_limits.special_library_capacity.get('Nova X-25B', 350.0)
-        )
+        """特殊文库总量限制已移除；保留兼容接口。"""
+        return float("inf")
     
     def get_concentration(self, lane_type: str) -> float:
         """获取上机浓度"""

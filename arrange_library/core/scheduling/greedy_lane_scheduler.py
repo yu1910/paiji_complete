@@ -16,15 +16,13 @@
 - RuleChecker: 完整的24条排机规则检测（文库对级别+Lane级别）
 
 变更记录：
-- 2026-01-30: 调整碱基不均衡和特殊文库限制：
+- 2026-01-30: 调整碱基不均衡限制：
   - max_imbalance_ratio: 35%（从30%调整）
-  - max_special_library_data_gb: 350G（从240G调整）
 - 2025-12-31: GreedyLaneConfig按机型从scheduling_config自动加载容量/阈值，默认回归规则文档取值
 - 2025-12-26: 调整Lane容量范围为严格配置：
   - min_utilization: 0.99（965GB）
   - max_utilization: 1.01（985GB）
 - 2025-12-25: 根据人工排机数据分析，调整了以下参数：
-  - max_special_library_data_gb: 从240G提高到350G（人工排机碱基不均衡占比最高达30%）
   - max_imbalance_ratio: 新增参数，控制碱基不均衡占比上限（默认40%）
   - enable_dedicated_imbalance_lane: 新增参数，支持碱基不均衡专用Lane策略
 """
@@ -114,9 +112,8 @@ class GreedyLaneConfig:
     # 特殊文库类型最大数量
     max_special_library_types: int = 3
     
-    # ===== 碱基不均衡数据量限制 =====
-    # [2026-01-30 修正] 调整为：Nova X-25B 特殊文库总量 350G
-    max_special_library_data_gb: float = 350.0
+    # 特殊文库总量限制已移除；字段仅用于兼容旧调用。
+    max_special_library_data_gb: float = float("inf")
 
     # 1.1 首轮/补排单 Lane 内“加测/混合”文库合同量封顶。
     # 这是终态封顶规则的前置准入版本，避免先排入再整 lane 回退重排。
@@ -1133,7 +1130,7 @@ class GreedyLaneScheduler:
                 f"处理机器类型 {machine_type} - 文库数: {len(libs)} - "
                 f"Lane容量: {self.config.lane_capacity_gb}GB, "
                 f"利用率区间: [{self.config.min_utilization:.0%}, {self.config.max_utilization:.0%}], "
-                f"特殊文库上限: {self.config.max_special_library_data_gb:.0f}GB"
+                f"碱基不均占比上限: {self.config.max_imbalance_ratio:.0%}"
             )
             
             # ===== 碱基不均衡专用Lane策略（规则约束决策） =====
@@ -2290,8 +2287,6 @@ class GreedyLaneScheduler:
         if imbalance_data > 0:
             imbalance_ratio = imbalance_data / total_data
             if imbalance_ratio - 1e-12 > self.config.max_imbalance_ratio:
-                return False
-            if imbalance_data - 1e-6 > self.config.max_special_library_data_gb:
                 return False
             if imbalance_data < total_data - 1e-6 and self.imbalance_handler:
                 is_compatible, _ = self.imbalance_handler.check_mix_compatibility(

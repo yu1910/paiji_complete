@@ -517,13 +517,13 @@ rules:
         normal_scenario: 0.4
         note_normal: "常规场景：碱基不均衡文库数据量占比 < 40%（可能年度调整）"
         mode_3_6t_new: 0.3
-        note_3_6t_new: "3.6T-NEW 模式散样排机：碱基不均衡文库数据量不得超过 30%，并且仍需满足特殊文库总量限制"
+        note_3_6t_new: "3.6T-NEW 模式散样排机：碱基不均衡文库仅受占比与兼容规则约束，不再限制特殊文库总量"
       total_library_types_limit: 3
       update_records:
         - date: "2024.11.21"
           changes:
             - "碱基不均衡文库最大数据量从190G更新为240G（Novaseq X Plus-PE150 25B）"
-            - "特殊文库总量从190更新为240（Novaseq X Plus-PE150 25B上机方式）"
+            - "特殊文库总量限制已移除"
       grouping_principles:
         - "同组内优先规则：同一组内，优先同文库类型包Lane；其次考虑混排包Lane"
         - "同类型排整条Lane：大多数碱基不均衡文库不可与其他碱基不均衡文库同Lane"
@@ -827,52 +827,21 @@ rules:
       max_ratio: 0.6
 
   - rule_id: "R9"
-    rule_name: "特殊文库总量限制"
-    description: "Novaseq X Plus-PE150 25B特殊文库总量≤240G，混排文库类型≤3种"
+    rule_name: "碱基不均混排兼容限制"
+    description: "碱基不均文库混排不再限制特殊文库总量，仍需满足占比、类型兼容等规则"
     priority: "high"
     compliance_target: 0.95
     doc_section: "碱基不均衡文库处理"
-    doc_reference: "docs/排机规则文档.md#特殊文库总量限制表"
+    doc_reference: "docs/排机规则文档.md#碱基不均衡文库数据量控制"
     details:
       max_library_types: 3
       important_rules:
         - "文库类型限制：不超过三种文库类型"
-        - "数据量限制：总文库的最大数据量总和不超过特殊文库总量"
-        - "特殊文库种类：每个工序/上机方式最多3种特殊文库类型"
-      definition: "特殊文库总量是指碱基不均衡文库与碱基均衡文库混排时，碱基不均衡文库的最大允许总量"
-      example: "Novaseq X Plus-PE150 25B的特殊文库总量为240G，意味着在一个Lane中，碱基不均衡文库的总数据量不能超过240G，同时混排的碱基不均衡文库类型不能超过3种"
-      complete_limit_table:
-        - process: "Novaseq PE150"
-          method: "S2"
-          limit_gb: 500
-          library_types: 3
-        - process: "Novaseq PE150"
-          method: "S1"
-          limit_gb: 400
-          library_types: 3
-        - process: "Novaseq PE150"
-          method: "S4"
-          limit_gb: 400
-          library_types: 3
-        - process: "Novaseq PE150"
-          method: "S4 XP"
-          limit_gb: 400
-          library_types: 3
-        - process: "Novaseq X Plus-PE150"
-          method: "25B"
-          limit_gb: 240
-          library_types: 3
-          update_date: "2024-11-21"
-          previous_limit: 190
-          update_note: "190→240"
-        - process: "Novaseq X Plus-PE150"
-          method: "10B"
-          limit_gb: 150
-          library_types: 3
-        - process: "Novaseq-T7"
-          method: "S4"
-          limit_gb: 175
-          library_types: 3
+        - "数据量限制：不再按特殊文库总G数设上限"
+        - "兼容限制：仍需满足碱基不均占比、组合兼容、Index等通用规则"
+      definition: "特殊文库总量上限已移除；碱基不均文库混排按占比与兼容规则控制"
+      example: "碱基不均文库混排时，不再因总量本身单独判为违规"
+      complete_limit_table: []
 
   - rule_id: "R10"
     rule_name: "Pooling与下单比例控制"

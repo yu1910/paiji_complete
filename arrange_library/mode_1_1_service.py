@@ -147,7 +147,7 @@ def _build_mode_1_1_first_round_balanced_25b_lanes(
             max_customer_ratio=0.50,
             min_10bp_index_ratio=0.40,
             max_special_library_types=0,
-            max_special_library_data_gb=350.0,
+            max_special_library_data_gb=float("inf"),
             enable_index_check=True,
             enable_imbalance_check=True,
             enable_rule_checker=False,

@@ -218,42 +218,6 @@
       "fc_min_data_gb": 1150.0
     },
     {
-      "rule_code": "sg_1738_mode_1_1_special_combo",
-      "priority": 430,
-      "process_codes": [
-        1738
-      ],
-      "test_nos": [
-        "Novaseq X Plus-PE150"
-      ],
-      "machine_types": [
-        "Nova X-25B",
-        "NovaSeq X Plus"
-      ],
-      "seq_strategy_keywords_any": [
-        "PE150"
-      ],
-      "seq_strategy_keywords_exclude": [
-        "10+24"
-      ],
-      "seq_modes": [
-        "1.1"
-      ],
-      "project_types": [],
-      "sample_type_group_codes_any": [
-        "special_combo_group_a",
-        "special_combo_group_b"
-      ],
-      "soft_target_gb": 2050.0,
-      "min_target_gb": 2000.0,
-      "max_target_gb": 2100.0,
-      "tolerance_gb": 5.0,
-      "lane_count": 8,
-      "loading_method": "25B",
-      "sequencing_mode": "1.1",
-      "fc_min_data_gb": 1150.0
-    },
-    {
       "rule_code": "jp_1699_mode_1_1_special_combo",
       "priority": 430,
       "process_codes": [
@@ -593,46 +557,6 @@
       "fc_min_data_gb": 1150.0
     },
     {
-      "rule_code": "sg_1738_mode_1_1_risk_prefer_single_lane",
-      "priority": 410,
-      "process_codes": [
-        1738
-      ],
-      "test_nos": [
-        "Novaseq X Plus-PE150"
-      ],
-      "machine_types": [
-        "Nova X-25B",
-        "NovaSeq X Plus"
-      ],
-      "seq_strategy_keywords_any": [
-        "PE150"
-      ],
-      "seq_strategy_keywords_exclude": [
-        "10+24"
-      ],
-      "seq_modes": [
-        "1.1"
-      ],
-      "project_types": [],
-      "customer_complex_results_any": [
-        "风险",
-        "不合格"
-      ],
-      "internal_risk_build_flags_any": [
-        "风险建库"
-      ],
-      "soft_single_lane_preferred": true,
-      "soft_target_gb": 2200.0,
-      "min_target_gb": 2100.0,
-      "max_target_gb": 2300.0,
-      "tolerance_gb": 5.0,
-      "lane_count": 8,
-      "loading_method": "25B",
-      "sequencing_mode": "1.1",
-      "fc_min_data_gb": 1150.0
-    },
-    {
       "rule_code": "jp_1699_mode_1_1_risk_prefer_single_lane",
       "priority": 410,
       "process_codes": [
@@ -901,38 +825,6 @@
       "priority": 400,
       "process_codes": [
         1601
-      ],
-      "test_nos": [
-        "Novaseq X Plus-PE150"
-      ],
-      "machine_types": [
-        "Nova X-25B",
-        "NovaSeq X Plus"
-      ],
-      "seq_strategy_keywords_any": [
-        "PE150"
-      ],
-      "seq_strategy_keywords_exclude": [
-        "10+24"
-      ],
-      "seq_modes": [
-        "1.1"
-      ],
-      "project_types": [],
-      "soft_target_gb": 2175.0,
-      "min_target_gb": 2100.0,
-      "max_target_gb": 2250.0,
-      "tolerance_gb": 5.0,
-      "lane_count": 8,
-      "loading_method": "25B",
-      "sequencing_mode": "1.1",
-      "fc_min_data_gb": 1150.0
-    },
-    {
-      "rule_code": "sg_1738_mode_1_1",
-      "priority": 400,
-      "process_codes": [
-        1738
       ],
       "test_nos": [
         "Novaseq X Plus-PE150"
@@ -1244,7 +1136,7 @@
         1738
       ],
       "test_nos": [
-        "Novaseq X Plus-PE150"
+        "Novaseq X Plus PE150"
       ],
       "machine_types": [
         "Nova X-25B",
@@ -1568,7 +1460,7 @@
         1738
       ],
       "test_nos": [
-        "Novaseq X Plus-PE150"
+        "Novaseq X Plus PE150"
       ],
       "machine_types": [
         "Nova X-25B",
@@ -1847,7 +1739,7 @@
         1738
       ],
       "test_nos": [
-        "Novaseq X Plus-PE150"
+        "Novaseq X Plus PE150"
       ],
       "machine_types": [
         "Nova X-25B",
@@ -2101,6 +1993,31 @@
         {
           "condition_type": "seq_strategy_and_sample_type",
           "seq_strategy_keyword": "10+24"
+        }
+      ]
+    },
+    {
+      "rule_code": "sg_1738_mode_1_1_forbid_rules",
+      "priority": 210,
+      "process_codes": [
+        1738
+      ],
+      "test_nos": [
+        "Novaseq X Plus PE150"
+      ],
+      "machine_types": [
+        "Nova X-25B",
+        "NovaSeq X Plus"
+      ],
+      "seq_modes": [
+        "1.1"
+      ],
+      "project_types": [],
+      "constraint_type": "forbid_mode_when_any_condition_matches",
+      "message": "新加坡工序1738不允许按1.1模式排机，只允许3.6T-NEW",
+      "conditions": [
+        {
+          "condition_type": "always"
         }
       ]
     }
