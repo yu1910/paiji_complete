@@ -5,7 +5,9 @@ Index验证器 - 基于真实数据验证的Index冲突检测
 更新时间：2026-05-08 14:00:00
 
 算法来源：output/check_lane_index_repeat.new.py（真实数据验证通过）
-修改记录：2026-05-08 - 调整Index冲突判定：单双混排只核对P7，双端按P7/P5联合判定
+修改记录：
+- 2026-06-17 - 8bp/10bp混查时按较短碱基数比较，不对短序列补齐；P7左对齐，P5右对齐
+- 2026-05-08 - 调整Index冲突判定：单双混排只核对P7，双端按P7/P5联合判定
 """
 
 from typing import List, Tuple, Optional, Set
@@ -62,8 +64,9 @@ class IndexValidatorVerified:
        - 6碱基：相同位数<=4不重复（>4判重复）
        - 8碱基：相同位数<=6不重复（>6判重复）
        - >8碱基：相同位数<=7不重复（>7判重复）
-    2. 左端（P7）：左对齐比较前L个碱基
-    3. 右端（P5）：右对齐截取后L个碱基比较
+    2. 左端（P7）：左对齐比较前L个碱基，L取两条Index较短长度
+    3. 右端（P5）：右对齐截取后L个碱基比较，L取两条Index较短长度
+       8bp与10bp混查时只按8bp比较，不给8bp补齐到10bp
     4. 单端/单双混排：只核对P7端
     5. 双端混排：P7和P5都重复才判定冲突（任一端不重复即可通过）
     
@@ -398,6 +401,26 @@ class IndexValidatorVerified:
             # 到达这里说明左端（P7）已经重复，直接判定为冲突
             return True, ConflictType.SINGLE_DUAL, same_left, None
     
+    @staticmethod
+    def _trim_to_shorter_left(seq1: str, seq2: str) -> Tuple[str, str]:
+        """P7左对齐：按较短Index长度裁剪，不对短序列补齐。"""
+        s1 = (seq1 or "").strip().upper()
+        s2 = (seq2 or "").strip().upper()
+        if not s1 or not s2:
+            return "", ""
+        length = min(len(s1), len(s2))
+        return s1[:length], s2[:length]
+
+    @staticmethod
+    def _trim_to_shorter_right(seq1: str, seq2: str) -> Tuple[str, str]:
+        """P5右对齐：按较短Index长度裁剪，不对短序列补齐。"""
+        s1 = (seq1 or "").strip().upper()
+        s2 = (seq2 or "").strip().upper()
+        if not s1 or not s2:
+            return "", ""
+        length = min(len(s1), len(s2))
+        return s1[-length:], s2[-length:]
+
     def _side_is_repeated_aligned(self, seq1: str, seq2: str) -> Tuple[bool, int]:
         """
         判断对齐后的序列是否重复
@@ -413,15 +436,14 @@ class IndexValidatorVerified:
         Returns:
             (is_repeated, same_count)
         """
-        seq1 = seq1.strip().upper()
-        seq2 = seq2.strip().upper()
+        seq1 = (seq1 or "").strip().upper()
+        seq2 = (seq2 or "").strip().upper()
         
         if not seq1 or not seq2:
             return False, 0
         
         L = min(len(seq1), len(seq2))
-        s1 = seq1[:L]
-        s2 = seq2[:L]
+        s1, s2 = self._trim_to_shorter_left(seq1, seq2)
         
         same = sum(1 for a, b in zip(s1, s2) if a == b)
         
@@ -440,7 +462,8 @@ class IndexValidatorVerified:
         Returns:
             (is_repeated, same_count)
         """
-        return self._side_is_repeated_aligned(seq1, seq2)
+        s1, s2 = self._trim_to_shorter_left(seq1, seq2)
+        return self._side_is_repeated_aligned(s1, s2)
     
     def _side_is_repeated_right(self, seq1: str, seq2: str) -> Tuple[bool, int]:
         """
@@ -454,16 +477,11 @@ class IndexValidatorVerified:
         Returns:
             (is_repeated, same_count)
         """
-        seq1 = seq1.strip().upper()
-        seq2 = seq2.strip().upper()
-        
-        if not seq1 or not seq2:
+        s1, s2 = self._trim_to_shorter_right(seq1, seq2)
+
+        if not s1 or not s2:
             return False, 0
-        
-        L = min(len(seq1), len(seq2))
-        s1 = seq1[-L:]  # 右对齐：从右侧截取
-        s2 = seq2[-L:]
-        
+
         return self._side_is_repeated_aligned(s1, s2)
     
     def _make_default_single_right(self, left_seq: str) -> str:

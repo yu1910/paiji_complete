@@ -703,13 +703,32 @@ def _parse_index_pairs_latest(index_seq: str) -> List[Tuple[str, Optional[str]]]
     return parsed
 
 
+def _trim_index_pair_left_latest(seq_1: str, seq_2: str) -> Tuple[str, str]:
+    """P7左对齐按较短Index长度裁剪，不对8bp补齐到10bp。"""
+    s1 = (seq_1 or "").strip().upper()
+    s2 = (seq_2 or "").strip().upper()
+    if not s1 or not s2:
+        return "", ""
+    length = min(len(s1), len(s2))
+    return s1[:length], s2[:length]
+
+
+def _trim_index_pair_right_latest(seq_1: str, seq_2: str) -> Tuple[str, str]:
+    """P5右对齐按较短Index长度裁剪，不对8bp补齐到10bp。"""
+    s1 = (seq_1 or "").strip().upper()
+    s2 = (seq_2 or "").strip().upper()
+    if not s1 or not s2:
+        return "", ""
+    length = min(len(s1), len(s2))
+    return s1[-length:], s2[-length:]
+
+
 def _side_is_repeated_aligned_latest(seq_1: str, seq_2: str) -> Tuple[bool, int]:
-    """最新规则：L<=8时same>(L-2)，L>8时same>7。"""
+    """最新规则：按传入序列长度比较；L<=8时same>(L-2)，L>8时same>7。"""
     s1 = (seq_1 or "").strip().upper()
     s2 = (seq_2 or "").strip().upper()
     if not s1 or not s2:
         return False, 0
-
     length = min(len(s1), len(s2))
     s1_cut = s1[:length]
     s2_cut = s2[:length]
@@ -719,21 +738,15 @@ def _side_is_repeated_aligned_latest(seq_1: str, seq_2: str) -> Tuple[bool, int]
 
 
 def _side_is_repeated_left_latest(seq_1: str, seq_2: str) -> Tuple[bool, int]:
-    """P7按左对齐比较。"""
-    return _side_is_repeated_aligned_latest(seq_1, seq_2)
+    """P7按左对齐比较；8bp/10bp混查时只比较前8bp。"""
+    s1, s2 = _trim_index_pair_left_latest(seq_1, seq_2)
+    return _side_is_repeated_aligned_latest(s1, s2)
 
 
 def _side_is_repeated_right_latest(seq_1: str, seq_2: str) -> Tuple[bool, int]:
-    """P5按右对齐比较。"""
-    s1 = (seq_1 or "").strip().upper()
-    s2 = (seq_2 or "").strip().upper()
-    if not s1 or not s2:
-        return False, 0
-
-    length = min(len(s1), len(s2))
-    s1_cut = s1[-length:]
-    s2_cut = s2[-length:]
-    return _side_is_repeated_aligned_latest(s1_cut, s2_cut)
+    """P5按右对齐比较；8bp/10bp混查时只比较后8bp。"""
+    s1, s2 = _trim_index_pair_right_latest(seq_1, seq_2)
+    return _side_is_repeated_aligned_latest(s1, s2)
 
 
 def _check_index_pair_repeat_latest(

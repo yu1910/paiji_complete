@@ -992,7 +992,7 @@ class SchedulingConfigManager:
         candidates: Set[int] = set()
         for profile in self._rule_matrix_config.get('lane_rule_profiles', []):
             test_nos = set(profile.get('test_nos', set()) or set())
-            if normalized_test_no in test_nos:
+            if self._match_test_no_scope(normalized_test_no, test_nos):
                 candidates.update(set(profile.get('process_codes', set()) or set()))
         if len(candidates) == 1:
             return next(iter(candidates))
@@ -1037,7 +1037,10 @@ class SchedulingConfigManager:
         for profile in self._rule_matrix_config.get('lane_rule_profiles', []):
             if mapping_process_code not in set(profile.get('process_codes', set()) or set()):
                 continue
-            if normalized_test_no in set(profile.get('test_nos', set()) or set()):
+            if self._match_test_no_scope(
+                normalized_test_no,
+                set(profile.get('test_nos', set()) or set()),
+            ):
                 return mapping_process_code
         return None
 
@@ -1218,6 +1221,27 @@ class SchedulingConfigManager:
             return True
         return normalized_value in allowed_values
 
+    def _normalize_test_no_alias(self, value: Any) -> str:
+        """工序文本同义归一化：PE150配置里空格/连字符写法等价。"""
+        text = self._normalize_text(value)
+        if not text:
+            return ""
+        return " ".join(text.replace("-", " ").split())
+
+    def _match_test_no_scope(self, normalized_value: str, allowed_values: Set[str]) -> bool:
+        """判断工序文本是否命中作用域，兼容 Novaseq X Plus PE150 的连字符差异。"""
+        if not allowed_values:
+            return True
+        if normalized_value in allowed_values:
+            return True
+        normalized_alias = self._normalize_test_no_alias(normalized_value)
+        if not normalized_alias:
+            return False
+        return any(
+            normalized_alias == self._normalize_test_no_alias(allowed_value)
+            for allowed_value in allowed_values
+        )
+
     def _match_process_scope(self, process_code: Optional[int], allowed_process_codes: Set[int]) -> bool:
         """判断工序编码是否命中作用域。"""
         if not allowed_process_codes:
@@ -1338,7 +1362,7 @@ class SchedulingConfigManager:
                 continue
             if not self._match_process_scope(process_code, set(profile.get('process_codes', set()) or set())):
                 continue
-            if not self._match_scope(test_no, set(profile.get('test_nos', set()) or set())):
+            if not self._match_test_no_scope(test_no, set(profile.get('test_nos', set()) or set())):
                 continue
             if not self._match_scope(project_type, set(profile.get('project_types', set()) or set())):
                 continue
@@ -1633,7 +1657,7 @@ class SchedulingConfigManager:
                 continue
             if not self._match_process_scope(process_code, set(constraint.get('process_codes', set()) or set())):
                 continue
-            if not self._match_scope(test_no, set(constraint.get('test_nos', set()) or set())):
+            if not self._match_test_no_scope(test_no, set(constraint.get('test_nos', set()) or set())):
                 continue
             if not self._match_scope(seq_mode, set(constraint.get('seq_modes', set()) or set())):
                 continue
@@ -1691,7 +1715,7 @@ class SchedulingConfigManager:
                 continue
             if not self._match_process_scope(process_code, set(rule.get('process_codes', set()) or set())):
                 continue
-            if not self._match_scope(test_no, set(rule.get('test_nos', set()) or set())):
+            if not self._match_test_no_scope(test_no, set(rule.get('test_nos', set()) or set())):
                 continue
             if not self._match_scope(seq_mode, set(rule.get('seq_modes', set()) or set())):
                 continue
