@@ -590,7 +590,11 @@ def _build_imbalance_fill_sort_key(
     """构建“尽量逼近不均衡目标占比”的排序键。"""
     data = float(getattr(lib, "contract_data_raw", 0.0) or 0.0)
     if not current_libraries:
-        return (0, 1, 0.0, 0.0, -data)
+        resolved_candidate_is_imbalance = _resolve_candidate_imbalance_flag(
+            lib,
+            candidate_is_imbalance,
+        )
+        return (0, 0 if resolved_candidate_is_imbalance else 1, 0.0, 0.0, -data)
     resolved_lane_summary = _resolve_lane_imbalance_summary(current_libraries, lane_summary)
     _, _, current_ratio = resolved_lane_summary
     projected_ratio = _project_lane_imbalance_ratio(
@@ -649,6 +653,12 @@ LANE_LOADING_COMBO_GROUP_B = {
         "墨卓转录组-3端文库",
         "10X转录组-3'文库",
         "10X转录组文库-3V4文库",
+    ]
+}
+LANE_LOADING_HD_VISIUM_TYPES = {
+    _normalize_text_for_match(item)
+    for item in [
+        "10x HD Visium空间转录组文库(新)",
     ]
 }
 LANE_LOADING_10_PLUS_24_ATAC_TYPES = {
@@ -3673,9 +3683,9 @@ def _is_manual_or_risk_library(lib: EnhancedLibraryInfo) -> bool:
 
 
 def _is_customer_library_candidate(lib: EnhancedLibraryInfo) -> bool:
-    """识别客户文库。"""
+    """识别客户文库：wksampleid/sample_id 第2-4位为 KDL。"""
     sample_id = _safe_library_text(lib, "sample_id", "wksampleid")
-    return sample_id.upper().startswith("FKDL")
+    return sample_id.upper()[1:4] == "KDL"
 
 
 CUSTOMER_IMBALANCE_LANE_GROUP = "G55"
@@ -3943,9 +3953,10 @@ def _build_repaired_candidate_lane(
     lane_validation_cache: Optional[
         Dict[Tuple[str, Tuple[Tuple[str, str], ...], Tuple[str, ...]], Any]
     ] = None,
-    max_fill_candidates: int = 120,
-    max_replace_remove_candidates: int = 24,
-    max_replace_add_candidates: int = 80,
+    max_fill_candidates: int = 80,
+    max_replace_remove_candidates: int = 12,
+    max_replace_add_candidates: int = 40,
+    deadline: Optional[float] = None,
 ) -> Tuple[Optional[LaneAssignment], List[EnhancedLibraryInfo], str]:
     """通用候选Lane修复：容量达标候选进入后，按失败规则做低成本定向修复。"""
     selected = list(libraries or [])
@@ -3954,6 +3965,8 @@ def _build_repaired_candidate_lane(
 
     metadata = dict(lane_metadata or {})
     cached_lane_validations = lane_validation_cache if lane_validation_cache is not None else {}
+    def _time_budget_exhausted() -> bool:
+        return deadline is not None and time.monotonic() >= deadline
 
     def _total(items: Sequence[EnhancedLibraryInfo]) -> float:
         return sum(float(getattr(item, "contract_data_raw", 0.0) or item.get_data_amount_gb()) for item in items)
@@ -3985,6 +3998,8 @@ def _build_repaired_candidate_lane(
     ) -> Tuple[bool, Optional[LaneAssignment], str]:
         if not items:
             return False, None, "empty"
+        if _time_budget_exhausted():
+            return False, None, "time_budget_exhausted"
         lane = _make_lane(items, metadata_override=metadata_override)
         if _is_split_lane_forbidden_by_mode(lane):
             return False, None, "split_forbidden_by_mode"
@@ -4015,6 +4030,8 @@ def _build_repaired_candidate_lane(
         )
         result = cached_lane_validations.get(cache_key)
         if result is None:
+            if _time_budget_exhausted():
+                return False, None, "time_budget_exhausted"
             result = _validate_lane_with_latest_index(
                 validator=validator,
                 libraries=lane.libraries,
@@ -4036,6 +4053,8 @@ def _build_repaired_candidate_lane(
     ) -> Tuple[Optional[Any], Optional[LaneAssignment]]:
         if not items:
             return None, None
+        if _time_budget_exhausted():
+            return None, None
         lane = _make_lane(items, metadata_override=metadata_override)
         metadata_for_validator = _build_lane_metadata_for_validator(
             lane.lane_id,
@@ -4050,6 +4069,8 @@ def _build_repaired_candidate_lane(
         )
         result = cached_lane_validations.get(cache_key)
         if result is None:
+            if _time_budget_exhausted():
+                return None, None
             result = _validate_lane_with_latest_index(
                 validator=validator,
                 libraries=lane.libraries,
@@ -4115,7 +4136,11 @@ def _build_repaired_candidate_lane(
         join_filter=None,
     ) -> Tuple[Optional[LaneAssignment], List[EnhancedLibraryInfo], str]:
         working = list(base_items)
+        if _time_budget_exhausted():
+            return None, [], "time_budget_exhausted"
         for candidate in _candidate_pool_for(working, selector)[:max_candidates]:
+            if _time_budget_exhausted():
+                return None, [], "time_budget_exhausted"
             if join_filter is not None and not join_filter(candidate, working, metadata_override or metadata):
                 continue
             trial = working + [candidate]
@@ -4147,7 +4172,11 @@ def _build_repaired_candidate_lane(
         max_removals: int = 16,
     ) -> Tuple[Optional[LaneAssignment], List[EnhancedLibraryInfo], str]:
         working = list(base_items)
+        if _time_budget_exhausted():
+            return None, [], "time_budget_exhausted"
         for _ in range(min(max_removals, len(working))):
+            if _time_budget_exhausted():
+                return None, [], "time_budget_exhausted"
             removable = [lib for lib in working if selector(lib)]
             if not removable:
                 break
@@ -4186,16 +4215,26 @@ def _build_repaired_candidate_lane(
         return bool(getattr(validator, "_is_10bp_index", lambda _: False)(getattr(item, "index_seq", "") or ""))
 
     def _is_ck_customer_repair_context() -> bool:
-        return lane_id.startswith("CK_") and all(
+        real_selected = [item for item in selected if not _is_ai_balance_library(item)]
+        if not real_selected:
+            return False
+        is_customer_only = all(
             _is_customer_library_candidate(item)
-            for item in selected
-            if not _is_ai_balance_library(item)
+            for item in real_selected
         )
+        if not is_customer_only:
+            return False
+        return lane_id.startswith("CK_") or _safe_str(
+            metadata.get("selected_seq_mode") or metadata.get("seq_mode") or metadata.get("lcxms"),
+            default="",
+        ) == "3.6T-NEW"
 
     def _try_ck_customer_directed_repair(
         base_items: List[EnhancedLibraryInfo],
     ) -> Tuple[Optional[LaneAssignment], List[EnhancedLibraryInfo], str]:
         """CK客户Lane专用修复：先裁不均超额，再补客户10bp/均衡文库，避免通用盲搜。"""
+        if _time_budget_exhausted():
+            return None, [], "time_budget_exhausted"
         if not _is_ck_customer_repair_context():
             return None, [], ""
 
@@ -4214,6 +4253,10 @@ def _build_repaired_candidate_lane(
             lane_metadata=metadata,
         )
         special_limit = _resolve_special_library_data_limit(machine_type)
+        imbalance_ratio_limit = float(
+            getattr(validator, "base_imbalance_ratio_limit_3_6t", CUSTOMER_MIX_IMBALANCE_MAX_RATIO)
+            or CUSTOMER_MIX_IMBALANCE_MAX_RATIO
+        )
         target_10bp_ratio = 0.40
 
         def _state(items: Sequence[EnhancedLibraryInfo]) -> Tuple[float, float, float, int, int]:
@@ -4222,13 +4265,34 @@ def _build_repaired_candidate_lane(
             tenbp_total = sum(_data(item) for item in items if _is_10bp_repair_candidate(item))
             return total, special_total, tenbp_total, len(list(items or [])), _count_lane_index_pairs(list(items or []))
 
+        def _tenbp_shape_ok(items: Sequence[EnhancedLibraryInfo]) -> bool:
+            real_items = [item for item in list(items or []) if not _is_ai_balance_library(item)]
+            tenbp_total = sum(_data(item) for item in real_items if _is_10bp_repair_candidate(item))
+            non10_total = sum(_data(item) for item in real_items if not _is_10bp_repair_candidate(item))
+            if tenbp_total <= 0 or non10_total <= 0:
+                return True
+            return tenbp_total / (tenbp_total + non10_total) >= target_10bp_ratio - 1e-6
+
+        def _metadata_for_tenbp_shape(items: Sequence[EnhancedLibraryInfo]) -> Dict[str, Any]:
+            shaped_metadata = dict(metadata)
+            real_items = [item for item in list(items or []) if not _is_ai_balance_library(item)]
+            tenbp_total = sum(_data(item) for item in real_items if _is_10bp_repair_candidate(item))
+            non10_total = sum(_data(item) for item in real_items if not _is_10bp_repair_candidate(item))
+            if non10_total > 0 and tenbp_total <= 0:
+                shaped_metadata["is_pure_non_10bp_lane"] = True
+            elif tenbp_total > 0 and non10_total <= 0:
+                shaped_metadata["is_pure_10bp_lane"] = True
+            return shaped_metadata
+
         def _meets_light_targets(items: List[EnhancedLibraryInfo]) -> bool:
             total, special_total, tenbp_total, _, _ = _state(items)
             if total < min_allowed - 1e-6 or total > max_allowed + 1e-6:
                 return False
             if special_total > special_limit + SPECIAL_LIBRARY_LIMIT_EPSILON:
                 return False
-            if total > 0 and tenbp_total / total < target_10bp_ratio - 1e-6:
+            if total > 0 and special_total / total > imbalance_ratio_limit + 1e-6:
+                return False
+            if not _tenbp_shape_ok(items):
                 return False
             if _violates_mode_1_1_add_test_cap(items, lane_metadata=metadata):
                 return False
@@ -4252,9 +4316,13 @@ def _build_repaired_candidate_lane(
                     trial_total = total + data
                     trial_10bp = tenbp_total + (data if is_10bp else 0.0)
                     trial_ratio = trial_10bp / trial_total if trial_total > 0 else 0.0
+                    trial_items = [*working, item]
                     needs_10bp = (
-                        current_10bp_ratio < target_10bp_ratio - 1e-6
-                        or (not is_10bp and trial_ratio < target_10bp_ratio - 1e-6)
+                        not _tenbp_shape_ok(working)
+                        or (
+                            not _tenbp_shape_ok(trial_items)
+                            and trial_10bp > 0
+                        )
                     )
                     return (
                         0 if (needs_10bp and is_10bp) or (not needs_10bp and not is_10bp) else 1,
@@ -4301,10 +4369,11 @@ def _build_repaired_candidate_lane(
 
         working = list(base_items)
 
-        # 先处理special_library_limit：这个是绝对上限，单纯加均衡文库无法修复。
+        # 先处理不均衡上限：3.6T客户纯Lane按比例约束，超限时必须先裁不均衡。
         while True:
             total, special_total, tenbp_total, _, _ = _state(working)
-            if special_total <= special_limit + SPECIAL_LIBRARY_LIMIT_EPSILON:
+            ratio_over_limit = total > 0 and special_total / total > imbalance_ratio_limit + 1e-6
+            if special_total <= special_limit + SPECIAL_LIBRARY_LIMIT_EPSILON and not ratio_over_limit:
                 break
             removable = [
                 item for item in working
@@ -4312,7 +4381,11 @@ def _build_repaired_candidate_lane(
             ]
             if not removable:
                 break
-            excess = special_total - special_limit
+            excess = max(
+                0.0,
+                special_total - special_limit,
+                special_total - imbalance_ratio_limit * total,
+            )
             removable.sort(
                 key=lambda item: (
                     0 if _data(item) >= excess - 1e-6 else 1,
@@ -4370,13 +4443,14 @@ def _build_repaired_candidate_lane(
                 count,
                 total,
                 special_total,
-                special_limit,
+                min(special_limit, total * imbalance_ratio_limit),
                 tenbp_total / total if total > 0 else 0.0,
                 index_pairs,
             )
             return None, [], "ck_customer_directed_repair_failed"
 
-        valid, lane, reason = _validate_items(working)
+        shaped_metadata = _metadata_for_tenbp_shape(working)
+        valid, lane, reason = _validate_items(working, metadata_override=shaped_metadata)
         if valid and lane is not None:
             logger.info(
                 "CK客户Lane专用修复成功: lane={}, 原始{}个/{:.1f}G, 修复后{}个/{:.1f}G, action={}",
@@ -4401,6 +4475,8 @@ def _build_repaired_candidate_lane(
     def _try_index_conflict_directed_repair(
         base_items: List[EnhancedLibraryInfo],
     ) -> Tuple[Optional[LaneAssignment], List[EnhancedLibraryInfo], str]:
+        if _time_budget_exhausted():
+            return None, [], "time_budget_exhausted"
         conflicts = list(_validate_index_conflicts_latest(base_items) or [])
         if not conflicts:
             return None, [], ""
@@ -4420,14 +4496,14 @@ def _build_repaired_candidate_lane(
         for _ in range(min(max_replace_remove_candidates, len(working))):
             removable = [
                 lib for lib in working
-                if conflict_counts.get(_safe_str(getattr(lib, "origrec", ""), default=""), 0) > 0
+                if conflict_counts.get(_get_library_identity_key(lib), 0) > 0
             ]
             if not removable:
                 break
             removable.sort(
                 key=lambda lib: (
                     _get_delivery_priority_remove_sort_value(lib),
-                    -conflict_counts.get(_safe_str(getattr(lib, "origrec", ""), default=""), 0),
+                    -conflict_counts.get(_get_library_identity_key(lib), 0),
                     _data(lib),
                     _safe_str(getattr(lib, "origrec", ""), default=""),
                 )
@@ -4461,6 +4537,8 @@ def _build_repaired_candidate_lane(
     def _try_peak_size_directed_repair(
         base_items: List[EnhancedLibraryInfo],
     ) -> Tuple[Optional[LaneAssignment], List[EnhancedLibraryInfo], str]:
+        if _time_budget_exhausted():
+            return None, [], "time_budget_exhausted"
         error_types = _error_types_for_items(base_items)
         if ValidationRuleType.PEAK_SIZE not in error_types:
             return None, [], ""
@@ -4491,6 +4569,8 @@ def _build_repaired_candidate_lane(
     def _try_split_mode_directed_repair(
         base_items: List[EnhancedLibraryInfo],
     ) -> Tuple[Optional[LaneAssignment], List[EnhancedLibraryInfo], str]:
+        if _time_budget_exhausted():
+            return None, [], "time_budget_exhausted"
         lane = _make_lane(base_items)
         if not _is_split_lane_forbidden_by_mode(lane):
             return None, [], ""
@@ -4513,8 +4593,55 @@ def _build_repaired_candidate_lane(
     def _try_special_split_directed_repair(
         base_items: List[EnhancedLibraryInfo],
     ) -> Tuple[Optional[LaneAssignment], List[EnhancedLibraryInfo], str]:
+        if _time_budget_exhausted():
+            return None, [], "time_budget_exhausted"
         ss_valid, _, ss_reason = _validate_lane_special_split_rule(base_items)
         if ss_valid:
+            return None, [], ""
+        if ss_reason == "hd_visium_and_group_b_mixed":
+            hd_items = [
+                item for item in base_items
+                if _library_sample_type_matches_rule(item, LANE_LOADING_HD_VISIUM_TYPES)
+            ]
+            group_b_items = [
+                item for item in base_items
+                if _library_sample_type_matches_rule(item, LANE_LOADING_COMBO_GROUP_B)
+            ]
+            if not hd_items or not group_b_items:
+                return None, [], ""
+            hd_data = _total(hd_items)
+            group_b_data = _total(group_b_items)
+            if _get_libraries_delivery_priority_sort_key(hd_items) < _get_libraries_delivery_priority_sort_key(group_b_items):
+                remove_hd = False
+            elif _get_libraries_delivery_priority_sort_key(group_b_items) < _get_libraries_delivery_priority_sort_key(hd_items):
+                remove_hd = True
+            else:
+                remove_hd = hd_data <= group_b_data
+            kept = [
+                item for item in base_items
+                if (
+                    not _library_sample_type_matches_rule(item, LANE_LOADING_HD_VISIUM_TYPES)
+                    if remove_hd
+                    else not _library_sample_type_matches_rule(item, LANE_LOADING_COMBO_GROUP_B)
+                )
+            ]
+            if not kept or len(kept) == len(base_items):
+                return None, [], ""
+            valid, lane, _ = _validate_items(kept)
+            action = "trimmed_hd_visium" if remove_hd else "trimmed_group_b_for_hd_visium"
+            if valid and lane is not None:
+                return lane, kept, action
+            lane, repaired, fill_action = _try_add_candidates_until_valid(
+                kept,
+                (
+                    (lambda lib: not _library_sample_type_matches_rule(lib, LANE_LOADING_HD_VISIUM_TYPES))
+                    if remove_hd
+                    else (lambda lib: not _library_sample_type_matches_rule(lib, LANE_LOADING_COMBO_GROUP_B))
+                ),
+                action=f"{action}_filled",
+            )
+            if lane is not None:
+                return lane, repaired, fill_action
             return None, [], ""
         if ss_reason != "group_a_and_group_b_mixed":
             return None, [], ""
@@ -4556,6 +4683,8 @@ def _build_repaired_candidate_lane(
     def _try_ratio_directed_repairs(
         base_items: List[EnhancedLibraryInfo],
     ) -> Tuple[Optional[LaneAssignment], List[EnhancedLibraryInfo], str]:
+        if _time_budget_exhausted():
+            return None, [], "time_budget_exhausted"
         if (
             bool(metadata.get("is_pure_10bp_lane"))
             or bool(metadata.get("is_pure_non_10bp_lane"))
@@ -4693,8 +4822,6 @@ def _build_repaired_candidate_lane(
     ck_lane, ck_selected, ck_action = _try_ck_customer_directed_repair(selected)
     if ck_lane is not None:
         return ck_lane, ck_selected, ck_action
-    if ck_action == "ck_customer_directed_repair_failed":
-        return None, [], ck_action
 
     index_lane, index_selected, index_action = _try_index_conflict_directed_repair(selected)
     if index_lane is not None:
@@ -5014,8 +5141,9 @@ def _attempt_build_lane_from_pool(
         categories = sorted(
             grouped,
             key=lambda name: (
-                -category_totals.get(name, 0.0),
+                0 if name == "imbalance" else 1,
                 0 if name == "neutral" else 1,
+                -category_totals.get(name, 0.0),
                 name,
             ),
         )
@@ -6387,7 +6515,9 @@ def _build_lane_validation_cache_key(
     libraries: List[EnhancedLibraryInfo],
 ) -> Tuple[str, Tuple[Tuple[str, str], ...], Tuple[str, ...]]:
     """构建Lane校验缓存键，按机型、校验上下文和等价文库组合收口。"""
-    validator_metadata = _build_lane_metadata_for_validator(lane_id, lane_metadata, libraries=libraries)
+    # lane_id 主要影响展示和自动编号，不应进入缓存键；否则终态 repair 中每个候选
+    # 都会因为 lane_id 不同而失去缓存命中。
+    validator_metadata = _build_lane_metadata_for_validator("", lane_metadata, libraries=libraries)
     return (
         _machine_type_to_text(machine_type, default="Nova X-25B"),
         tuple(sorted((str(key), repr(value)) for key, value in validator_metadata.items())),
@@ -11165,6 +11295,10 @@ def _validate_lane_special_split_rule(
 ) -> Tuple[bool, Set[str], str]:
     """校验Lane内wkspecialsplits组合规则。"""
     tokens = _collect_lane_special_split_tokens(libraries)
+    lane_sample_types = _get_lane_sample_types(libraries)
+    if lane_sample_types & LANE_LOADING_HD_VISIUM_TYPES and lane_sample_types & LANE_LOADING_COMBO_GROUP_B:
+        return False, tokens, "hd_visium_and_group_b_mixed"
+
     mode_counter: Dict[str, int] = {"A": 0, "B": 0, "EMPTY": 0, "OTHER": 0}
     for lib in libraries:
         if _is_ai_balance_library(lib):
@@ -12781,9 +12915,9 @@ def _build_lane_metadata_for_validator(
 
 
 def _is_customer_like_validator(lib: EnhancedLibraryInfo) -> bool:
-    """按当前业务口径识别客户文库：仅wksampleid/sample_id前缀FKDL。"""
+    """按当前业务口径识别客户文库：wksampleid/sample_id 第2-4位为 KDL。"""
     sample_id = _safe_library_text(lib, "sample_id", "wksampleid")
-    return sample_id.upper().startswith("FKDL")
+    return sample_id.upper()[1:4] == "KDL"
 
 
 def _split_customer_and_non_customer(
@@ -14346,8 +14480,9 @@ def _try_build_single_36t_mixed_lane_from_items(
     validator: Any,
     machine_type: MachineType,
     lane_id_prefix: str,
-    max_candidates: int = 220,
+    max_candidates: int = 140,
     require_36t_main_library: bool = False,
+    deadline: Optional[float] = None,
 ) -> Tuple[Optional[LaneAssignment], Set[int]]:
     """从普通文库中挑一条3.6T混排Lane，复用1.1近下限的多变体构造思路。
 
@@ -14387,7 +14522,7 @@ def _try_build_single_36t_mixed_lane_from_items(
             candidates,
             key=lambda lib: (
                 _get_delivery_priority_sort_value(lib),
-                1 if _is_imbalance_library_candidate(lib) else 0,
+                0 if _is_imbalance_library_candidate(lib) else 1,
                 -_count_library_index_pairs(lib),
                 -float(getattr(lib, "contract_data_raw", 0.0) or lib.get_data_amount_gb() or 0.0),
                 _get_library_identity_key(lib),
@@ -14401,10 +14536,103 @@ def _try_build_single_36t_mixed_lane_from_items(
     if not active_candidates:
         return None, set()
 
+    directed_lane, directed_selected = _try_build_single_36t_pure_customer_lane(
+        active_candidates,
+        validator=validator,
+        lane_id_prefix="CK36",
+        machine_type=machine_type,
+    )
+    if directed_lane is not None and directed_selected:
+        used_sources = {
+            source_by_identity.get(_get_library_identity_key(item), id(item))
+            for item in directed_selected
+        }
+        return directed_lane, used_sources
+
     special_data_limit = _resolve_special_library_data_limit(machine_type)
     idx_validator = _MODULE_IDX_VALIDATOR
-    max_validation_attempts = 180
+    max_validation_attempts = 90
     validation_attempts = 0
+    repair_impossible_counters: Counter[str] = Counter()
+    terminal_impossible_reason = ""
+
+    def _repair_impossible_reason(
+        items: List[EnhancedLibraryInfo],
+        min_allowed: float,
+        max_allowed: float,
+    ) -> str:
+        real_items = [item for item in items if not _is_ai_balance_library(item)]
+        if not real_items:
+            return ""
+
+        def _item_data(item: EnhancedLibraryInfo) -> float:
+            return float(getattr(item, "contract_data_raw", 0.0) or item.get_data_amount_gb() or 0.0)
+
+        total_data = sum(_item_data(item) for item in real_items)
+        if total_data <= 0:
+            return ""
+
+        customer_predicate = getattr(validator, "_is_customer_side_library", None)
+        if callable(customer_predicate):
+            customer_items = [item for item in real_items if customer_predicate(item)]
+            customer_data = sum(_item_data(item) for item in customer_items)
+            non_customer_data = total_data - customer_data
+            customer_ratio = customer_data / total_data if total_data > 0 else 0.0
+            if customer_ratio > 0.50 + 1e-9 and customer_ratio < 1.0 - 1e-9:
+                # 修复客户占比只有两条路：
+                # 1) 加/换足够非客户文库，把客户占比稀释到 <=50%，要求总量至少 2*customer_data；
+                # 2) 剔除所有非客户文库，变成 100% 客户 Lane，要求客户文库自身仍满足容量下限。
+                dilute_possible_by_capacity = (2.0 * customer_data) <= max_allowed + 1e-6
+                selected_customer_ids = {id(item) for item in customer_items}
+                available_customer_data = customer_data + sum(
+                    _item_data(item)
+                    for item in active_candidates
+                    if id(item) not in selected_customer_ids
+                    and customer_predicate(item)
+                )
+                # 转纯客户Lane时可以先剔除非客户，再从同一3.6候选池补客户文库；
+                # 因此不能只看当前候选内客户数据，否则会误判 324 这类客户池充足的场景。
+                pure_customer_possible_by_capacity = (
+                    available_customer_data >= min_allowed - 1e-6
+                    and _count_lane_index_pairs(customer_items) >= AI_LANE_MIN_INDEX_PAIRS
+                )
+                if not dilute_possible_by_capacity and not pure_customer_possible_by_capacity:
+                    return (
+                        "customer_ratio_unrepairable_by_capacity("
+                        f"customer={customer_data:.1f}G,non_customer={non_customer_data:.1f}G,"
+                        f"ratio={customer_ratio:.1%},available_customer={available_customer_data:.1f}G,"
+                        f"min={min_allowed:.1f}G,max={max_allowed:.1f}G)"
+                    )
+
+        libs_10bp, libs_non_10bp = _split_10bp_and_non_10bp(real_items, validator)
+        data_10bp = sum(_item_data(item) for item in libs_10bp)
+        data_non_10bp = sum(_item_data(item) for item in libs_non_10bp)
+        mixed_10bp = data_10bp > 0 and data_non_10bp > 0
+        if mixed_10bp:
+            ratio_10bp = data_10bp / (data_10bp + data_non_10bp)
+            if ratio_10bp < 0.40 - 1e-9:
+                required_add_10bp = max(0.0, (0.40 * total_data - data_10bp) / 0.60)
+                add_possible_by_capacity = total_data + required_add_10bp <= max_allowed + 1e-6
+                max_non_10bp_after_trim = 1.5 * data_10bp
+                total_after_trim = data_10bp + min(data_non_10bp, max_non_10bp_after_trim)
+                trim_possible_by_capacity = total_after_trim >= min_allowed - 1e-6
+                selected_10bp_ids = {id(item) for item in libs_10bp}
+                available_10bp_data = data_10bp + sum(
+                    _item_data(item)
+                    for item in active_candidates
+                    if id(item) not in selected_10bp_ids
+                    and item in _split_10bp_and_non_10bp([item], validator)[0]
+                )
+                pool_rebuild_possible = available_10bp_data >= (0.40 * min_allowed) - 1e-6
+                if not add_possible_by_capacity and not trim_possible_by_capacity and not pool_rebuild_possible:
+                    return (
+                        "10bp_ratio_unrepairable_by_capacity("
+                        f"10bp={data_10bp:.1f}G,non10bp={data_non_10bp:.1f}G,"
+                        f"ratio={ratio_10bp:.1%},need_add={required_add_10bp:.1f}G,"
+                        f"available_10bp={available_10bp_data:.1f}G,"
+                        f"min={min_allowed:.1f}G,max={max_allowed:.1f}G)"
+                    )
+        return ""
 
     def build_lane(
         lane_id: str,
@@ -14435,6 +14663,9 @@ def _try_build_single_36t_mixed_lane_from_items(
     def validate_completed(selected: List[EnhancedLibraryInfo]) -> Optional[LaneAssignment]:
         nonlocal validation_attempts
         nonlocal best_repair_libs, best_repair_total, best_repair_index_pairs
+        nonlocal terminal_impossible_reason
+        if terminal_impossible_reason:
+            return None
         if validation_attempts >= max_validation_attempts:
             return None
         total = _total_lane_data(selected)
@@ -14474,6 +14705,14 @@ def _try_build_single_36t_mixed_lane_from_items(
                 for warn in list(getattr(validation_result, "warnings", []) or [])[:2]:
                     key = _safe_str(getattr(warn, "message", None), default="validation_warning")
                     validation_failures[key] += 1
+            repair_skip_reason = _repair_impossible_reason(selected, min_allowed, max_allowed)
+            if repair_skip_reason:
+                repair_skip_root = repair_skip_reason.split("(", 1)[0]
+                repair_impossible_counters[repair_skip_root] += 1
+                if repair_impossible_counters[repair_skip_root] >= 12:
+                    terminal_impossible_reason = repair_skip_root
+                validation_failures[repair_skip_reason] += 1
+                return None
             repaired_lane, repaired_selected, repair_action = _build_repaired_candidate_lane(
                 libraries=list(selected),
                 pool=active_candidates,
@@ -14482,9 +14721,10 @@ def _try_build_single_36t_mixed_lane_from_items(
                 lane_id=f"{lane_id_prefix}_{machine_type.value}_{_reserve_auto_lane_serial(lane_id_prefix, machine_type):03d}",
                 lane_metadata=lane_metadata,
                 stage_label=f"{lane_id_prefix}_terminal_global_36t_near_min_repair",
-                max_fill_candidates=80,
-                max_replace_remove_candidates=16,
-                max_replace_add_candidates=80,
+                max_fill_candidates=60,
+                max_replace_remove_candidates=12,
+                max_replace_add_candidates=40,
+                deadline=deadline,
             )
             if repaired_lane is not None:
                 if repair_action != "already_valid":
@@ -14512,15 +14752,299 @@ def _try_build_single_36t_mixed_lane_from_items(
             data_key = -data
         return (
             _get_delivery_priority_sort_value(lib),
-            1 if _is_imbalance_library_candidate(lib) else 0,
+            0 if _is_imbalance_library_candidate(lib) else 1,
             _get_scattered_mix_priority_rank(lib),
             data_key,
             -_count_library_index_pairs(lib),
             _get_library_identity_key(lib),
         )
 
+    def _is_10bp_for_36t_probe(item: EnhancedLibraryInfo) -> bool:
+        ten_bp_data = getattr(item, "ten_bp_data", None)
+        if ten_bp_data is not None and ten_bp_data > 0:
+            return True
+        return bool(getattr(validator, "_is_10bp_index", lambda _: False)(getattr(item, "index_seq", "") or ""))
+
+    def _tenbp_shape_valid_for_36t_probe(tenbp_total: float, non10_total: float) -> bool:
+        if tenbp_total <= 0.0 or non10_total <= 0.0:
+            return True
+        return tenbp_total / (tenbp_total + non10_total) >= 0.40 - 1e-6
+
+    def _try_36t_feasibility_probe(
+        candidates_for_probe: List[EnhancedLibraryInfo],
+        *,
+        state_limit: int = 384,
+    ) -> Optional[LaneAssignment]:
+        """有界DP/beam可行性探针：覆盖普通贪心补不上的3.6候选组合。"""
+        if not candidates_for_probe:
+            return None
+        min_allowed, max_allowed = _resolve_lane_capacity_limits(
+            libraries=candidates_for_probe,
+            machine_type=machine_type,
+            lane_id=f"{lane_id_prefix}_TMP",
+            lane_metadata=lane_metadata,
+        )
+        absolute_imbalance_limit = min(
+            special_data_limit,
+            max_allowed * CUSTOMER_MIX_IMBALANCE_MAX_RATIO,
+        )
+
+        def _state_score(state: Dict[str, Any]) -> Tuple[Any, ...]:
+            total = float(state["total"])
+            tenbp_total = float(state["tenbp"])
+            non10_total = float(state["non10"])
+            imbalance_total = float(state["imbalance"])
+            in_capacity = min_allowed <= total <= max_allowed
+            ratio_ok = (
+                total > 0.0
+                and imbalance_total / total <= CUSTOMER_MIX_IMBALANCE_MAX_RATIO + 1e-6
+                and _tenbp_shape_valid_for_36t_probe(tenbp_total, non10_total)
+            )
+            imbalance_ratio = imbalance_total / total if total > 0.0 else 0.0
+            return (
+                0 if in_capacity and ratio_ok else 1,
+                abs(total - min_allowed) if total >= min_allowed else min_allowed - total,
+                _imbalance_target_distance(imbalance_ratio, CUSTOMER_MIX_IMBALANCE_MAX_RATIO),
+                -total,
+                -int(state["index_pairs"]),
+                len(state["items"]),
+            )
+
+        states: List[Dict[str, Any]] = [
+            {
+                "items": [],
+                "indices": [],
+                "total": 0.0,
+                "imbalance": 0.0,
+                "tenbp": 0.0,
+                "non10": 0.0,
+                "index_pairs": 0,
+            }
+        ]
+        best_probe_total = 0.0
+        best_probe_index_pairs = 0
+        best_probe_items: List[EnhancedLibraryInfo] = []
+        best_capacity_shape_total = 0.0
+        best_capacity_shape_index_pairs = 0
+        validation_candidate_count = 0
+        probe_rejects: Counter[str] = Counter()
+
+        ordered = sorted(
+            candidates_for_probe,
+            key=lambda item: (
+                0 if _is_imbalance_library_candidate(item) else 1,
+                0 if not _is_10bp_for_36t_probe(item) else 1,
+                _get_delivery_priority_sort_value(item),
+                -float(getattr(item, "contract_data_raw", 0.0) or item.get_data_amount_gb() or 0.0),
+                -_count_library_index_pairs(item),
+                _get_library_identity_key(item),
+            ),
+        )
+        for candidate in ordered:
+            if deadline is not None and time.monotonic() >= deadline:
+                probe_rejects["time_budget_exhausted"] += 1
+                break
+            candidate_data = float(getattr(candidate, "contract_data_raw", 0.0) or candidate.get_data_amount_gb() or 0.0)
+            if candidate_data <= 0.0:
+                continue
+            candidate_is_imbalance = _is_imbalance_library_candidate(candidate)
+            candidate_is_10bp = _is_10bp_for_36t_probe(candidate)
+            additions: List[Dict[str, Any]] = []
+            for state in states:
+                items = list(state["items"])
+                if _shares_split_family_with_selected(items, candidate):
+                    probe_rejects["split_family"] += 1
+                    continue
+                total = float(state["total"]) + candidate_data
+                if total > max_allowed + 1e-6:
+                    probe_rejects["over_max"] += 1
+                    continue
+                imbalance_total = float(state["imbalance"]) + (candidate_data if candidate_is_imbalance else 0.0)
+                if imbalance_total > absolute_imbalance_limit + 1e-6:
+                    probe_rejects["imbalance_absolute"] += 1
+                    continue
+                if total >= min_allowed - 1e-6 and imbalance_total / total > CUSTOMER_MIX_IMBALANCE_MAX_RATIO + 1e-6:
+                    probe_rejects["imbalance_ratio"] += 1
+                    continue
+                trial_items = items + [candidate]
+                ss_valid, _, _ = _validate_lane_special_split_rule(trial_items)
+                if not ss_valid:
+                    probe_rejects["special_split"] += 1
+                    continue
+                has_conflict, candidate_indices = _new_lib_has_latest_index_conflict_with_cache(
+                    state["indices"],
+                    candidate,
+                )
+                if has_conflict:
+                    probe_rejects["incremental_index"] += 1
+                    continue
+                tenbp_total = float(state["tenbp"]) + (candidate_data if candidate_is_10bp else 0.0)
+                non10_total = float(state["non10"]) + (0.0 if candidate_is_10bp else candidate_data)
+                if total >= min_allowed - 1e-6 and not _tenbp_shape_valid_for_36t_probe(tenbp_total, non10_total):
+                    probe_rejects["tenbp_shape"] += 1
+                    continue
+                additions.append(
+                    {
+                        "items": trial_items,
+                        "indices": list(state["indices"]) + [candidate_indices],
+                        "total": total,
+                        "imbalance": imbalance_total,
+                        "tenbp": tenbp_total,
+                        "non10": non10_total,
+                        "index_pairs": int(state["index_pairs"]) + _count_library_index_pairs(candidate),
+                    }
+                )
+            if additions:
+                states.extend(additions)
+                states.sort(key=_state_score)
+                states = states[:state_limit]
+                for state in states[: min(48, len(states))]:
+                    total = float(state["total"])
+                    if total > best_probe_total + 1e-6:
+                        best_probe_total = total
+                        best_probe_index_pairs = int(state["index_pairs"])
+                        best_probe_items = list(state["items"])
+                    if total < min_allowed - 1e-6 or total > max_allowed + 1e-6:
+                        continue
+                    if int(state["index_pairs"]) < AI_LANE_MIN_INDEX_PAIRS:
+                        continue
+                    if float(state["imbalance"]) / total > CUSTOMER_MIX_IMBALANCE_MAX_RATIO + 1e-6:
+                        continue
+                    if not _tenbp_shape_valid_for_36t_probe(float(state["tenbp"]), float(state["non10"])):
+                        continue
+                    validation_candidate_count += 1
+                    if total > best_capacity_shape_total + 1e-6:
+                        best_capacity_shape_total = total
+                        best_capacity_shape_index_pairs = int(state["index_pairs"])
+                    lane = validate_completed(list(state["items"]))
+                    if lane is not None:
+                        return lane
+        repair_seed_threshold = max(0.0, 0.90 * min_allowed)
+        if best_probe_items and best_probe_total >= repair_seed_threshold - 1e-6:
+            best_selected_ids = {id(item) for item in best_probe_items}
+            best_indices = [_parse_library_index_pairs_latest(item) for item in best_probe_items]
+            best_tenbp_total = sum(
+                float(getattr(item, "contract_data_raw", 0.0) or item.get_data_amount_gb() or 0.0)
+                for item in best_probe_items
+                if _is_10bp_for_36t_probe(item)
+            )
+            best_non10_total = best_probe_total - best_tenbp_total
+            best_imbalance_total = sum(
+                float(getattr(item, "contract_data_raw", 0.0) or item.get_data_amount_gb() or 0.0)
+                for item in best_probe_items
+                if _is_imbalance_library_candidate(item)
+            )
+            gap_fill_candidates = sorted(
+                [
+                    item for item in candidates_for_probe
+                    if id(item) not in best_selected_ids
+                    and not _shares_split_family_with_selected(best_probe_items, item)
+                ],
+                key=lambda item: (
+                    abs(float(getattr(item, "contract_data_raw", 0.0) or item.get_data_amount_gb() or 0.0) - (min_allowed - best_probe_total)),
+                    0 if _is_10bp_for_36t_probe(item) else 1,
+                    0 if _is_imbalance_library_candidate(item) else 1,
+                    _get_delivery_priority_sort_value(item),
+                    -_count_library_index_pairs(item),
+                    _get_library_identity_key(item),
+                ),
+            )
+            gap_rejects: Counter[str] = Counter()
+            direct_gap_trials: List[List[EnhancedLibraryInfo]] = []
+            for first in gap_fill_candidates[:80]:
+                first_data = float(getattr(first, "contract_data_raw", 0.0) or first.get_data_amount_gb() or 0.0)
+                first_total = best_probe_total + first_data
+                if first_total <= max_allowed + 1e-6:
+                    direct_gap_trials.append([first])
+                for second in gap_fill_candidates[:40]:
+                    if second is first or id(second) in best_selected_ids:
+                        continue
+                    if _shares_split_family_with_selected([*best_probe_items, first], second):
+                        continue
+                    second_data = float(getattr(second, "contract_data_raw", 0.0) or second.get_data_amount_gb() or 0.0)
+                    pair_total = best_probe_total + first_data + second_data
+                    if pair_total <= max_allowed + 1e-6:
+                        direct_gap_trials.append([first, second])
+            direct_gap_trials.sort(
+                key=lambda additions: (
+                    abs((best_probe_total + sum(
+                        float(getattr(item, "contract_data_raw", 0.0) or item.get_data_amount_gb() or 0.0)
+                        for item in additions
+                    )) - min_allowed),
+                    len(additions),
+                )
+            )
+            for additions in direct_gap_trials[:160]:
+                trial = list(best_probe_items) + list(additions)
+                trial_total = _total_lane_data(trial)
+                if trial_total < min_allowed - 1e-6 or trial_total > max_allowed + 1e-6:
+                    gap_rejects["capacity"] += 1
+                    continue
+                trial_imbalance = sum(
+                    float(getattr(item, "contract_data_raw", 0.0) or item.get_data_amount_gb() or 0.0)
+                    for item in trial
+                    if _is_imbalance_library_candidate(item)
+                )
+                if trial_imbalance / trial_total > CUSTOMER_MIX_IMBALANCE_MAX_RATIO + 1e-6:
+                    gap_rejects["imbalance_ratio"] += 1
+                    continue
+                trial_tenbp = sum(
+                    float(getattr(item, "contract_data_raw", 0.0) or item.get_data_amount_gb() or 0.0)
+                    for item in trial
+                    if _is_10bp_for_36t_probe(item)
+                )
+                trial_non10 = trial_total - trial_tenbp
+                if not _tenbp_shape_valid_for_36t_probe(trial_tenbp, trial_non10):
+                    gap_rejects["tenbp_shape"] += 1
+                    continue
+                conflict = False
+                trial_indices = list(best_indices)
+                for addition in additions:
+                    has_conflict, addition_indices = _new_lib_has_latest_index_conflict_with_cache(
+                        trial_indices,
+                        addition,
+                    )
+                    if has_conflict:
+                        conflict = True
+                        break
+                    trial_indices.append(addition_indices)
+                if conflict:
+                    gap_rejects["incremental_index"] += 1
+                    continue
+                lane = validate_completed(trial)
+                if lane is not None:
+                    return lane
+            repair_lane_id = f"{lane_id_prefix}_{machine_type.value}_{_reserve_auto_lane_serial(lane_id_prefix, machine_type):03d}"
+            repaired_lane, repaired_selected, repair_action = _build_repaired_candidate_lane(
+                libraries=list(best_probe_items),
+                pool=active_candidates,
+                validator=validator,
+                machine_type=machine_type,
+                lane_id=repair_lane_id,
+                lane_metadata=lane_metadata,
+                stage_label=f"{lane_id_prefix}_terminal_global_36t_dp_probe_repair",
+                max_fill_candidates=80,
+                max_replace_remove_candidates=12,
+                max_replace_add_candidates=60,
+                deadline=deadline,
+            )
+            if repaired_lane is not None:
+                return repaired_lane
+        return None
+
+    probe_lane = _try_36t_feasibility_probe(active_candidates)
+    if probe_lane is not None:
+        used_sources = {
+            source_by_identity.get(_get_library_identity_key(item), id(item))
+            for item in list(getattr(probe_lane, "libraries", []) or [])
+            if not _is_ai_balance_library(item)
+        }
+        return probe_lane, used_sources
+
     variant_plan = ("large_first", "small_first", "balanced_fill")
     for variant in variant_plan:
+        if terminal_impossible_reason:
+            break
         ordered = sorted(active_candidates, key=lambda lib: candidate_sort_key(lib, variant))
         seed_candidates = [
             lib for lib in ordered
@@ -14532,7 +15056,9 @@ def _try_build_single_36t_mixed_lane_from_items(
                 lib for lib in ordered
                 if not require_36t_main_library or _is_eligible_for_36t_after_mode_priority(lib)
             ] or list(ordered)
-        for seed in seed_candidates[:80]:
+        for seed_index, seed in enumerate(seed_candidates[:40], start=1):
+            if terminal_impossible_reason:
+                break
             if validation_attempts >= max_validation_attempts:
                 break
             selected: List[EnhancedLibraryInfo] = []
@@ -14540,6 +15066,8 @@ def _try_build_single_36t_mixed_lane_from_items(
             selected_idx_cache: List[Any] = []
             total = 0.0
             for lib in [seed] + [item for item in ordered if id(item) != id(seed)]:
+                if terminal_impossible_reason:
+                    break
                 if validation_attempts >= max_validation_attempts:
                     break
                 if id(lib) in selected_ids:
@@ -14603,41 +15131,54 @@ def _try_build_single_36t_mixed_lane_from_items(
                     )
                     return lane, used_sources
 
-    if best_repair_libs:
-        repair_lane_id = f"{lane_id_prefix}_{machine_type.value}_{_reserve_auto_lane_serial(lane_id_prefix, machine_type):03d}"
-        repair_seed_lane = build_lane(repair_lane_id, best_repair_libs)
-        repair_seed_libs = list(getattr(repair_seed_lane, "libraries", []) or [])
-        if (not require_36t_main_library) or any(_is_eligible_for_36t_after_mode_priority(item) for item in repair_seed_libs):
-            repaired_lane, repaired_selected, repair_action = _build_repaired_candidate_lane(
-                libraries=repair_seed_libs,
-                pool=active_candidates,
-                validator=validator,
-                machine_type=machine_type,
-                lane_id=repair_seed_lane.lane_id,
-                lane_metadata=repair_seed_lane.metadata,
-                stage_label=f"{lane_id_prefix}_terminal_global_36t_failed_candidate_repair",
-                max_fill_candidates=80,
-                max_replace_remove_candidates=16,
-                max_replace_add_candidates=60,
-            )
-            if repaired_lane is not None:
-                if repair_action != "already_valid":
-                    logger.info(
-                        "终态全局3.6增量混排失败候选通用修复成功: lane={}, action={}, 原始{}个/{:.1f}G, 修复后{}个/{:.1f}G",
-                        repaired_lane.lane_id,
-                        repair_action,
-                        len(repair_seed_libs),
-                        _total_lane_data(repair_seed_libs),
-                        len(repaired_selected),
-                        _total_lane_data(repaired_selected),
+    if best_repair_libs and not terminal_impossible_reason:
+        repair_min_allowed, repair_max_allowed = _resolve_lane_capacity_limits(
+            libraries=best_repair_libs,
+            machine_type=machine_type,
+            lane_id=f"{lane_id_prefix}_TMP",
+            lane_metadata=lane_metadata,
+        )
+        final_repair_skip_reason = _repair_impossible_reason(
+            best_repair_libs,
+            repair_min_allowed,
+            repair_max_allowed,
+        )
+        if not final_repair_skip_reason:
+            repair_lane_id = f"{lane_id_prefix}_{machine_type.value}_{_reserve_auto_lane_serial(lane_id_prefix, machine_type):03d}"
+            repair_seed_lane = build_lane(repair_lane_id, best_repair_libs)
+            repair_seed_libs = list(getattr(repair_seed_lane, "libraries", []) or [])
+            if (not require_36t_main_library) or any(_is_eligible_for_36t_after_mode_priority(item) for item in repair_seed_libs):
+                repaired_lane, repaired_selected, repair_action = _build_repaired_candidate_lane(
+                    libraries=repair_seed_libs,
+                    pool=active_candidates,
+                    validator=validator,
+                    machine_type=machine_type,
+                    lane_id=repair_seed_lane.lane_id,
+                    lane_metadata=repair_seed_lane.metadata,
+                    stage_label=f"{lane_id_prefix}_terminal_global_36t_failed_candidate_repair",
+                    max_fill_candidates=60,
+                    max_replace_remove_candidates=12,
+                    max_replace_add_candidates=40,
+                    deadline=deadline,
                 )
-                repaired_identity_keys = {_get_library_identity_key(lib) for lib in repaired_selected}
-                repaired_used_sources = {
-                    source_by_identity.get(_get_library_identity_key(lib), id(lib))
-                    for lib in repaired_selected
-                    if _get_library_identity_key(lib) in repaired_identity_keys
-                }
-                return repaired_lane, repaired_used_sources
+                if repaired_lane is not None:
+                    if repair_action != "already_valid":
+                        logger.info(
+                            "终态全局3.6增量混排失败候选通用修复成功: lane={}, action={}, 原始{}个/{:.1f}G, 修复后{}个/{:.1f}G",
+                            repaired_lane.lane_id,
+                            repair_action,
+                            len(repair_seed_libs),
+                            _total_lane_data(repair_seed_libs),
+                            len(repaired_selected),
+                            _total_lane_data(repaired_selected),
+                    )
+                    repaired_identity_keys = {_get_library_identity_key(lib) for lib in repaired_selected}
+                    repaired_used_sources = {
+                        source_by_identity.get(_get_library_identity_key(lib), id(lib))
+                        for lib in repaired_selected
+                        if _get_library_identity_key(lib) in repaired_identity_keys
+                    }
+                    return repaired_lane, repaired_used_sources
     logger.info(
         "终态全局3.6增量混排未成Lane明细: 机型={}, 候选items={}, best_total={:.1f}G, best_index_pairs={}, repair_seed={:.1f}G/{}对index, rejects={}, validation_top={}".format(
             machine_type.value,
@@ -14651,6 +15192,185 @@ def _try_build_single_36t_mixed_lane_from_items(
         )
     )
     return None, set()
+
+
+def _try_build_single_36t_pure_customer_lane(
+    libraries: List[EnhancedLibraryInfo],
+    *,
+    validator: Any,
+    lane_id_prefix: str = "CK36",
+    machine_type: MachineType = MachineType.NOVA_X_25B,
+) -> Tuple[Optional[LaneAssignment], List[EnhancedLibraryInfo]]:
+    """3.6T入口优先构造100% KDL客户纯Lane。"""
+
+    def _data(item: EnhancedLibraryInfo) -> float:
+        return float(getattr(item, "contract_data_raw", 0.0) or item.get_data_amount_gb() or 0.0)
+
+    def _total(items: Sequence[EnhancedLibraryInfo]) -> float:
+        return sum(_data(item) for item in items)
+
+    def _peak(item: EnhancedLibraryInfo) -> float:
+        return float(getattr(item, "peak_size", 0.0) or 0.0)
+
+    def _is_10bp_item(item: EnhancedLibraryInfo) -> bool:
+        ten_bp_data = getattr(item, "ten_bp_data", None)
+        if ten_bp_data is not None and ten_bp_data > 0:
+            return True
+        return bool(getattr(validator, "_is_10bp_index", lambda _: False)(getattr(item, "index_seq", "") or ""))
+
+    metadata = {
+        "selected_seq_mode": "3.6T-NEW",
+        "seq_mode": "3.6T-NEW",
+        "lcxms": "3.6T-NEW",
+        "dispatch_stage": "preextract_36t_pure_customer",
+        "is_pure_non_10bp_lane": True,
+    }
+    candidate_pool = [
+        lib for lib in list(libraries or [])
+        if _is_customer_library_candidate(lib)
+        and not _is_ai_balance_library(lib)
+        and not _is_split_library(lib)
+        and not _is_10bp_item(lib)
+        and _peak(lib) > 0
+        and _is_normal_filler_allowed_for_36t(lib)
+    ]
+    if not candidate_pool:
+        return None, []
+
+    min_allowed, max_allowed = _resolve_lane_capacity_limits(
+        libraries=candidate_pool,
+        machine_type=machine_type,
+        lane_id=f"{lane_id_prefix}_TMP",
+        lane_metadata=metadata,
+    )
+    window_bp = int(getattr(validator, "peak_size_max_diff", 150) or 150)
+    coverage_ratio = float(getattr(validator, "peak_size_coverage_ratio", 0.75) or 0.75)
+    imbalance_limit = float(
+        getattr(validator, "base_imbalance_ratio_limit_3_6t", CUSTOMER_MIX_IMBALANCE_MAX_RATIO)
+        or CUSTOMER_MIX_IMBALANCE_MAX_RATIO
+    )
+
+    def _imbalance_ratio(items: Sequence[EnhancedLibraryInfo]) -> float:
+        total = _total(items)
+        if total <= 0:
+            return 0.0
+        return sum(_data(item) for item in items if _is_imbalance_library_candidate(item)) / total
+
+    def _make_lane(items: List[EnhancedLibraryInfo], lane_id: str) -> LaneAssignment:
+        lane = LaneAssignment(
+            lane_id=lane_id,
+            machine_id=f"M_{lane_id}",
+            machine_type=machine_type,
+            lane_capacity_gb=_lane_capacity_for_machine(machine_type),
+        )
+        lane.metadata.update(metadata)
+        for lib in items:
+            lib._current_seq_mode_raw = "3.6T-NEW"
+            lib.selected_seq_mode = "3.6T-NEW"
+            lib.current_seq_mode = "3.6T-NEW"
+            lib.lcxms = "3.6T-NEW"
+            lane.add_library(lib)
+        return lane
+
+    def _validate_selection(items: List[EnhancedLibraryInfo]) -> bool:
+        total = _total(items)
+        if total < min_allowed - 1e-6 or total > max_allowed + 1e-6:
+            return False
+        if _count_lane_index_pairs(items) < AI_LANE_MIN_INDEX_PAIRS:
+            return False
+        if _imbalance_ratio(items) > imbalance_limit + 1e-6:
+            return False
+        trial_lane = _make_lane(items, f"{lane_id_prefix}_TMP")
+        result = _validate_lane_state(validator, trial_lane, items)
+        return bool(getattr(result, "is_valid", False))
+
+    def _try_add(
+        selected: List[EnhancedLibraryInfo],
+        selected_indices: List[Tuple[Tuple[str, Optional[str]], ...]],
+        candidate: EnhancedLibraryInfo,
+    ) -> Optional[Tuple[Tuple[str, Optional[str]], ...]]:
+        if _total(selected) + _data(candidate) > max_allowed + 1e-6:
+            return None
+        if _imbalance_ratio([*selected, candidate]) > imbalance_limit + 1e-6:
+            return None
+        has_conflict, candidate_indices = _new_lib_has_latest_index_conflict_with_cache(
+            selected_indices,
+            candidate,
+        )
+        if has_conflict:
+            return None
+        return candidate_indices
+
+    for window_start in sorted({int(_peak(item)) for item in candidate_pool}):
+        window_end = window_start + window_bp
+        inside = [item for item in candidate_pool if window_start <= _peak(item) <= window_end]
+        if _total(inside) < min_allowed * coverage_ratio - 1e-6:
+            continue
+        outside = [item for item in candidate_pool if not (window_start <= _peak(item) <= window_end)]
+        sort_key = lambda item: (
+            1 if _is_imbalance_library_candidate(item) else 0,
+            _get_delivery_priority_sort_value(item),
+            -_data(item),
+            _safe_str(getattr(item, "origrec", ""), default=""),
+        )
+        selected: List[EnhancedLibraryInfo] = []
+        selected_indices: List[Tuple[Tuple[str, Optional[str]], ...]] = []
+        inside_data = 0.0
+        for candidate in sorted(inside, key=sort_key):
+            candidate_indices = _try_add(selected, selected_indices, candidate)
+            if candidate_indices is None:
+                continue
+            selected.append(candidate)
+            selected_indices.append(candidate_indices)
+            inside_data += _data(candidate)
+            if _validate_selection(selected):
+                lane_id = f"{lane_id_prefix}_{machine_type.value}_{_reserve_auto_lane_serial(lane_id_prefix, machine_type):03d}"
+                return _make_lane(selected, lane_id), selected
+
+        for candidate in sorted(outside, key=sort_key):
+            projected_total = _total(selected) + _data(candidate)
+            if projected_total <= 0 or inside_data / projected_total < coverage_ratio - 1e-6:
+                continue
+            candidate_indices = _try_add(selected, selected_indices, candidate)
+            if candidate_indices is None:
+                continue
+            selected.append(candidate)
+            selected_indices.append(candidate_indices)
+            if _validate_selection(selected):
+                lane_id = f"{lane_id_prefix}_{machine_type.value}_{_reserve_auto_lane_serial(lane_id_prefix, machine_type):03d}"
+                return _make_lane(selected, lane_id), selected
+
+    return None, []
+
+
+def _preextract_36t_pure_customer_lanes(
+    libraries: List[EnhancedLibraryInfo],
+    *,
+    validator: Any,
+    max_lanes: int = 8,
+) -> Tuple[List[LaneAssignment], List[EnhancedLibraryInfo], Dict[str, int]]:
+    """3.6T入口优先抽取100% KDL客户纯Lane。"""
+    remaining = list(libraries or [])
+    lanes: List[LaneAssignment] = []
+    stats = {"pure_customer_lanes": 0, "used_libraries": 0}
+    for _ in range(max_lanes):
+        lane, selected = _try_build_single_36t_pure_customer_lane(
+            remaining,
+            validator=validator,
+            lane_id_prefix="CK36",
+            machine_type=MachineType.NOVA_X_25B,
+        )
+        if lane is None or not selected:
+            break
+        lanes.append(lane)
+        selected_keys = {_get_library_identity_key(item) for item in selected}
+        remaining = [
+            item for item in remaining
+            if _get_library_identity_key(item) not in selected_keys
+        ]
+        stats["pure_customer_lanes"] += 1
+        stats["used_libraries"] += len(selected)
+    return lanes, remaining, stats
 
 
 def _try_add_cross_split_fragment_lanes_from_unassigned(
@@ -16681,6 +17401,7 @@ def _try_add_terminal_global_36t_mixed_lanes(
                 machine_type=machine_type,
                 lane_id_prefix="GM",
                 require_36t_main_library=True,
+                deadline=deadline,
             )
             if lane is None or not lane_used_ids:
                 break
@@ -16919,7 +17640,7 @@ def _try_add_terminal_remaining_10bp_nb_lanes(
 
     auto_10bp_pool.sort(
         key=lambda lib: (
-            1 if _is_imbalance_library_candidate(lib) else 0,
+            0 if _is_imbalance_library_candidate(lib) else 1,
             1 if _get_library_special_split_tokens(lib) else 0,
             _get_delivery_priority_sort_value(lib),
             -_data(lib),
@@ -16930,7 +17651,7 @@ def _try_add_terminal_remaining_10bp_nb_lanes(
         key=lambda lib: (
             0 if _mix_side(lib) == "客户自建" else 1,
             1 if _is_10bp(lib) else 0,
-            1 if _is_imbalance_library_candidate(lib) else 0,
+            0 if _is_imbalance_library_candidate(lib) else 1,
             1 if _get_library_special_split_tokens(lib) else 0,
             _get_delivery_priority_sort_value(lib),
             -_data(lib),
@@ -17607,6 +18328,38 @@ def _pick_special_split_removals(
 
     to_remove: List[EnhancedLibraryInfo] = []
     remaining = list(libraries)
+    lane_sample_types = _get_lane_sample_types(remaining)
+    if lane_sample_types & LANE_LOADING_HD_VISIUM_TYPES and lane_sample_types & LANE_LOADING_COMBO_GROUP_B:
+        hd_items = [
+            lib for lib in remaining
+            if _library_sample_type_matches_rule(lib, LANE_LOADING_HD_VISIUM_TYPES)
+        ]
+        group_b_items = [
+            lib for lib in remaining
+            if _library_sample_type_matches_rule(lib, LANE_LOADING_COMBO_GROUP_B)
+        ]
+        hd_data = sum(float(getattr(lib, "contract_data_raw", 0.0) or 0.0) for lib in hd_items)
+        group_b_data = sum(float(getattr(lib, "contract_data_raw", 0.0) or 0.0) for lib in group_b_items)
+        keep_hd = hd_data >= group_b_data
+        if prefer_delivery_priority and hd_items and group_b_items:
+            hd_delivery = _get_libraries_delivery_priority_sort_key(hd_items)
+            group_b_delivery = _get_libraries_delivery_priority_sort_key(group_b_items)
+            if hd_delivery < group_b_delivery:
+                keep_hd = True
+            elif group_b_delivery < hd_delivery:
+                keep_hd = False
+        removal_pool = group_b_items if keep_hd else hd_items
+        return sorted(
+            removal_pool,
+            key=lambda lib: (
+                _get_delivery_priority_remove_sort_value(lib)
+                if prefer_delivery_priority
+                else 0.0,
+                float(getattr(lib, "contract_data_raw", 0.0) or 0.0),
+                _get_library_identity_key(lib),
+            ),
+        )
+
     remaining_modes = {_classify_library_special_split_mode(lib) for lib in remaining}
 
     has_a = "A" in remaining_modes
@@ -20503,6 +21256,23 @@ def arrange_library(
                 len(normal_libs),
             )
 
+    pre_36t_customer_lanes: List[LaneAssignment] = []
+    if normal_libs:
+        pre_36t_customer_lanes, normal_libs, pre_36t_customer_stats = (
+            _preextract_36t_pure_customer_lanes(
+                normal_libs,
+                validator=stage_validator,
+                max_lanes=8,
+            )
+        )
+        if pre_36t_customer_lanes:
+            logger.info(
+                "步骤2前置3.6客户纯Lane抽取完成: 新增Lane={}, 使用文库={}, 剩余普通排机文库={}",
+                int(pre_36t_customer_stats.get("pure_customer_lanes", 0)),
+                int(pre_36t_customer_stats.get("used_libraries", 0)),
+                len(normal_libs),
+            )
+
     has_prebuilt_lanes = any(
         (
             package_lanes,
@@ -20513,6 +21283,7 @@ def arrange_library(
             mode_1_1_lanes,
             trailing_dedicated_imbalance_lanes,
             pre_36t_imbalance_lanes,
+            pre_36t_customer_lanes,
         )
     )
     if normal_libs or has_prebuilt_lanes:
@@ -20553,6 +21324,7 @@ def arrange_library(
                 + list(mode_1_1_lanes)
                 + list(trailing_dedicated_imbalance_lanes)
                 + list(pre_36t_imbalance_lanes)
+                + list(pre_36t_customer_lanes)
             )
             stats, solution = test_with_model(
                 deepcopy(normal_libs),

@@ -468,9 +468,11 @@ class LaneValidator:
         return str(value).strip().replace("＋", "+").replace("×", "X").upper()
 
     def _is_customer_side_library(self, lib: EnhancedLibraryInfo) -> bool:
-        """仅基于wkjkhj识别客户侧文库。"""
-        wkjkhj = self._normalize_profile_text(getattr(lib, "wkjkhj", "") or "")
-        return wkjkhj == "客户自建"
+        """按当前业务口径识别客户侧文库：wksampleid/sample_id 第2-4位为 KDL。"""
+        sample_id = self._normalize_profile_text(
+            getattr(lib, "sample_id", "") or getattr(lib, "wksampleid", "") or ""
+        ).upper()
+        return sample_id[1:4] == "KDL"
 
     def _is_manual_side_library(self, lib: EnhancedLibraryInfo) -> bool:
         """仅基于wkjkhj识别手工侧文库。"""
@@ -1025,8 +1027,8 @@ class LaneValidator:
         """校验诺禾单Index大文库限制"""
         for lib in libraries:
             # 判断是否为诺禾文库
-            sample_id = getattr(lib, 'sample_id', '') or ''
-            is_customer = sample_id.startswith('FKDL') or '客户' in (getattr(lib, 'lab_type', '') or '')
+            sample_id = str(getattr(lib, 'sample_id', '') or '').upper()
+            is_customer = sample_id[1:4] == 'KDL' or '客户' in (getattr(lib, 'lab_type', '') or '')
             
             if not is_customer:  # 诺禾文库
                 # 统计Index数量
