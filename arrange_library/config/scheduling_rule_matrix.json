@@ -1755,9 +1755,9 @@
         "3.6T-NEW"
       ],
       "project_types": [],
-      "soft_target_gb": 1050.0,
-      "min_target_gb": 1000.0,
-      "max_target_gb": 1100.0,
+      "soft_target_gb": 995.0,
+      "min_target_gb": 980.0,
+      "max_target_gb": 1010.0,
       "tolerance_gb": 5.0,
       "lane_count": 8,
       "loading_method": "25B",

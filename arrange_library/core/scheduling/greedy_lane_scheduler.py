@@ -5345,9 +5345,24 @@ class GreedyLaneScheduler:
                 else self._sort_remaining_for_lane_seed(remaining, seed_lib)
             )
 
+            seed_seq_mode = str(
+                getattr(seed_lib, "_current_seq_mode_raw", None)
+                or getattr(seed_lib, "selected_seq_mode", None)
+                or getattr(seed_lib, "current_seq_mode", None)
+                or getattr(seed_lib, "lcxms", None)
+                or ""
+            ).strip()
+            if not seed_seq_mode:
+                seed_seq_mode = "3.6T-NEW"
+            seed_capacity_metadata = {
+                "seq_mode": seed_seq_mode,
+                "lcxms": seed_seq_mode,
+                "selected_seq_mode": seed_seq_mode,
+            }
             seed_rule = self._get_scheduling_lane_capacity_range(
                 libraries=[seed_lib],
                 machine_type=machine_type_enum.value,
+                metadata=seed_capacity_metadata,
             )
             lane_candidate_order = self._sort_by_soft_single_lane_preference(
                 lane_candidate_order,
@@ -5378,7 +5393,10 @@ class GreedyLaneScheduler:
                 lane_capacity_gb=seed_rule.soft_target_gb or self.config.lane_capacity_gb
             )
             current_lane.metadata["rule_code"] = seed_rule.rule_code
+            current_lane.metadata["capacity_rule_code"] = seed_rule.rule_code
+            current_lane.metadata["selected_seq_mode"] = seed_rule.sequencing_mode
             current_lane.metadata["seq_mode"] = seed_rule.sequencing_mode
+            current_lane.metadata["lcxms"] = seed_rule.sequencing_mode
             current_lane.metadata["sequencing_mode"] = seed_rule.sequencing_mode
             current_lane.metadata["loading_method"] = seed_rule.loading_method
             current_lane.metadata["target_capacity_gb"] = target_capacity_gb
