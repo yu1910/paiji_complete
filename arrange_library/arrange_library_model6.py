@@ -9741,6 +9741,121 @@ def _try_convert_mergeable_36t_tail_lanes_to_mode_1_1(
     }
 
 
+def _try_reflow_single_36t_dedicated_imbalance_with_unassigned_to_g55(
+    solution: Any,
+    validator: Any,
+) -> Dict[str, int]:
+    """将单条3.6T碱基不均专Lane与未分配池一起重选为1.1 G55专Lane。"""
+    lanes = list(getattr(solution, "lane_assignments", []) or [])
+    unassigned = list(getattr(solution, "unassigned_libraries", []) or [])
+    if not lanes or not unassigned:
+        return {"converted_lanes": 0, "new_lanes": 0, "used_libraries": 0, "returned_libraries": 0}
+
+    candidate_lanes: List[LaneAssignment] = []
+    for lane in lanes:
+        if not _is_explicit_dedicated_imbalance_lane(lane):
+            continue
+        lane_libs = _get_non_balance_libraries(list(getattr(lane, "libraries", []) or []))
+        if not lane_libs:
+            continue
+        if _is_mode_1_1_lane_context(lane, lane_libs):
+            continue
+        if not any(_is_imbalance_library_candidate(lib) for lib in lane_libs):
+            continue
+        candidate_lanes.append(lane)
+
+    if not candidate_lanes:
+        logger.info(
+            "终态单条3.6T不均专Lane回流1.1 G55跳过: 未找到可回流3.6T不均专Lane，当前Lane数={}，未分配={}个/{:.1f}G",
+            len(lanes),
+            len(unassigned),
+            _total_lane_data(unassigned),
+        )
+        return {"converted_lanes": 0, "new_lanes": 0, "used_libraries": 0, "returned_libraries": 0}
+
+    best_result: Optional[Tuple[float, int, LaneAssignment, List[EnhancedLibraryInfo], LaneAssignment]] = None
+    max_add_test_gb = float(
+        (get_scheduling_config().get_mode_1_1_config() or {}).get(
+            "first_round_add_test_max_gb_per_lane",
+            150.0,
+        )
+        or 150.0
+    )
+
+    for source_lane in sorted(
+        candidate_lanes,
+        key=lambda item: (
+            -_total_lane_data(_get_non_balance_libraries(list(getattr(item, "libraries", []) or []))),
+            _safe_str(getattr(item, "lane_id", ""), default=""),
+        ),
+    ):
+        source_libs = _get_non_balance_libraries(list(getattr(source_lane, "libraries", []) or []))
+        pool = list(unassigned) + list(source_libs)
+        pool_ids = {id(lib) for lib in pool}
+        all_lanes_without_source = [lane for lane in lanes if id(lane) != id(source_lane)]
+        new_lanes, _, stats = _consume_g55_imbalance_as_mode_1_1_lanes(
+            pool=pool,
+            validator=validator,
+            all_lanes=all_lanes_without_source,
+            max_lanes=1,
+            max_add_test_gb_per_lane=max_add_test_gb,
+            stage_label="终态单条3.6T不均专Lane回流1.1 G55",
+        )
+        if not new_lanes:
+            logger.info(
+                "终态单条3.6T不均专Lane回流1.1 G55未成Lane: source_lane={}, pool={}个/{:.1f}G",
+                _safe_str(getattr(source_lane, "lane_id", ""), default=""),
+                len(pool),
+                _total_lane_data(pool),
+            )
+            continue
+        lane = new_lanes[0]
+        used_libs = [
+            lib for lib in list(getattr(lane, "libraries", []) or [])
+            if id(lib) in pool_ids and not _is_ai_balance_library(lib)
+        ]
+        score = (_total_lane_data(used_libs), len(used_libs))
+        candidate = (score[0], score[1], lane, used_libs, source_lane)
+        if best_result is None or (candidate[0], candidate[1]) > (best_result[0], best_result[1]):
+            best_result = candidate
+
+    if best_result is None:
+        return {"converted_lanes": 0, "new_lanes": 0, "used_libraries": 0, "returned_libraries": 0}
+
+    _, _, new_lane, used_libs, source_lane = best_result
+    used_ids = {id(lib) for lib in used_libs}
+    source_libs = _get_non_balance_libraries(list(getattr(source_lane, "libraries", []) or []))
+    returned_libraries = [
+        lib for lib in list(unassigned) + list(source_libs)
+        if id(lib) not in used_ids
+    ]
+    new_lane.metadata["dispatch_stage"] = "terminal_single_36t_dedicated_imbalance_reflow_to_g55"
+    new_lane.metadata["source_lane_ids"] = [_safe_str(getattr(source_lane, "lane_id", ""), default="")]
+    for lib in used_libs:
+        lib._current_seq_mode_raw = "1.1"
+        lib.selected_seq_mode = "1.1"
+        lib.current_seq_mode = "1.1"
+        lib.lcxms = "1.1"
+
+    solution.lane_assignments = [lane for lane in lanes if id(lane) != id(source_lane)] + [new_lane]
+    solution.unassigned_libraries = returned_libraries
+    logger.info(
+        "终态单条3.6T不均专Lane回流1.1 G55成功: source_lane={}，新增lane={}，使用{}个/{:.1f}G，回退未用{}个/{:.1f}G",
+        _safe_str(getattr(source_lane, "lane_id", ""), default=""),
+        new_lane.lane_id,
+        len(used_libs),
+        _total_lane_data(used_libs),
+        len(returned_libraries),
+        _total_lane_data(returned_libraries),
+    )
+    return {
+        "converted_lanes": 1,
+        "new_lanes": 1,
+        "used_libraries": len(used_libs),
+        "returned_libraries": len(returned_libraries),
+    }
+
+
 def _consume_small_split_rule_originals_as_mode_1_1_lanes(
     *,
     pool: List[EnhancedLibraryInfo],
@@ -15540,11 +15655,16 @@ def _resolve_g55_base_group_id(lib: EnhancedLibraryInfo) -> str:
 
 
 def _resolve_g55_base_group_id_1_1_legacy(lib: EnhancedLibraryInfo) -> str:
-    """1.1 G55候选口径：排除未知/G56/G57，其余不再按group55类型表前置截断。"""
+    """1.1 G55候选口径：允许未知不均文库按类型回退到G53/G54等基础组。"""
     if _is_ai_balance_library(lib) or not _is_imbalance_library_candidate(lib):
         return ""
     group_id = _safe_str(_BASE_IMBALANCE_HANDLER.identify_imbalance_type(lib), default="")
-    if not group_id or group_id == "G_UNKNOWN" or group_id in {"G56", "G57"}:
+    if not group_id or group_id == "G_UNKNOWN":
+        fallback_group_id = _resolve_g55_base_group_id(lib)
+        if fallback_group_id and not fallback_group_id.startswith("G_UNKNOWN"):
+            return fallback_group_id
+        return ""
+    if group_id in {"G56", "G57"}:
         return ""
     return group_id
 
@@ -21624,6 +21744,30 @@ def arrange_library(
                 "终态可合并3.6T回收合并后二次总复核: 淘汰{}条不合规Lane，回收{}个文库".format(
                     mergeable_36t_cleanup_stats["removed_lanes"],
                     mergeable_36t_cleanup_stats["recovered_libs"],
+                )
+            )
+
+    single_36t_reflow_stats = _try_reflow_single_36t_dedicated_imbalance_with_unassigned_to_g55(
+        solution,
+        final_cleanup_validator,
+    )
+    if single_36t_reflow_stats["converted_lanes"] > 0:
+        logger.info(
+            "终态单条3.6T不均专Lane回流1.1 G55完成: 回收3.6T Lane={}，新增1.1 G55 Lane={}，使用文库={}".format(
+                single_36t_reflow_stats["converted_lanes"],
+                single_36t_reflow_stats["new_lanes"],
+                single_36t_reflow_stats["used_libraries"],
+            )
+        )
+        single_36t_reflow_cleanup_stats = _final_non_package_validation_cleanup(
+            solution,
+            final_cleanup_validator,
+        )
+        if single_36t_reflow_cleanup_stats["removed_lanes"] > 0:
+            logger.warning(
+                "终态单条3.6T不均专Lane回流1.1后总复核: 淘汰{}条不合规Lane，回收{}个文库".format(
+                    single_36t_reflow_cleanup_stats["removed_lanes"],
+                    single_36t_reflow_cleanup_stats["recovered_libs"],
                 )
             )
 
