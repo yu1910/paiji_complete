@@ -18,7 +18,6 @@
 """
 
 import argparse
-import json
 import math
 import os
 import random
@@ -31,7 +30,7 @@ from dataclasses import dataclass, field
 from copy import deepcopy
 from datetime import datetime
 from enum import Enum
-from functools import lru_cache
+from functools import lru_cache, wraps
 from pathlib import Path
 from typing import Any, Dict, List, Optional, Sequence, Set, Tuple, Union
 from uuid import uuid4
@@ -136,12 +135,14 @@ _MODULE_LIBRARY_SPLITTER = LibrarySplitter()
 from prediction_delivery import MODELS_DIR, predict_pooling
 
 # ==================== 排机超时控制 ====================
-# 排机最长允许运行时间（秒）。超过此时间视为异常，强制中断并返回失败。
-SCHEDULING_TIMEOUT_SECONDS = 600  # 10 分钟
+# 排机全流程最长允许运行时间（秒）。超过此时间视为异常，强制中断并返回失败。
+FULL_PROCESS_TIMEOUT_SECONDS = 30 * 60  # 30 分钟
+# 兼容历史变量名：当前含义已调整为全流程超时阈值。
+SCHEDULING_TIMEOUT_SECONDS = FULL_PROCESS_TIMEOUT_SECONDS
 TERMINAL_GLOBAL_36T_TIME_BUDGET_SECONDS = 45
 
 
-class SchedulingTimeoutError(Exception):
+class SchedulingTimeoutError(BaseException):
     """排机超时异常：排机耗时超过允许上限，强制终止。"""
     pass
 
@@ -157,8 +158,65 @@ class RollbackMode11ScheduleResult:
 def _scheduling_timeout_handler(signum: int, frame: object) -> None:
     """SIGALRM 信号处理器，超时时抛出 SchedulingTimeoutError。"""
     raise SchedulingTimeoutError(
-        f"排机超时：超过 {SCHEDULING_TIMEOUT_SECONDS // 60} 分钟仍未完成，已强制终止"
+        f"排机全流程超时：超过 {FULL_PROCESS_TIMEOUT_SECONDS // 60} 分钟仍未完成，已强制终止"
     )
+
+
+def _format_elapsed_time(seconds: float) -> str:
+    """格式化耗时，便于日志查看。"""
+    total_seconds = max(0, int(round(seconds)))
+    minutes, sec = divmod(total_seconds, 60)
+    hours, minutes = divmod(minutes, 60)
+    if hours:
+        return f"{hours}小时{minutes}分{sec}秒"
+    if minutes:
+        return f"{minutes}分{sec}秒"
+    return f"{sec}秒"
+
+
+def _with_full_process_timeout(func):
+    """为 arrange_library 增加全流程耗时统计和超时保护。"""
+
+    @wraps(func)
+    def wrapper(*args, **kwargs):
+        process_start = time.monotonic()
+        timeout_minutes = FULL_PROCESS_TIMEOUT_SECONDS // 60
+        status = "异常"
+        old_handler = None
+        use_signal_timeout = hasattr(signal, "SIGALRM")
+
+        if use_signal_timeout:
+            try:
+                old_handler = signal.signal(signal.SIGALRM, _scheduling_timeout_handler)
+                signal.alarm(FULL_PROCESS_TIMEOUT_SECONDS)
+                logger.info(f"排机全流程超时保护已启动，最大允许时间: {timeout_minutes} 分钟")
+            except (OSError, ValueError) as exc:
+                use_signal_timeout = False
+                logger.warning(f"排机全流程 signal 超时保护启用失败，仅记录耗时: {exc}")
+
+        try:
+            result = func(*args, **kwargs)
+            status = "完成"
+            return result
+        except SchedulingTimeoutError as exc:
+            status = "超时"
+            logger.error(f"排机全流程超时（{timeout_minutes} 分钟），强制终止: {exc}")
+            raise
+        finally:
+            elapsed_seconds = time.monotonic() - process_start
+            logger.info(
+                "排机全流程耗时统计: 状态={}, 耗时={} ({:.2f}s), 超时阈值={}分钟".format(
+                    status,
+                    _format_elapsed_time(elapsed_seconds),
+                    elapsed_seconds,
+                    timeout_minutes,
+                )
+            )
+            if use_signal_timeout:
+                signal.alarm(0)
+                signal.signal(signal.SIGALRM, old_handler or signal.SIG_DFL)
+
+    return wrapper
 
 
 # ==================== Lane上机浓度规则 ====================
@@ -15684,6 +15742,35 @@ def _g55_type_bucket(lib: EnhancedLibraryInfo) -> str:
     return ""
 
 
+def _g55_rule_matrix_constraint_messages(
+    selected: Sequence[EnhancedLibraryInfo],
+    *,
+    lane_metadata: Dict[str, Any],
+    machine_type: MachineType,
+) -> List[str]:
+    """G55候选补平衡前，先复用统一规则表剔除必然失败的硬约束。"""
+    selected_libraries = list(selected or [])
+    if not selected_libraries:
+        return []
+    metadata = _build_lane_metadata_for_validator(
+        "G55_TMP",
+        lane_metadata,
+        libraries=selected_libraries,
+    )
+    return get_scheduling_config().validate_lane_constraints(
+        libraries=selected_libraries,
+        machine_type=_machine_type_to_text(machine_type, default="Nova X-25B"),
+        metadata=metadata,
+    )
+
+
+def _g55_rule_matrix_failure_key(messages: Sequence[str]) -> str:
+    joined = "；".join(_safe_str(message, default="") for message in list(messages or []))
+    if "组合1与组合2文库类型不可混排" in joined:
+        return "rule_matrix_special_combo_groups_not_mixed"
+    return "rule_matrix_constraint"
+
+
 def _check_g55_cross_group_compatibility(selected: List[EnhancedLibraryInfo]) -> Tuple[bool, str]:
     """G55兜底混排只做G55自身硬约束；未知不均类型仍可作为G55候选。"""
     group_ids = {_resolve_g55_base_group_id(lib) for lib in selected}
@@ -16273,6 +16360,13 @@ def _validate_g55_mode_1_1_selection(
     max_allowed = float(getattr(selection, "effective_max_gb", 0.0) or 0.0)
     if total_gb < min_allowed - 1e-6 or total_gb > max_allowed + 1e-6:
         return None, "capacity_out_of_rule_range"
+    rule_constraint_messages = _g55_rule_matrix_constraint_messages(
+        selected,
+        lane_metadata=lane_metadata,
+        machine_type=machine_type,
+    )
+    if rule_constraint_messages:
+        return None, _g55_rule_matrix_failure_key(rule_constraint_messages)
 
     lane = LaneAssignment(
         lane_id="G55_TMP",
@@ -16432,6 +16526,15 @@ def _consume_g55_imbalance_as_mode_lanes(
             compatible, reason = _check_g55_cross_group_compatibility(selected)
             if not compatible and reason not in {"g58_g54_mix_forbidden"}:
                 key = f"g55_{reason or 'mix_incompatible'}"
+                failure_counter[key] = failure_counter.get(key, 0) + 1
+                return
+            rule_constraint_messages = _g55_rule_matrix_constraint_messages(
+                selected,
+                lane_metadata=lane_metadata,
+                machine_type=machine_type,
+            )
+            if rule_constraint_messages:
+                key = f"g55_{_g55_rule_matrix_failure_key(rule_constraint_messages)}"
                 failure_counter[key] = failure_counter.get(key, 0) + 1
                 return
             signature = _g55_validation_signature(selected)
@@ -16674,9 +16777,11 @@ def _consume_g55_imbalance_as_mode_lanes(
             states: List[List[EnhancedLibraryInfo]] = [[]]
             validation_queue: List[List[EnhancedLibraryInfo]] = []
             validation_seen: Set[Tuple[str, ...]] = set()
-            for budgeted_seed in _build_budgeted_g55_group_candidates(sub_pool):
+            budgeted_candidates = _build_budgeted_g55_group_candidates(sub_pool)
+            for budgeted_seed in budgeted_candidates:
                 _enqueue_g55_validation_candidate(validation_queue, validation_seen, budgeted_seed)
-            for trimmed_seed in _build_trimmed_g55_seed_candidates(sub_pool[:180]):
+            trimmed_candidates = _build_trimmed_g55_seed_candidates(sub_pool[:180])
+            for trimmed_seed in trimmed_candidates:
                 _enqueue_g55_validation_candidate(validation_queue, validation_seen, trimmed_seed)
             for lib in sub_pool[:180]:
                 next_states = list(states)
@@ -20564,6 +20669,7 @@ def _run_prediction_delivery(input_data: Union[Path, pd.DataFrame], output_path:
     return prediction_df
 
 
+@_with_full_process_timeout
 def arrange_library(
     data_file: Union[str, Path],
     mode: str = "arrange",
@@ -21408,88 +21514,58 @@ def arrange_library(
     )
     if normal_libs or has_prebuilt_lanes:
         random.seed(42)
-        # 设置排机超时保护：超过 SCHEDULING_TIMEOUT_SECONDS 秒强制中断
-        # signal.SIGALRM 仅在 Unix/Linux 下可用，且必须在主线程中调用
-        _old_handler = None
-        # SIG_ERR 是 C 层面的常量，Python signal 模块没有该属性，只需检查 SIGALRM 是否存在
-        _use_signal_timeout = hasattr(signal, "SIGALRM")
-        if _use_signal_timeout:
-            _old_handler = signal.signal(signal.SIGALRM, _scheduling_timeout_handler)
-            signal.alarm(SCHEDULING_TIMEOUT_SECONDS)
-            logger.info(f"排机超时保护已启动，最大允许时间: {SCHEDULING_TIMEOUT_SECONDS // 60} 分钟")
-
-        try:
-            for lane in mode_1_1_lanes:
-                if not isinstance(lane.metadata, dict):
-                    lane.metadata = {}
-                selected_seq_mode = str(lane.metadata.get("selected_seq_mode") or "").strip()
-                if _is_explicit_dedicated_imbalance_lane(lane):
-                    if not selected_seq_mode:
-                        selected_seq_mode = "3.6T-NEW"
-                    lane.metadata["selected_seq_mode"] = selected_seq_mode
-                    lane.metadata["seq_mode"] = selected_seq_mode
-                    lane.metadata["lcxms"] = selected_seq_mode
-                elif not selected_seq_mode:
-                    lane.metadata["selected_seq_mode"] = "1.1"
-                    selected_seq_mode = "1.1"
-                for lib in list(lane.libraries or []):
-                    lib._current_seq_mode_raw = selected_seq_mode
-            # 将包Lane、10+24 Lane seq和1.1模式Lane一起纳入最终结果
-            all_existing_lanes = (
-                list(package_lanes)
-                + list(lane_seq_10_plus_24_lanes)
-                + list(dedicated_imbalance_lanes)
-                + list(customer_mode_1_1_lanes)
-                + list(proactive_split_lanes)
-                + list(mode_1_1_lanes)
-                + list(trailing_dedicated_imbalance_lanes)
-                + list(pre_36t_imbalance_lanes)
-                + list(pre_36t_customer_lanes)
+        for lane in mode_1_1_lanes:
+            if not isinstance(lane.metadata, dict):
+                lane.metadata = {}
+            selected_seq_mode = str(lane.metadata.get("selected_seq_mode") or "").strip()
+            if _is_explicit_dedicated_imbalance_lane(lane):
+                if not selected_seq_mode:
+                    selected_seq_mode = "3.6T-NEW"
+                lane.metadata["selected_seq_mode"] = selected_seq_mode
+                lane.metadata["seq_mode"] = selected_seq_mode
+                lane.metadata["lcxms"] = selected_seq_mode
+            elif not selected_seq_mode:
+                lane.metadata["selected_seq_mode"] = "1.1"
+                selected_seq_mode = "1.1"
+            for lib in list(lane.libraries or []):
+                lib._current_seq_mode_raw = selected_seq_mode
+        # 将包Lane、10+24 Lane seq和1.1模式Lane一起纳入最终结果
+        all_existing_lanes = (
+            list(package_lanes)
+            + list(lane_seq_10_plus_24_lanes)
+            + list(dedicated_imbalance_lanes)
+            + list(customer_mode_1_1_lanes)
+            + list(proactive_split_lanes)
+            + list(mode_1_1_lanes)
+            + list(trailing_dedicated_imbalance_lanes)
+            + list(pre_36t_imbalance_lanes)
+            + list(pre_36t_customer_lanes)
+        )
+        stats, solution = test_with_model(
+            deepcopy(normal_libs),
+            existing_lanes=all_existing_lanes,
+            enable_57_rescue=False,
+        )
+        (
+            solution.lane_assignments,
+            solution.unassigned_libraries,
+            main_stage_split_stats,
+        ) = _enforce_split_family_atomicity_for_stage(
+            lane_assignments=list(solution.lane_assignments or []),
+            unassigned_libraries=list(solution.unassigned_libraries or []),
+            validator=stage_validator,
+            stage_label="主排机",
+        )
+        rollback_mode_1_1_libraries = list(
+            getattr(solution, "split_rollback_mode_1_1_libraries", []) or []
+        )
+        if rollback_mode_1_1_libraries:
+            rollback_mode_1_1_result = _schedule_rollback_libraries_in_mode_1_1(
+                rollback_mode_1_1_libraries,
+                mode_1_1_config=mode_1_1_config,
             )
-            stats, solution = test_with_model(
-                deepcopy(normal_libs),
-                existing_lanes=all_existing_lanes,
-                enable_57_rescue=False,
-            )
-            (
-                solution.lane_assignments,
-                solution.unassigned_libraries,
-                main_stage_split_stats,
-            ) = _enforce_split_family_atomicity_for_stage(
-                lane_assignments=list(solution.lane_assignments or []),
-                unassigned_libraries=list(solution.unassigned_libraries or []),
-                validator=stage_validator,
-                stage_label="主排机",
-            )
-            rollback_mode_1_1_libraries = list(
-                getattr(solution, "split_rollback_mode_1_1_libraries", []) or []
-            )
-            if rollback_mode_1_1_libraries:
-                rollback_mode_1_1_result = _schedule_rollback_libraries_in_mode_1_1(
-                    rollback_mode_1_1_libraries,
-                    mode_1_1_config=mode_1_1_config,
-                )
-                solution.lane_assignments.extend(rollback_mode_1_1_result.lanes)
-                solution.unassigned_libraries.extend(rollback_mode_1_1_result.remaining_libraries)
-        except SchedulingTimeoutError as exc:
-            # 超时后取消闹钟、恢复旧信号处理器，再将异常继续向上抛出
-            if _use_signal_timeout:
-                signal.alarm(0)
-                signal.signal(signal.SIGALRM, _old_handler or signal.SIG_DFL)
-            elapsed_min = SCHEDULING_TIMEOUT_SECONDS // 60
-            logger.error(f"排机超时（{elapsed_min} 分钟），强制终止: {exc}")
-            raise
-        except Exception:
-            # 其他异常：同样先清理超时保护，再原样抛出
-            if _use_signal_timeout:
-                signal.alarm(0)
-                signal.signal(signal.SIGALRM, _old_handler or signal.SIG_DFL)
-            raise
-        else:
-            # 正常完成：取消闹钟、恢复旧信号处理器
-            if _use_signal_timeout:
-                signal.alarm(0)
-                signal.signal(signal.SIGALRM, _old_handler or signal.SIG_DFL)
+            solution.lane_assignments.extend(rollback_mode_1_1_result.lanes)
+            solution.unassigned_libraries.extend(rollback_mode_1_1_result.remaining_libraries)
     else:
         from types import SimpleNamespace
         stats = {}
@@ -22013,6 +22089,10 @@ if __name__ == "__main__":
         main()
     except KeyboardInterrupt:
         logger.warning("用户中断")
+        sys.exit(130)
+    except SchedulingTimeoutError as e:
+        logger.error(f"排机超时终止: {e}")
+        sys.exit(1)
     except Exception as e:
         logger.error(f"测试过程发生错误: {e}")
         sys.exit(1)
