@@ -4291,8 +4291,24 @@ def _build_repaired_candidate_lane(
         base_items: List[EnhancedLibraryInfo],
     ) -> Tuple[Optional[LaneAssignment], List[EnhancedLibraryInfo], str]:
         """CK客户Lane专用修复：先裁不均超额，再补客户10bp/均衡文库，避免通用盲搜。"""
+        repair_started_at = time.monotonic()
+        repair_budget_seconds = (
+            max(0.0, deadline - repair_started_at)
+            if deadline is not None
+            else 0.0
+        )
+
+        def _ck_timeout_result() -> Tuple[Optional[LaneAssignment], List[EnhancedLibraryInfo], str]:
+            logger.info(
+                "CK客户Lane专用修复超时: lane={}, elapsed={:.1f}s, limit={:.1f}s",
+                lane_id,
+                time.monotonic() - repair_started_at,
+                repair_budget_seconds,
+            )
+            return None, [], "ck_customer_directed_repair_timeout"
+
         if _time_budget_exhausted():
-            return None, [], "time_budget_exhausted"
+            return _ck_timeout_result()
         if not _is_ck_customer_repair_context():
             return None, [], ""
 
@@ -4364,6 +4380,8 @@ def _build_repaired_candidate_lane(
             selected_ids = {id(item) for item in working}
             remaining = [item for item in candidates if id(item) not in selected_ids]
             while remaining and not _meets_light_targets(working):
+                if _time_budget_exhausted():
+                    break
                 total, _, tenbp_total, _, _ = _state(working)
                 fill_gap = max(0.0, min_allowed - total)
                 current_10bp_ratio = tenbp_total / total if total > 0 else 0.0
@@ -4393,6 +4411,8 @@ def _build_repaired_candidate_lane(
 
                 added = False
                 for candidate in sorted(remaining, key=_candidate_key):
+                    if _time_budget_exhausted():
+                        break
                     remaining = [item for item in remaining if item is not candidate]
                     if id(candidate) in selected_ids:
                         continue
@@ -4455,6 +4475,8 @@ def _build_repaired_candidate_lane(
                 )
             )
             working = [item for item in working if item is not removable[0]]
+            if _time_budget_exhausted():
+                return _ck_timeout_result()
 
         pool_candidates = [
             item for item in list(pool or [])
@@ -4473,6 +4495,8 @@ def _build_repaired_candidate_lane(
             )
         )
         working = _append_compatible(working, pool_candidates)
+        if _time_budget_exhausted():
+            return _ck_timeout_result()
 
         # 如果补完还低于容量或10bp比例不足，再做一次更宽松的客户均衡补齐。
         if not _meets_light_targets(working):
@@ -4492,11 +4516,15 @@ def _build_repaired_candidate_lane(
                 )
             )
             working = _append_compatible(working, wider_candidates)
+            if _time_budget_exhausted():
+                return _ck_timeout_result()
 
         if not _meets_light_targets(working):
+            if _time_budget_exhausted():
+                return _ck_timeout_result()
             total, special_total, tenbp_total, count, index_pairs = _state(working)
             logger.info(
-                "CK客户Lane专用修复未达轻目标: lane={}, count={}, total={:.1f}G, special={:.1f}G/{:.1f}G, 10bp={:.1%}, index_pairs={}",
+                "CK客户Lane专用修复未达轻目标: lane={}, count={}, total={:.1f}G, special={:.1f}G/{:.1f}G, 10bp={:.1%}, index_pairs={}, elapsed={:.1f}s, limit={:.1f}s",
                 lane_id,
                 count,
                 total,
@@ -4504,11 +4532,15 @@ def _build_repaired_candidate_lane(
                 min(special_limit, total * imbalance_ratio_limit),
                 tenbp_total / total if total > 0 else 0.0,
                 index_pairs,
+                time.monotonic() - repair_started_at,
+                repair_budget_seconds,
             )
             return None, [], "ck_customer_directed_repair_failed"
 
         shaped_metadata = _metadata_for_tenbp_shape(working)
         valid, lane, reason = _validate_items(working, metadata_override=shaped_metadata)
+        if reason == "time_budget_exhausted":
+            return _ck_timeout_result()
         if valid and lane is not None:
             logger.info(
                 "CK客户Lane专用修复成功: lane={}, 原始{}个/{:.1f}G, 修复后{}个/{:.1f}G, action={}",
@@ -4522,11 +4554,13 @@ def _build_repaired_candidate_lane(
             return lane, working, "ck_trim_special_fill_10bp_customer"
 
         logger.info(
-            "CK客户Lane专用修复严格校验失败: lane={}, reason={}, count={}, total={:.1f}G",
+            "CK客户Lane专用修复严格校验失败: lane={}, reason={}, count={}, total={:.1f}G, elapsed={:.1f}s, limit={:.1f}s",
             lane_id,
             reason,
             len(working),
             _total(working),
+            time.monotonic() - repair_started_at,
+            repair_budget_seconds,
         )
         return None, [], "ck_customer_directed_repair_failed"
 
@@ -4880,6 +4914,10 @@ def _build_repaired_candidate_lane(
     ck_lane, ck_selected, ck_action = _try_ck_customer_directed_repair(selected)
     if ck_lane is not None:
         return ck_lane, ck_selected, ck_action
+    if _time_budget_exhausted():
+        return None, [], "ck_customer_directed_repair_timeout"
+    if ck_action in {"ck_customer_directed_repair_failed", "ck_customer_directed_repair_timeout"}:
+        return None, [], ck_action
 
     index_lane, index_selected, index_action = _try_index_conflict_directed_repair(selected)
     if index_lane is not None:
@@ -5092,6 +5130,9 @@ def _attempt_build_lane_from_pool(
     diagnostic_best_index_pairs = 0
     ck_low_10bp_failure_count = 0
     ck_low_10bp_failure_limit = 3
+    ck_repair_failure_count = 0
+    ck_repair_failure_limit = 3
+    ck_repair_time_budget_seconds = 10.0
 
     def _record_candidate_state(reason: str, libs: Sequence[EnhancedLibraryInfo], total_gb: float) -> None:
         nonlocal diagnostic_best_total, diagnostic_best_count, diagnostic_best_index_pairs
@@ -5517,6 +5558,11 @@ def _attempt_build_lane_from_pool(
             _record_candidate_state("full_validation_failed", selected, total)
             other_failure_retry_count += 1
             continue
+        repair_deadline = (
+            time.monotonic() + ck_repair_time_budget_seconds
+            if lane_id_prefix == "CK" and mode_for_diagnostics == "1.1"
+            else None
+        )
         repaired_lane, repaired_selected, repair_action = _build_repaired_candidate_lane(
             libraries=list(lane.libraries or []),
             pool=active_pool,
@@ -5526,6 +5572,7 @@ def _attempt_build_lane_from_pool(
             lane_metadata=lane.metadata,
             stage_label=f"{lane_id_prefix}_candidate_repair",
             lane_validation_cache=cached_lane_validations,
+            deadline=repair_deadline,
         )
         if repaired_lane is not None:
             if repair_action != "already_valid":
@@ -5539,6 +5586,25 @@ def _attempt_build_lane_from_pool(
                     _total_lane_data(repaired_selected),
                 )
             return repaired_lane, repaired_selected
+        if (
+            lane_id_prefix == "CK"
+            and mode_for_diagnostics == "1.1"
+            and repair_action in {"ck_customer_directed_repair_failed", "ck_customer_directed_repair_timeout"}
+        ):
+            ck_repair_failure_count += 1
+            if ck_repair_failure_count >= ck_repair_failure_limit:
+                selected_total = _total_lane_data(selected)
+                logger.info(
+                    "CK客户Lane构造早停: lane_prefix={}, serial={}, 连续{}次专用修复失败/超时, 单次限制={:.1f}s, last_action={}, last_count={}, last_total={:.1f}G",
+                    lane_id_prefix,
+                    allocated_lane_serial,
+                    ck_repair_failure_count,
+                    ck_repair_time_budget_seconds,
+                    repair_action,
+                    len(selected),
+                    selected_total,
+                )
+                break
         if lane_id_prefix == "CK" and mode_for_diagnostics == "1.1":
             selected_total = _total_lane_data(selected)
             selected_10bp_total = _total_lane_data(
