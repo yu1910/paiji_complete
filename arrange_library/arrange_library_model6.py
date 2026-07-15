@@ -262,6 +262,7 @@ RM_SCATTERED_MIX_VARIANT_ATTEMPTS = 4
 INDEX_RULE_CONFIG_PATH = Path(__file__).resolve().parents[2] / "merge_deal" / "config"
 BALANCE_LIBRARY_CONFIG_PATH = Path(__file__).resolve().parent / "AI排机-平衡文库.csv"
 BALANCE_LIBRARY_MARKER_COLUMN = "_is_ai_balance_library"
+IS_SPLIT_RAW_COLUMN = "is_split_raw"
 REDUNDANT_OUTPUT_COLUMNS: Tuple[str, ...] = (
     "predicted_lorderdata",
     "ai_predicted_lorderdata",
@@ -360,6 +361,15 @@ def _reset_auto_lane_serial_counters() -> None:
 def _drop_redundant_output_columns(df: pd.DataFrame) -> pd.DataFrame:
     """移除不再对外输出的预测中间列。"""
     return df.drop(columns=list(REDUNDANT_OUTPUT_COLUMNS), errors="ignore")
+
+
+def _move_output_column_to_end(df: pd.DataFrame, column_name: str) -> pd.DataFrame:
+    """将指定业务列稳定放到输出末尾。"""
+    if column_name not in df.columns:
+        return df
+    column = df.pop(column_name)
+    df[column_name] = column
+    return df
 
 
 def _reserve_auto_lane_serial(
@@ -10976,11 +10986,86 @@ def _collect_lanes_with_split(lanes: List[LaneAssignment]) -> Set[str]:
 
 
 def _collect_detail_output_libraries(solution: Any) -> List[EnhancedLibraryInfo]:
-    """收集最终输出明细所需的全部文库，包含成Lane与未分配文库。"""
+    """收集最终输出明细，并为完整成Lane的拆分家族补充原文库行。"""
     detail_libraries: List[EnhancedLibraryInfo] = []
+    assigned_split_families: Dict[str, List[EnhancedLibraryInfo]] = {}
     for lane in getattr(solution, "lane_assignments", []) or []:
-        detail_libraries.extend(list(getattr(lane, "libraries", []) or []))
-    detail_libraries.extend(list(getattr(solution, "unassigned_libraries", []) or []))
+        lane_libraries = list(getattr(lane, "libraries", []) or [])
+        detail_libraries.extend(lane_libraries)
+        for lib in lane_libraries:
+            family_id = _get_split_family_id_for_lane_build(lib)
+            if family_id and _is_split_library(lib):
+                assigned_split_families.setdefault(family_id, []).append(lib)
+
+    unassigned_libraries = list(getattr(solution, "unassigned_libraries", []) or [])
+    detail_libraries.extend(unassigned_libraries)
+    unassigned_split_family_ids = {
+        family_id
+        for lib in unassigned_libraries
+        if _is_split_library(lib)
+        for family_id in [_get_split_family_id_for_lane_build(lib)]
+        if family_id
+    }
+
+    for family_id, fragments in assigned_split_families.items():
+        expected_count = max(int(getattr(lib, "total_fragments", 0) or 0) for lib in fragments)
+        if (
+            expected_count <= 1
+            or len(fragments) != expected_count
+            or family_id in unassigned_split_family_ids
+        ):
+            continue
+
+        source_library = next(
+            (
+                getattr(fragment, "_split_source_library", None)
+                for fragment in fragments
+                if getattr(fragment, "_split_source_library", None) is not None
+            ),
+            None,
+        )
+        if source_library is None:
+            continue
+
+        # 历史输入中已拆分的子库通常无法可靠还原原BID；只为本轮新拆分家族补原库行。
+        if not any(hasattr(fragment, "_split_source_bid") for fragment in fragments):
+            continue
+
+        original_output = deepcopy(source_library)
+        original_contract_data = _safe_float(
+            getattr(source_library, "contract_data_raw", None),
+            default=0.0,
+        )
+        source_bid = _safe_str(
+            next(
+                (
+                    getattr(fragment, "_split_source_bid", None)
+                    for fragment in fragments
+                    if getattr(fragment, "_split_source_bid", None) not in (None, "")
+                ),
+                None,
+            )
+            or getattr(source_library, "wkaidbid", None)
+            or getattr(source_library, "aidbid", None),
+            default="",
+        )
+        original_output.contract_data_raw = original_contract_data
+        original_output.wktotalcontractdata = original_contract_data
+        original_output.total_contract_data = original_contract_data
+        original_output.is_split = False
+        original_output.wkissplit = ""
+        original_output.split_status = "completed"
+        original_output.original_library_id = ""
+        original_output.fragment_index = 0
+        original_output.total_fragments = 0
+        original_output.fragment_id = ""
+        original_output._split_output_role = "original"
+        original_output._split_source_bid = source_bid
+        original_output._detail_output_key = f"{source_bid or family_id}__split_raw"
+        if hasattr(original_output, "_library_identity_key_cache"):
+            delattr(original_output, "_library_identity_key_cache")
+        detail_libraries.append(original_output)
+
     return detail_libraries
 
 
@@ -13913,13 +13998,11 @@ def _try_build_matrix_split_lanes_for_group(
                 new_lib.fragment_index = i + 1
                 new_lib.total_fragments = split_count
                 new_lib.fragment_id = f"{new_lib.original_library_id}_F{new_lib.fragment_index:03d}"
-                if i == 0 and original_aidbid:
-                    new_aidbid = original_aidbid
-                else:
-                    new_aidbid = str(uuid4())
+                new_aidbid = str(uuid4())
                 new_lib.wkaidbid = new_aidbid
                 new_lib.aidbid = new_aidbid
                 new_lib._split_source_library = source
+                new_lib._split_source_bid = original_aidbid
                 source_origrec_key = str(
                     getattr(source, "_source_origrec_key", None)
                     or getattr(source, "_origrec_key", None)
@@ -19353,12 +19436,25 @@ def _expand_detail_output_rows(
         if aidbid:
             template["wkaidbid"] = aidbid
 
+        split_output_role = _safe_str(getattr(lib, "_split_output_role", None), default="")
+        split_source_library = getattr(lib, "_split_source_library", None)
+        split_source_bid = _safe_str(
+            getattr(lib, "_split_source_bid", None)
+            or getattr(split_source_library, "wkaidbid", None)
+            or getattr(split_source_library, "aidbid", None),
+            default="",
+        )
+        template[IS_SPLIT_RAW_COLUMN] = ""
         if _is_ai_balance_library(lib):
             template[BALANCE_LIBRARY_MARKER_COLUMN] = True
             template["wkissplit"] = ""
             template["wktotalcontractdata"] = pd.NA
+        elif split_output_role == "original":
+            template["wkissplit"] = ""
+            template[IS_SPLIT_RAW_COLUMN] = "yes"
         elif _is_split_library(lib):
             template["wkissplit"] = "yes"
+            template[IS_SPLIT_RAW_COLUMN] = split_source_bid
         else:
             template["wkissplit"] = ""
 
@@ -19513,6 +19609,10 @@ def _build_detail_output(
         merged["origrec_key"] = _build_origrec_key(merged)
     if "detail_row_key" not in merged.columns:
         merged["detail_row_key"] = merged["origrec_key"].astype(str).str.strip()
+    if IS_SPLIT_RAW_COLUMN not in merged.columns:
+        merged[IS_SPLIT_RAW_COLUMN] = ""
+    else:
+        merged[IS_SPLIT_RAW_COLUMN] = merged[IS_SPLIT_RAW_COLUMN].fillna("")
 
     # 默认补齐预测相关字段，保证输出结构稳定
     merged["runid"] = pd.NA
@@ -19923,6 +20023,7 @@ def _build_detail_output(
     if "origrec" not in df_raw.columns:
         merged = merged.drop(columns=["origrec"], errors="ignore")
     merged = _drop_redundant_output_columns(merged)
+    merged = _move_output_column_to_end(merged, IS_SPLIT_RAW_COLUMN)
 
     if output_path.exists():
         logger.info(f"明细文件已存在，将覆盖: {output_path}")
@@ -20725,6 +20826,7 @@ def _run_prediction_delivery(input_data: Union[Path, pd.DataFrame], output_path:
         errors="ignore",
     )
     prediction_df = _drop_redundant_output_columns(prediction_df)
+    prediction_df = _move_output_column_to_end(prediction_df, IS_SPLIT_RAW_COLUMN)
 
     output_path.parent.mkdir(parents=True, exist_ok=True)
     prediction_df.to_csv(output_path, index=False)
@@ -22063,6 +22165,28 @@ def arrange_library(
             "最终剩余10bp混排NB补Lane未新增Lane: 剩余未分配={}",
             terminal_10bp_nb_stats["remaining_unassigned"],
         )
+
+    # 终态10bp补Lane及其清理仍可能改变Lane成员，导出前再次收口拆分家族原子性。
+    final_atomicity_round = 0
+    while True:
+        final_atomicity_round += 1
+        terminal_split_stats = _rollback_incomplete_split_families_in_final_solution(solution)
+        if terminal_split_stats["rollback_families"] == 0:
+            break
+        logger.warning(
+            "最终输出拆分原子性第{}轮回滚: 家族={}，撤回片段={}，恢复原始文库={}",
+            final_atomicity_round,
+            terminal_split_stats["rollback_families"],
+            terminal_split_stats["removed_fragments"],
+            terminal_split_stats["restored_originals"],
+        )
+        _final_non_package_validation_cleanup(solution, final_cleanup_validator)
+
+    _recover_missing_original_libraries_for_final_output(
+        solution,
+        final_output_source_libraries,
+    )
+    _deduplicate_solution_libraries(solution)
 
     final_renamed_lane_ids = _ensure_unique_lane_ids(solution.lane_assignments)
     if final_renamed_lane_ids > 0:

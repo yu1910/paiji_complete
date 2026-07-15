@@ -304,6 +304,16 @@ class PackageLaneScheduler:
         split_values[-1] = float(total_data) - average * (split_count - 1)
         return split_values
 
+    @classmethod
+    def _split_optional_data_evenly(cls, value: object, split_count: int) -> List[object]:
+        """均分可选数值字段，空值或非数值保持原样。"""
+        if value in (None, ''):
+            return [value] * split_count
+        try:
+            return list(cls._split_contract_data_evenly(float(value), split_count))
+        except (TypeError, ValueError):
+            return [value] * split_count
+
     @staticmethod
     def _expand_consecutive_package_lane_numbers(start_number: str, count: int) -> List[str]:
         """按末尾数字扩展连续包Lane编号，如 C2611046783 -> C2611046783...C2611046790。"""
@@ -429,6 +439,16 @@ class PackageLaneScheduler:
             if declared_total_contract_data > total_contract_data:
                 total_contract_data = declared_total_contract_data
             split_values = self._split_contract_data_evenly(total_contract_data, len(package_lane_numbers))
+            raw_single_index_data = getattr(lib, 'single_index_data', None)
+            split_single_index_values = self._split_optional_data_evenly(
+                raw_single_index_data,
+                len(package_lane_numbers),
+            )
+            raw_ten_bp_data = getattr(lib, 'ten_bp_data', None)
+            split_ten_bp_values = self._split_optional_data_evenly(
+                raw_ten_bp_data,
+                len(package_lane_numbers),
+            )
             original_library_id = (
                 str(getattr(lib, 'fragment_id', '') or '').strip()
                 or str(getattr(lib, '_detail_output_key', '') or '').strip()
@@ -439,7 +459,6 @@ class PackageLaneScheduler:
             original_aidbid = str(
                 getattr(lib, 'wkaidbid', None) or getattr(lib, 'aidbid', None) or ''
             ).strip()
-
             logger.info(
                 "文库 {} 检测到多个包Lane编号 {}，按{}份执行专用拆分",
                 source_label,
@@ -447,12 +466,19 @@ class PackageLaneScheduler:
                 len(package_lane_numbers),
             )
 
-            for idx, (package_lane_number, split_value) in enumerate(
-                zip(package_lane_numbers, split_values),
+            for idx, (package_lane_number, split_value, single_index_value, ten_bp_value) in enumerate(
+                zip(
+                    package_lane_numbers,
+                    split_values,
+                    split_single_index_values,
+                    split_ten_bp_values,
+                ),
                 start=1,
             ):
                 fragment = copy.deepcopy(lib)
                 fragment.contract_data_raw = split_value
+                fragment.single_index_data = single_index_value
+                fragment.ten_bp_data = ten_bp_value
                 fragment.package_lane_number = package_lane_number
                 fragment._package_lane_output_baleno = str(raw_package_lane).strip()
                 fragment.is_package_lane = '是'
@@ -473,12 +499,10 @@ class PackageLaneScheduler:
                 fragment._package_lane_original_numbers = tuple(package_lane_numbers)
                 fragment._package_lane_original_value = str(raw_package_lane).strip()
 
-                if idx == 1 and original_aidbid:
-                    new_aidbid = original_aidbid
-                else:
-                    new_aidbid = str(uuid.uuid4())
+                new_aidbid = str(uuid.uuid4())
                 fragment.wkaidbid = new_aidbid
                 fragment.aidbid = new_aidbid
+                fragment._split_source_bid = original_aidbid
                 source_origrec_key = str(
                     getattr(lib, '_source_origrec_key', None)
                     or getattr(lib, '_origrec_key', None)

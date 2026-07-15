@@ -240,8 +240,8 @@ class GeneticAlgorithmConfig:
 class LibrarySplitConfig:
     """文库拆分配置"""
     # 1.1模式（兼容旧名1.0）文库不参与预拆分；以下阈值仅适用于3.6T-NEW模式
-    # 3.6T-NEW模式 + 单对index：单文库合同量 >130G 触发拆分
-    single_index_non_1_0_threshold_gb: float = 130.0
+    # 3.6T-NEW模式 + 单对index：单文库合同量 >200G 触发拆分
+    single_index_non_1_0_threshold_gb: float = 200.0
     # 兼容历史配置保留，当前文库拆分逻辑不再使用该阈值
     single_index_mode_1_0_threshold_gb: float = 200.0
     # 兼容历史配置保留；当前多对index只用逗号分隔的对数参与份数计算，不拆改index序列

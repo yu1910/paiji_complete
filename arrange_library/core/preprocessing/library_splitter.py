@@ -97,7 +97,7 @@ class LibrarySplitter:
         新规则：
         1. 1.1模式文库（兼容旧名1.0）不拆分
         2. 3.6T-NEW模式按逗号识别index对数
-        3. 单对index合同量 >130G 才拆，多对index合同量 >300G 才拆
+        3. 单对index合同量 >200G 才拆，多对index合同量 >300G 才拆
         4. index序列保持原样，index对数只参与阈值分档
         """
         # 1. 包FC/指定Lane不拆分；带包Lane编号的文库按包Lane规则允许拆分。
@@ -156,7 +156,7 @@ class LibrarySplitter:
         lib: EnhancedLibraryInfo,
         data_amount: float,
     ) -> bool:
-        """兼容旧调用点；拆分必须统一走单对130G/多对300G阈值，不再强制绕过。"""
+        """兼容旧调用点；拆分必须统一走单对200G/多对300G阈值，不再强制绕过。"""
         return False
 
     def _is_single_end_index(self, lib: EnhancedLibraryInfo) -> bool:
@@ -304,7 +304,7 @@ class LibrarySplitter:
 
         规则：
         - index序列不拆改
-        - 单对index按130G阈值拆，多对index按300G阈值拆
+        - 单对index按200G阈值拆，多对index按300G阈值拆
         - 确保每个子文库数据量在合理范围内
         """
         data_amount = float(lib.contract_data_raw)
@@ -362,14 +362,12 @@ class LibrarySplitter:
             new_lib.total_fragments = split_count
             new_lib.fragment_id = f"{new_lib.original_library_id}_F{new_lib.fragment_index:03d}"
 
-            # 拆分后保留wkorigrec/wksid/wkpid原始值，使用wkaidbid区分拆分文库。
-            if i == 0 and original_aidbid:
-                new_aidbid = original_aidbid
-            else:
-                new_aidbid = str(uuid.uuid4())
+            # 拆分后保留wkorigrec/wksid/wkpid原始值，每个子文库使用新BID区分。
+            new_aidbid = str(uuid.uuid4())
             new_lib.wkaidbid = new_aidbid
             new_lib.aidbid = new_aidbid
             new_lib._split_source_library = lib
+            new_lib._split_source_bid = original_aidbid
             source_origrec_key = str(
                 getattr(lib, "_source_origrec_key", None)
                 or getattr(lib, "_origrec_key", None)
@@ -400,7 +398,7 @@ class LibrarySplitter:
     ) -> int:
         """计算拆分份数。
 
-        index序列不拆改；单对按130G阈值，多对按300G阈值，把每片拆到不再触发。
+        index序列不拆改；单对按200G阈值，多对按300G阈值，把每片拆到不再触发。
         """
         if math.isinf(split_threshold):
             return 1

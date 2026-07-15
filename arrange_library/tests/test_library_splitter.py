@@ -45,14 +45,14 @@ def _make_lib(
 
 def test_splitter_ignores_last_cxms_for_36t_single_index():
     splitter = LibrarySplitter()
-    lib = _make_lib(contract_data_raw=200.0)
+    lib = _make_lib(contract_data_raw=201.0)
     lib._last_cxms_raw = "1.0"
     lib.last_cxms = "1.0"
 
     rule_label, threshold = splitter._resolve_split_rule(lib)
 
-    assert rule_label == "3.6t_new_single_index"
-    assert threshold == 100.0
+    assert rule_label == "3.6t_new_single_index_pair"
+    assert threshold == 200.0
     assert splitter._should_split(lib) is True
 
 
@@ -60,7 +60,7 @@ def test_splitter_infers_36t_from_test_no_when_test_code_missing():
     splitter = LibrarySplitter()
     lib = _make_lib(
         origrec="LIB_SPLIT_001A",
-        contract_data_raw=200.0,
+        contract_data_raw=201.0,
         test_code=0,
         test_no="Novaseq X Plus-PE150",
         seq_scheme="PE150",
@@ -70,8 +70,8 @@ def test_splitter_infers_36t_from_test_no_when_test_code_missing():
 
     rule_label, threshold = splitter._resolve_split_rule(lib)
 
-    assert rule_label == "3.6t_new_single_index"
-    assert threshold == 100.0
+    assert rule_label == "3.6t_new_single_index_pair"
+    assert threshold == 200.0
     assert splitter._should_split(lib) is True
 
 
@@ -87,7 +87,7 @@ def test_splitter_ignores_last_cxms_for_36t_multi_index():
 
     rule_label, threshold = splitter._resolve_split_rule(lib)
 
-    assert rule_label == "3.6t_new_multi_index"
+    assert rule_label == "3.6t_new_multi_index_pair"
     assert threshold == 300.0
     assert splitter._should_split(lib) is True
 
@@ -103,3 +103,37 @@ def test_splitter_keeps_current_1_1_mode_unsplit():
     assert rule_label == "mode_1.1_disabled_compat_1.0"
     assert threshold == float("inf")
     assert splitter._should_split(lib) is False
+
+
+def test_splitter_evenly_splits_data_fields_and_generates_new_child_bids():
+    splitter = LibrarySplitter()
+    lib = _make_lib(origrec="LIB_SPLIT_OUTPUT", contract_data_raw=600.0)
+    lib.wkaidbid = "ORIGINAL_BID"
+    lib.aidbid = "ORIGINAL_BID"
+    lib.single_index_data = 90.0
+    lib.ten_bp_data = 30.0
+
+    fragments = splitter._perform_split(lib)
+
+    assert len(fragments) == 3
+    assert {fragment.contract_data_raw for fragment in fragments} == {200.0}
+    assert {fragment.single_index_data for fragment in fragments} == {30.0}
+    assert {fragment.ten_bp_data for fragment in fragments} == {10.0}
+    assert {fragment.wkissplit for fragment in fragments} == {"yes"}
+    assert {fragment._split_source_bid for fragment in fragments} == {"ORIGINAL_BID"}
+    child_bids = {fragment.wkaidbid for fragment in fragments}
+    assert len(child_bids) == 3
+    assert "ORIGINAL_BID" not in child_bids
+
+
+def test_single_index_split_uses_strict_200g_boundary_and_ceiling_count():
+    splitter = LibrarySplitter()
+    boundary_lib = _make_lib(origrec="LIB_SPLIT_200", contract_data_raw=200.0)
+    over_boundary_lib = _make_lib(origrec="LIB_SPLIT_401", contract_data_raw=401.0)
+
+    assert splitter._should_split(boundary_lib) is False
+    assert splitter._perform_split(boundary_lib) == [boundary_lib]
+
+    fragments = splitter._perform_split(over_boundary_lib)
+    assert len(fragments) == 3
+    assert all(abs(fragment.contract_data_raw - (401.0 / 3.0)) < 1e-9 for fragment in fragments)
